@@ -101,13 +101,15 @@
 
 两个版本功能一样，区别只在「运行时」放在哪：
 
-| | 需 .NET 8 运行时版 | 免安装便携版 |
+| | runtime-dependent（需 .NET 8 运行时） | portable（免安装便携版） |
 | --- | --- | --- |
-| 压缩包 | `一条龙管家-v1.2-需.NET8运行时.zip` | `一条龙管家-v1.2-免安装便携版.zip` |
+| 压缩包 | `Dragon-Butler-v1.2-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.2-win-x64-portable.zip` |
 | 大小 | 约 0.22 MB | 约 62.7 MB |
 | 要求 | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0) | 无，自带运行时 |
+| 适用 | 机器上已有 .NET 8，想下最小包 | 不确定有没有 .NET 8、要换电脑或放 U 盘 |
 
-> 文件名里的 `v1.2` 就是当前版本（与日志里 `启动：Dragon Butler v1.2.0` 一致）；解压出来的目录名固定不带版本，升级时直接覆盖原目录，`config\` 里的设置不会丢。
+> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.2` 是当前版本（与日志里 `启动：Dragon Butler v1.2.0` 一致），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
+> 解压出来的目录名固定为 `Dragon-Butler-win-x64-runtime-dependent\` 或 `Dragon-Butler-win-x64-portable\`，**不带版本**——升级时直接覆盖原目录，`config\` 里的设置不会丢。
 
 > **两个版本都不用"安装"**：没有安装向导、不写注册表、不注册服务，解压后双击 exe 就能用，删掉文件夹就是卸载。
 > 区别只在于 exe 里有没有打包 .NET 运行时——没打包的那个，需要电脑上已经装过一次 .NET 8 桌面运行时（微软免费，装一次以后所有 .NET 8 程序都能用）；已经装过的话，两个版本用起来没有任何区别。

@@ -163,32 +163,86 @@
 
 ## 四、当前构建与产物
 
+### 一条命令打包（推荐）
+
+```powershell
+# 构建并打包全部变体（默认 win-x64）
+.\scripts\package.ps1
+
+# 只打包便携版 / 只重新打 zip / 打其他平台
+.\scripts\package.ps1 -Variant portable
+.\scripts\package.ps1 -ZipOnly
+.\scripts\package.ps1 -Runtime win-arm64
+```
+
+脚本是**命名的唯一来源**：版本号从 `Dragon Butler.csproj` 的 `<Version>` 读取，目录名与压缩包名由脚本拼出，
+不需要手工敲 publish 命令或手工改文件名。发布前先退出正在运行的 Dragon Butler（否则 exe 被占用，清理旧目录会失败）。
+
+若提示"在此系统上禁止运行脚本"，用（只影响当前进程，不改系统策略）：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\package.ps1
+```
+
+### 等价的原始命令
+
 ```bash
 # 构建
 dotnet build "Dragon Butler/Dragon Butler.csproj" -c Release
 # → 0 错误，4 个既有警告（wf 别名 CS8981 ×2、DPI manifest WFAC010 ×2）
 
-# 需 .NET 8 运行时版（框架依赖，体积最小）
+# runtime-dependent（框架依赖，体积最小）
 dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self-contained false \
-  -p:PublishSingleFile=true -o "发布/一条龙管家-需.NET8运行时"
+  -p:PublishSingleFile=true -o "发布/Dragon-Butler-win-x64-runtime-dependent"
 
-# 免安装便携版（自包含单文件）
+# portable（自包含单文件）
 dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self-contained true \
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
-  -p:DebugType=None -o "发布/一条龙管家-免安装便携版"
+  -p:DebugType=None -o "发布/Dragon-Butler-win-x64-portable"
 ```
 
 > 工程与产物目录都含空格，命令行必须加引号；发布前先确保没有正在运行的实例（会锁住 exe）。
 
 | 产物 | 路径 | 体积 |
 | --- | --- | --- |
-| 需 .NET 8 运行时版 exe | `发布/一条龙管家-需.NET8运行时/Dragon Butler.exe` | 472,696 B |
-| 需 .NET 8 运行时版压缩包 | `发布/一条龙管家-v1.2-需.NET8运行时.zip` | ≈ 0.22 MB |
-| 免安装便携版 exe | `发布/一条龙管家-免安装便携版/Dragon Butler.exe` | 162,029,035 B |
-| 免安装便携版压缩包 | `发布/一条龙管家-v1.2-免安装便携版.zip` | ≈ 62.72 MB |
+| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 472,696 B |
+| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.2-win-x64-runtime-dependent.zip` | ≈ 0.22 MB |
+| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,029,035 B |
+| portable 压缩包 | `发布/Dragon-Butler-v1.2-win-x64-portable.zip` | ≈ 62.72 MB |
 
-压缩包内顶层目录是**不带版本**的固定名（与 `发布/` 下的源目录一致，如 `一条龙管家-需.NET8运行时/`），内含一个 exe + `使用说明.txt`。
+压缩包内顶层目录是**不带版本**的固定名（与 `发布/` 下的源目录一致，如 `Dragon-Butler-win-x64-portable/`），内含一个 exe + `使用说明.txt`。
 这样升级时把新包解压到原目录覆盖即可，`config\`（设置）不会丢；版本信息只体现在**下载到的文件名**上。
+
+### 命名规则
+
+```
+<Product>-v<Version>-<Runtime>-<Variant>.zip
+Dragon-Butler  -v1.2   -win-x64  -portable .zip
+```
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `<Product>` | `Dragon-Butler` | 固定，与 GitHub 仓库名一致 |
+| `v<Version>` | `v1.2` | 取自 csproj `<Version>`，去掉补位的 `.0`（`1.2.0` → `v1.2`） |
+| `<Runtime>` | `win-x64` | .NET RID。当前只有 win-x64；加平台时只增不改名 |
+| `<Variant>` | `runtime-dependent` / `portable` | 见下表 |
+
+包内顶层目录 = `<Product>-<Runtime>-<Variant>`（**不带版本**），保证覆盖升级。
+
+### 名称对照表
+
+| 原名称（中文） | 新名称（英文） | 平台 / RID | 包类型 | 运行时依赖 | 体积 | 适用场景 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `一条龙管家-v1.2-需.NET8运行时.zip` | `Dragon-Butler-v1.2-win-x64-runtime-dependent.zip` | Windows 10/11 x64 · `win-x64` | 绿色版（框架依赖） | 需已装 .NET 8 桌面运行时 | ≈ 0.22 MB | 机器上已有 .NET 8，只想下最小包；带宽/空间敏感 |
+| `一条龙管家-v1.2-免安装便携版.zip` | `Dragon-Butler-v1.2-win-x64-portable.zip` | Windows 10/11 x64 · `win-x64` | 绿色版（自包含单文件） | 无，运行时已打包进 exe | ≈ 62.72 MB | 不确定有没有 .NET 8；换电脑、重装系统、放 U 盘随身携带 |
+| （GitHub 自动生成，不可改名） | `Dragon-Butler-1.2.0.zip` | 全平台（源码） | 源码包 | 需 .NET 8 SDK 自行编译 | — | 想看代码、改代码或自己构建 |
+| 暂无产物（规则预留） | `Dragon-Butler-v1.2-win-x64-setup.exe` | Windows 10/11 x64 · `win-x64` | 安装包 | 待定 | — | 将来若做安装向导，按此名预留，不与绿色版混淆 |
+| `发布/一条龙管家-需.NET8运行时/` | `发布/Dragon-Butler-win-x64-runtime-dependent/` | Windows 10/11 x64 | 包内顶层目录 | — | — | 解压后的目录名，固定不带版本 |
+| `发布/一条龙管家-免安装便携版/` | `发布/Dragon-Butler-win-x64-portable/` | Windows 10/11 x64 | 包内顶层目录 | — | — | 解压后的目录名，固定不带版本 |
+
+> 两个压缩包**都是绿色版**（无安装向导、不写注册表、不注册服务），差别只在 .NET 运行时放在 exe 里还是系统里。
+> 目前没有真正的安装包，`setup.exe` 只是为将来预留的命名位。
 
 ---
 
@@ -223,14 +277,15 @@ v1.1 建议重点手测：
 
 ## 六、发布检查清单
 
-1. 先定版本：改 `Dragon Butler.csproj` 的 `<Version>`（显示号 = 去掉末尾 `.0`，如 `1.2.0` → `v1.2`）；
+1. 先定版本：改 `Dragon Butler.csproj` 的 `<Version>`（显示号 = 去掉末尾 `.0`，如 `1.2.0` → `v1.2`）——**只改这一处**，压缩包与目录名都由脚本读出；
 2. `dotnet build` 0 错误；
-3. 两份 `dotnet publish` 到 `发布/一条龙管家-{变体}/`（目录名不带版本，保持稳定）；
-4. 确认目录里只有 `Dragon Butler.exe` + `使用说明.txt`（不留 `.pdb`）；
-5. 用 python `zipfile` 重打压缩包：**文件名带 `v{版本}`**，包内顶层目录用不带版本的固定名，校验 CRC；
-6. 更新 `使用说明.txt` 里受影响的段落与页脚版本；
+3. 退出正在运行的 Dragon Butler，然后跑 `.\scripts\package.ps1`（自动 publish 到 `发布/Dragon-Butler-win-x64-{variant}/`，目录名不带版本）；
+4. 确认目录里只有 `Dragon Butler.exe` + `使用说明.txt`（脚本已自动删 `.pdb` 并拷入说明）；
+5. 脚本已按 `<Product>-v<版本>-<Runtime>-<Variant>.zip` 打好包，核对 `发布/` 下的文件名与本报告「名称对照表」一致；
+6. 更新 `docs/使用说明.txt` 里受影响的段落与页脚版本（脚本会把它拷进每个产物目录）；
 7. 更新本文档的版本表与产物体积；
-8. 需要时再更新 README 的版本徽章。
+8. 需要时再更新 README 的版本徽章与下载表；
+9. 上传 GitHub Release 附件时**用脚本生成的英文名**，不要用中文名（中文名在上传后会变成 `-v1.2-` 这类残缺名，见「已知约束」）。
 
 ---
 
@@ -242,3 +297,5 @@ v1.1 建议重点手测：
 - 图片背景亮度取整图平均色，极端构图可能判不准，需手动指定文字配色。
 - 截图冻结检测要求游戏窗口可见，最小化到托盘时跳过。
 - 无自动更新机制，升级靠手动替换 exe（`config\`、`全部日志\` 保留即可）。
+- **GitHub Release 附件不能用中文名**：v1.2.0 上传中文名压缩包后，附件名被截断成 `-v1.2-`、`-v1.2-.NET8`、`-v1.2-.zip`，下载页完全无法辨认。改用英文名后不再有此问题；上传前务必确认附件名与「名称对照表」一致。
+- GitHub 的源码包（`Source code (zip)`）由仓库名 + tag 自动生成（形如 `Dragon-Butler-1.2.0.zip`，前缀 `v` 会被去掉），**不受打包脚本控制**，不要手改。
