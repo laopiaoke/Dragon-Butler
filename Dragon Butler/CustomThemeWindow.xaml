@@ -1,0 +1,323 @@
+<Window x:Class="DragonButler.CustomThemeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="自定义主题" Width="798" SizeToContent="Height"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        FontFamily="HarmonyOS Sans SC, Microsoft YaHei UI, Segoe UI"
+        UseLayoutRounding="True">
+
+    <Window.Resources>
+        <!-- 分段按钮：与主界面同款（独立定义，避免跨窗口引用资源） -->
+        <Style x:Key="Seg" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Height="26" Padding="12,0">
+                            <TextBlock x:Name="Tx" Text="{TemplateBinding Content}" VerticalAlignment="Center"
+                                       HorizontalAlignment="Center" Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardBgBrush}"/>
+                                <Setter TargetName="Tx" Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                                <Setter TargetName="Tx" Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 次按钮：描边幽灵 -->
+        <Style x:Key="Ghost" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="8" Padding="{TemplateBinding Padding}"
+                                Background="{DynamicResource ControlBgBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 主按钮：品牌实心 -->
+        <Style x:Key="Primary" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource BrandOnBrush}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="20,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="8" Padding="{TemplateBinding Padding}"
+                                Background="{DynamicResource BrandBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BrandPressedBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 细滑块（跟随主题，避免系统默认白色滑杆在深色卡片上突兀） -->
+        <Style x:Key="SlimThumb" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse Width="14" Height="14" Fill="{DynamicResource BrandBrush}"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SlimSlider" TargetType="Slider">
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="4" CornerRadius="2" VerticalAlignment="Center"
+                                    Background="{DynamicResource ControlBgBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
+                            <Track x:Name="PART_Track" VerticalAlignment="Center"
+                                   Minimum="{Binding Minimum, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Maximum="{Binding Maximum, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Value="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                   IsDirectionReversed="{Binding IsDirectionReversed, RelativeSource={RelativeSource TemplatedParent}}">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" Focusable="False" Height="16" Opacity="0"
+                                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Focusable="False" Height="16" Opacity="0"
+                                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource SlimThumb}" Width="14" Height="14"/>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 关闭按钮：透明底 + hover 高亮 -->
+        <Style x:Key="CloseBtn" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="7" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 色块 -->
+        <Style x:Key="Swatch" TargetType="Border">
+            <Setter Property="Width" Value="26"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="CornerRadius" Value="7"/>
+            <Setter Property="Margin" Value="0,0,7,7"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="Shell" Margin="14" CornerRadius="16" Background="{DynamicResource CardBgBrush}"
+            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.35" Color="#000000"/>
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="44"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 标题栏 -->
+            <Grid Grid.Row="0" Background="Transparent" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <TextBlock Text="外观 · 自定义主题" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}"
+                           VerticalAlignment="Center" Margin="18,0,0,0"/>
+                <Button x:Name="BtnClose" Content="✕" Width="38" Height="28" HorizontalAlignment="Right"
+                        Margin="0,0,8,0" VerticalAlignment="Center" Click="BtnClose_Click"
+                        Style="{StaticResource CloseBtn}"/>
+            </Grid>
+
+            <!-- 主体：左预览 / 右控件 -->
+            <Grid Grid.Row="1" Margin="18,2,18,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="330"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 实时预览：与主界面同构的迷你窗口 -->
+                <Border CornerRadius="12" ClipToBounds="True" BorderThickness="1"
+                        BorderBrush="{DynamicResource BorderBrush}">
+                    <Grid>
+                        <Border Background="{DynamicResource BgArtBrush}"/>
+                        <Border Background="{DynamicResource ScrimBrush}"/>
+                        <StackPanel Margin="12">
+                            <TextBlock Text="一条龙管家 · 预览" FontSize="11"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                            <Border Margin="0,9,0,0" CornerRadius="10" Padding="12"
+                                    Background="{DynamicResource CardBgBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Text="守护已开启" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock Text="每 5 秒心跳 · 四路监测正常" FontSize="11" Margin="0,4,0,0"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <Border Height="30" CornerRadius="8" Margin="0,10,0,0"
+                                            Background="{DynamicResource BrandBrush}">
+                                        <TextBlock Text="立刻启动一条龙" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource BrandOnBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                            <Border Margin="0,9,0,0" CornerRadius="10" Padding="12"
+                                    Background="{DynamicResource CardBg2Brush}"
+                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Text="正文样式 ABC 0123" FontSize="12"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock Text="次要说明文字 · 对比度实时检查" FontSize="11" Margin="0,3,0,0"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="三级注释文字" FontSize="10.5" Margin="0,3,0,0"
+                                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="TbPreviewHint" Margin="0,10,0,0" FontSize="10.5"
+                                       Foreground="{DynamicResource TextTertiaryBrush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- 控件列 -->
+                <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                    <TextBlock Text="背景方式" FontSize="11.5" Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    <Border Margin="0,6,0,0" HorizontalAlignment="Left" CornerRadius="8" Padding="2"
+                            Background="{DynamicResource ControlBgBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="SegColor" Content="调色板" Tag="Color"
+                                         Style="{StaticResource Seg}" Checked="SegBgKind_Checked"/>
+                            <RadioButton x:Name="SegImage" Content="图片" Tag="Image"
+                                         Style="{StaticResource Seg}" Checked="SegBgKind_Checked"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 调色板 -->
+                    <StackPanel x:Name="ColorPanel" Margin="0,10,0,0">
+                        <WrapPanel x:Name="SwatchPanel"/>
+                        <Button x:Name="BtnPickColor" Content="自定义颜色…" Style="{StaticResource Ghost}"
+                                HorizontalAlignment="Left" Margin="0,2,0,0" Click="BtnPickColor_Click"
+                                Height="30" Padding="12,0"/>
+                    </StackPanel>
+
+                    <!-- 图片 -->
+                    <StackPanel x:Name="ImagePanel" Margin="0,10,0,0" Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="BtnPickImage" Content="选择图片…" Style="{StaticResource Ghost}"
+                                    Height="30" Padding="12,0" Click="BtnPickImage_Click"/>
+                            <TextBlock x:Name="TbImageName" VerticalAlignment="Center" Margin="10,0,0,0"
+                                       FontSize="11" TextTrimming="CharacterEllipsis" MaxWidth="200"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                        <Grid Margin="0,12,0,0">
+                            <TextBlock Text="遮罩强度" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                            <TextBlock x:Name="TbOverlayValue" FontSize="11.5" HorizontalAlignment="Right"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        </Grid>
+                        <Slider x:Name="SldOverlay" Style="{StaticResource SlimSlider}" Minimum="0" Maximum="90" TickFrequency="5"
+                                IsSnapToTickEnabled="True" Margin="0,4,0,0"
+                                ValueChanged="SldOverlay_ValueChanged"/>
+                        <TextBlock Text="遮罩越强，图片越暗、文字越稳；0% 时完全露出原图。"
+                                   FontSize="10.5" Margin="0,4,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="文字配色" FontSize="11.5" Margin="0,14,0,0"
+                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    <Border Margin="0,6,0,0" HorizontalAlignment="Left" CornerRadius="8" Padding="2"
+                            Background="{DynamicResource ControlBgBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="SegAuto" Content="自动" Tag="Auto"
+                                         Style="{StaticResource Seg}" Checked="SegScheme_Checked"/>
+                            <RadioButton x:Name="SegLightText" Content="浅底深字" Tag="Light"
+                                         Style="{StaticResource Seg}" Checked="SegScheme_Checked"/>
+                            <RadioButton x:Name="SegDarkText" Content="深底浅字" Tag="Dark"
+                                         Style="{StaticResource Seg}" Checked="SegScheme_Checked"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Margin="0,14,0,0" CornerRadius="9" Padding="11,9"
+                            Background="{DynamicResource InsetBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock x:Name="TbContrast" FontSize="11.5" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+                            <TextBlock x:Name="TbTip" FontSize="10.5" Margin="0,3,0,0" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+
+            <!-- 底部按钮 -->
+            <Grid Grid.Row="2" Margin="18,12,18,16">
+                <Button x:Name="BtnReset" Content="恢复默认主题" Style="{StaticResource Ghost}"
+                        HorizontalAlignment="Left" Click="BtnReset_Click"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="BtnCancel" Content="取消" Style="{StaticResource Ghost}"
+                            MinWidth="76" Margin="0,0,8,0" Click="BtnCancel_Click"/>
+                    <Button x:Name="BtnApply" Content="应用" Style="{StaticResource Primary}"
+                            MinWidth="86" Click="BtnApply_Click"/>
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

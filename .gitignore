@@ -1,0 +1,25 @@
+# ---------- .NET / WPF 构建产物 ----------
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+project.lock.json
+project.assets.json
+artifacts/
+.vs/
+
+# ---------- 发布包 /  binaries ----------
+发布/
+*.exe
+*.zip
+*.pdb
+*.msi
+
+# ---------- WorkBuddy 会话数据 ----------
+.workbuddy/

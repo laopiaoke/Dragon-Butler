@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <WindowsFormsImplicitUsings>disable</WindowsFormsImplicitUsings>
+    <WPFImplicitUsings>disable</WPFImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Dragon Butler.ico</ApplicationIcon>
+    <AssemblyName>Dragon Butler</AssemblyName>
+    <RootNamespace>DragonButler</RootNamespace>
+    <Version>1.2.0</Version>
+    <FileVersion>1.2.0.0</FileVersion>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <Product>一条龙管家</Product>
+    <Company>Dragon Butler</Company>
+    <Description>BetterGI 一条龙的启停管家与守护工具</Description>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Remove="System" />
+    <Using Remove="System.Controls" />
+  </ItemGroup>
+</Project>

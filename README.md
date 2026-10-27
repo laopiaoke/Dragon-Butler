@@ -1,5 +1,4 @@
-[Uploading README.md…]()
-# Dragon-Butler# 一条龙管家 · Dragon Butler
+# 一条龙管家 · Dragon Butler
 
 <p align="center">
   <img src="docs/main_dark.png" alt="主界面（深色主题）" width="860">
