@@ -30,6 +30,23 @@ public sealed class LogWatcher
 {
     public event Action<SentinelEvent>? OnEvent;
 
+    private readonly Regex? _rxCompletion;
+    private readonly string? _logDirOverride;
+
+    /// <summary>
+    /// 构造：completionPattern 为空时保持旧行为（只用内置的"配置组 … 执行结束"）。
+    /// logDirOverride 为空时按当前 BGI 路径推断日志目录。
+    /// </summary>
+    public LogWatcher(string? completionPattern = null, string? logDirOverride = null)
+    {
+        _logDirOverride = string.IsNullOrWhiteSpace(logDirOverride) ? null : logDirOverride;
+        if (!string.IsNullOrWhiteSpace(completionPattern))
+        {
+            try { _rxCompletion = new Regex(completionPattern, RegexOptions.Compiled); }
+            catch (Exception ex) { LogService.LogEvent("完成日志正则无效，已忽略：" + ex.Message); }
+        }
+    }
+
     // 解析正则（源自 auto-bgi 实测，直接照抄）
     private static readonly Regex RxGroupStart = new(@"配置组 ""(.*?)"" 加载完成", RegexOptions.Compiled);
     private static readonly Regex RxGroupEnd = new(@"配置组 ""(.*?)"" 执行结束", RegexOptions.Compiled);
@@ -61,6 +78,7 @@ public sealed class LogWatcher
                 // 只追新增行：从当前文件末尾开始
                 try { _lastPosition = new FileInfo(todayFile).Length; } catch { _lastPosition = 0; }
                 _leftover = "";
+                LogService.LogEvent($"LogWatcher：监视 {Path.GetFileName(todayFile)}（起点 {_lastPosition} 字节）");
             }
         }
         catch (Exception ex)
@@ -69,10 +87,12 @@ public sealed class LogWatcher
         }
     }
 
-    private static string LogDir()
+    private string LogDir()
     {
         try
         {
+            // 显式指定时按"日志目录本身"处理（v1.3：由 profile 的 exe 目录推导）
+            if (!string.IsNullOrEmpty(_logDirOverride)) return _logDirOverride;
             string? baseDir = Path.GetDirectoryName(BgiService.Settings.BgiPath);
             return string.IsNullOrEmpty(baseDir) ? "" : Path.Combine(baseDir, "log");
         }
@@ -143,6 +163,13 @@ public sealed class LogWatcher
 
     private void ProcessLine(string line)
     {
+        // v1.3：profile 指定的完成哨兵先判（放在内置规则之前，避免被 GroupEnded 的 return 吞掉）
+        if (_rxCompletion != null && _rxCompletion.IsMatch(line))
+        {
+            try { OnEvent?.Invoke(new SentinelEvent { Kind = SentinelEventKind.DragonEnded, Payload = line, Source = "log-pattern" }); }
+            catch { }
+        }
+
         var m = RxGroupStart.Match(line);
         if (m.Success)
         {
@@ -159,6 +186,7 @@ public sealed class LogWatcher
         {
             Emit(SentinelEventKind.LogErrorLine, line);
         }
+
     }
 
     private void Emit(SentinelEventKind kind, string payload)

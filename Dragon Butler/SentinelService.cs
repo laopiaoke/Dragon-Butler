@@ -102,7 +102,7 @@ public static class SentinelService
     /// <summary>BGI Webhook 监听是否正在运行（供界面显示进度识别通道状态）</summary>
     public static bool WebhookRunning => WebhookInstance.IsRunning;
 
-    private static readonly LogWatcher LogWatcherInstance = new();
+    private static readonly LogWatcher LogWatcherInstance = new(ProfileRegistry.BetterGi.LogCompletionPattern);
     private static readonly ScreenshotMonitor ScreenshotInstance = new();
     private static readonly WebhookListener WebhookInstance = new();
 
@@ -126,7 +126,7 @@ public static class SentinelService
             LogWatcherInstance.OnEvent += OnSourceEvent;
             ScreenshotInstance.OnEvent += OnSourceEvent;
             LogWatcherInstance.Start();
-            WebhookInstance.Start(BgiService.Settings.BgiWebhookPort);
+            WebhookInstance.Start(ProfileRegistry.BetterGiWebhookPort);
             if (BgiService.IsRunning) State = SentinelState.Unknown;
             _timer = new System.Threading.Timer(Tick, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5));
             LogService.LogEvent("哨兵已启动（5 秒心跳）");

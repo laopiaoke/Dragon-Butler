@@ -23,3 +23,10 @@ artifacts/
 
 # ---------- WorkBuddy 会话数据 ----------
 .workbuddy/
+
+# ---------- 运行时数据（exe 旁生成） ----------
+/config/
+/全部日志/
+/sounds/
+/tools/
+

@@ -91,6 +91,16 @@ public class AppSettings
 
     /// <summary>推送方式：Toast（Windows 通知，默认）/ Wecom（企业微信）/ Balloon（仅托盘气泡）</summary>
     public string NotifyMode { get; set; } = "Toast";
+
+    // ===== v1.3：多工具档案 =====
+    /// <summary>配置结构版本：0/缺省=旧版（v1.2 及以前），13=v1.3。</summary>
+    public int Version { get; set; }
+
+    /// <summary>v1.3 当前配置结构版本号。</summary>
+    public const int CurrentVersion = 13;
+
+    /// <summary>各工具档案（键为 ToolId）。旧配置无此节时为空字典。</summary>
+    public Dictionary<string, ToolProfile> Tools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -128,6 +138,11 @@ public static class BgiService
     public static void Init()
     {
         LoadSettings();
+        // v1.3：加载/迁移工具档案（内部会读写 settings.json，失败时保持原文件不动）
+        ProfileRegistry.Initialize();
+        var bgi = ProfileRegistry.BetterGi;
+        if (string.IsNullOrWhiteSpace(Settings.BgiPath) && !string.IsNullOrWhiteSpace(bgi.ExecutablePath))
+            Settings.BgiPath = bgi.ExecutablePath;
         if (_initialized) return;
         _initialized = true;
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -138,25 +153,7 @@ public static class BgiService
     /// <summary>
     /// 本会话的 BetterGI 进程（SessionId 过滤，取不到 SessionId 的跳过）
     /// </summary>
-    public static Process[] GetSessionBgi()
-    {
-        int me = Process.GetCurrentProcess().SessionId;
-        var list = new List<Process>();
-        foreach (var p in Process.GetProcessesByName("BetterGI"))
-        {
-            try
-            {
-                if (p.SessionId == me) list.Add(p);
-                else p.Dispose();
-            }
-            catch
-            {
-                // 取不到 SessionId（进程已退出等）→ 跳过
-                try { p.Dispose(); } catch { }
-            }
-        }
-        return list.ToArray();
-    }
+    public static Process[] GetSessionBgi() => ToolRunner.GetSessionProcesses(ProfileRegistry.BetterGi);
 
     /// <summary>本会话的原神进程（YuanShen.exe / GenshinImpact.exe，SessionId 过滤）</summary>
     public static Process[] GetSessionGame()
@@ -200,8 +197,11 @@ public static class BgiService
     /// </summary>
     public static async Task<(bool ok, string err)> StartCore(string args, string source)
     {
-        if (string.IsNullOrWhiteSpace(Settings.BgiPath) || !File.Exists(Settings.BgiPath))
+        var profile = ProfileRegistry.BetterGi;
+        string exe = !string.IsNullOrWhiteSpace(profile.ExecutablePath) ? profile.ExecutablePath : Settings.BgiPath;
+        if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
             return (false, "BetterGI.exe 路径无效，请先在主界面填写");
+        profile.ExecutablePath = exe;
 
         // 对已在运行的 BGI 实例传参无效 → 先杀后启；杀进程必须 Task.Run（WaitForExit 最长 3 秒，同步会冻结界面）
         if (IsRunning)
@@ -210,18 +210,9 @@ public static class BgiService
             await Task.Delay(800);
         }
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = Settings.BgiPath,
-            Arguments = args,
-            WorkingDirectory = Path.GetDirectoryName(Settings.BgiPath) ?? "",
-            UseShellExecute = true,
-            Verb = "runas",
-        };
-
         try
         {
-            using var p = Process.Start(psi);
+            using var p = ToolRunner.StartProcess(profile, args);
             RaiseLog($"✓ 已启动一条龙（来源：{source}）参数：{args}");
             LogService.LogEvent($"BGI：启动一条龙（来源：{source}）参数：{args}");
             await Task.Delay(1200);
@@ -240,9 +231,7 @@ public static class BgiService
     /// <summary>启动一条龙：无配置名用 startOneDragon，有配置名用 startOneDragon "配置名"</summary>
     public static Task<(bool ok, string err)> StartDragonAsync(string source)
     {
-        string args = string.IsNullOrWhiteSpace(Settings.DragonConfigName)
-            ? "startOneDragon"
-            : $"startOneDragon \"{Settings.DragonConfigName}\"";
+        string args = ToolRunner.BuildArguments(ProfileRegistry.BetterGi, Settings.DragonConfigName);
         return StartCore(args, source);
     }
 
@@ -275,25 +264,7 @@ public static class BgiService
     }
 
     /// <summary>只杀本会话 BGI（Kill + WaitForExit(3000) + Dispose）</summary>
-    public static void KillAll()
-    {
-        foreach (var p in GetSessionBgi())
-        {
-            try
-            {
-                if (!p.HasExited)
-                {
-                    p.Kill();
-                    p.WaitForExit(3000);
-                }
-            }
-            catch { }
-            finally
-            {
-                try { p.Dispose(); } catch { }
-            }
-        }
-    }
+    public static void KillAll() => ToolRunner.KillAll(ProfileRegistry.BetterGi);
 
     /// <summary>读取 settings.json，损坏回退默认值</summary>
     public static void LoadSettings()
@@ -324,6 +295,20 @@ public static class BgiService
         {
             string dir = Path.GetDirectoryName(SettingsPath)!;
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            // v1.3：把界面上的 BGI 路径/配置名/勾选组反写进 profile，保持单一事实来源
+            try
+            {
+                if (ProfileRegistry.All.Count > 0)
+                {
+                    var bgi = ProfileRegistry.BetterGi.Clone();
+                    if (!string.IsNullOrWhiteSpace(Settings.BgiPath)) bgi.ExecutablePath = Settings.BgiPath;
+                    bgi.CustomData["dragonConfigName"] = Settings.DragonConfigName ?? "";
+                    bgi.CustomData["selectedGroups"] = string.Join("|", Settings.SelectedGroups ?? Array.Empty<string>());
+                    Settings.Tools ??= new Dictionary<string, ToolProfile>(StringComparer.OrdinalIgnoreCase);
+                    Settings.Tools["bettergi"] = bgi;
+                }
+            }
+            catch { }
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Settings, WriteOpt));
         }
         catch (Exception ex)

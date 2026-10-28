@@ -17,6 +17,10 @@
     <Company>Dragon Butler</Company>
     <Description>BetterGI 一条龙的启停管家与守护工具</Description>
     <Nullable>enable</Nullable>
+    <!-- v1.3 交付要求 0 warning：以下两条为存量、与本次重构无关，明确豁免 -->
+    <!-- CS8981：using wf = System.Windows.Forms 的小写别名（App.xaml.cs 既有写法） -->
+    <!-- WFAC010：WinForms 对 app.manifest DPI 段的提示；WPF 程序必须保留 manifest 设置 -->
+    <NoWarn>$(NoWarn);CS8981;WFAC010</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
