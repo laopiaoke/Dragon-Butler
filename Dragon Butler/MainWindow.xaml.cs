@@ -1524,17 +1524,17 @@ public partial class MainWindow : Window
             BtnBrowse_Click(sender, new RoutedEventArgs());
             return;
         }
-        try
+        if (ClipboardHelper.TrySetText(p))
         {
-            Clipboard.SetText(p);
             TbPathCopied.Visibility = Visibility.Visible;
             _pathCopiedTimer.Stop();
             _pathCopiedTimer.Start();
             BgiService.PublishLog("✓ 已复制 BetterGI 路径到剪贴板");
         }
-        catch (Exception ex)
+        else
         {
-            LogService.LogEvent("复制路径失败：" + ex.Message);
+            // 剪贴板被其他程序持续占用：改为弹窗让用户手动 Ctrl+C（技术细节只进日志）
+            ClipboardHelper.ShowManualCopyFallback(p, this, "复制路径");
         }
     }
 
@@ -2120,15 +2120,11 @@ public partial class MainWindow : Window
 
     private void BtnCopyWebhook_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            Clipboard.SetText($"http://127.0.0.1:{BgiService.Settings.BgiWebhookPort}/webhook");
+        string url = $"http://127.0.0.1:{BgiService.Settings.BgiWebhookPort}/webhook";
+        if (ClipboardHelper.TrySetText(url))
             BgiService.PublishLog("✓ 已复制 BGI Webhook 地址");
-        }
-        catch (Exception ex)
-        {
-            BgiService.PublishLog("✗ 复制失败：" + ex.Message);
-        }
+        else
+            ClipboardHelper.ShowManualCopyFallback(url, this); // 兜底：只读可全选文本框 + 手动复制提示
     }
 
     // ===== 主题（四段式分段控件）=====

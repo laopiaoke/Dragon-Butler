@@ -50,11 +50,12 @@ public partial class AppDialog : Window
                             string primary = "知道了",
                             string? secondary = null,
                             Action? secondaryAction = null,
-                            Window? owner = null)
+                            Window? owner = null,
+                            string? copyText = null)
     {
         try
         {
-            var dlg = Create(kind, title ?? "一条龙管家", message, detail, primary, secondary, secondaryAction, owner);
+            var dlg = Create(kind, title ?? "一条龙管家", message, detail, primary, secondary, secondaryAction, owner, copyText);
             dlg.ShowDialog();
             return dlg.Result;
         }
@@ -74,14 +75,15 @@ public partial class AppDialog : Window
                                    string primary = "知道了",
                                    string? secondary = null,
                                    Action? secondaryAction = null,
-                                   Window? owner = null)
+                                   Window? owner = null,
+                                   string? copyText = null)
     {
         EnsureThemeResources();
         var dlg = new AppDialog();
         // 启动早期的提示往往在后台进程里弹出：先置顶确保用户看得见，
         // 一旦拿到焦点就恢复普通层级（避免长期压在其它窗口之上）
         dlg.Topmost = true;
-        dlg.Setup(kind, title, message, detail, primary, secondary, secondaryAction);
+        dlg.Setup(kind, title, message, detail, primary, secondary, secondaryAction, copyText);
         if (owner != null && owner.IsVisible && !ReferenceEquals(owner, dlg))
         {
             dlg.Owner = owner;
@@ -97,7 +99,8 @@ public partial class AppDialog : Window
     // ===== 初始化 =====
 
     private void Setup(Kind kind, string title, string message, string? detail,
-                       string primary, string? secondary, Action? secondaryAction)
+                       string primary, string? secondary, Action? secondaryAction,
+                       string? copyText)
     {
         Title = string.IsNullOrWhiteSpace(title) ? "一条龙管家" : title;
         TitleText.Text = Title;
@@ -111,6 +114,17 @@ public partial class AppDialog : Window
         {
             DetailText.Text = detail;
             DetailText.Visibility = Visibility.Visible;
+        }
+
+        bool hasCopyBox = !string.IsNullOrWhiteSpace(copyText);
+        if (hasCopyBox)
+        {
+            CopyBox.Text = copyText;
+            CopyBox.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            CopyBox.Visibility = Visibility.Collapsed;
         }
 
         BtnPrimary.Content = string.IsNullOrWhiteSpace(primary) ? "知道了" : primary;
@@ -150,7 +164,16 @@ public partial class AppDialog : Window
 
         Loaded += (_, _) =>
         {
-            BtnPrimary.Focus();
+            if (hasCopyBox)
+            {
+                // 兜底场景：聚焦文本框并全选，用户按一次 Ctrl+C 即可复制
+                CopyBox.Focus();
+                CopyBox.SelectAll();
+            }
+            else
+            {
+                BtnPrimary.Focus();
+            }
             Activate();
         };
         Activated += (_, _) =>

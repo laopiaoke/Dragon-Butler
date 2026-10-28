@@ -73,6 +73,36 @@
             </Setter>
         </Style>
 
+        <!-- 只读可全选文本框：剪贴板被占用时让用户手动 Ctrl+C（默认隐藏，不影响既有调用） -->
+        <Style x:Key="DlgCopyBox" TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource InsetBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="Padding" Value="9,7"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Microsoft YaHei UI"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="IsReadOnlyCaretVisible" Value="False"/>
+            <Setter Property="MaxHeight" Value="96"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border CornerRadius="8" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 标题栏关闭：26×26 透明按钮，hover 出底色 -->
         <Style x:Key="DlgClose" TargetType="Button">
             <Setter Property="Width" Value="26"/>
@@ -154,6 +184,8 @@
                                TextWrapping="Wrap" Visibility="Collapsed"
                                FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
                                Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    <TextBox x:Name="CopyBox" Style="{StaticResource DlgCopyBox}"
+                             Margin="0,9,0,0" Visibility="Collapsed"/>
                 </StackPanel>
             </Grid>
 
