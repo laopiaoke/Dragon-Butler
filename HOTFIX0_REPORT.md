@@ -46,7 +46,7 @@
 | Build 0 error 0 warning | ✅ | `dotnet build "Dragon Butler/Dragon Butler.csproj" -c Release` → 0/0；三个测试工程同为 0/0 |
 | 占用期间走兜底且 UI 无 HRESULT | ✅ | `CoordinatorProbe clipboard <holder>` → `CLIP busy ok=False elapsed=962ms`；兜底弹窗截图见 `docs/clipboard_fallback.png`（无任何错误码） |
 | 空闲回归复制成功 | ✅ | 同一命令后半段 `CLIP free ok=True text=http://127.0.0.1:18235/webhook` |
-| 提交并 push | ✅ / ⚠ | 见第五节（本地提交已完成；push 结果按实际网络/凭证情况说明） |
+| 提交并 push | ✅ | 提交 `f3b846a`，已推送 `origin/main`（本地 HEAD = 远端 `f3b846a`） |
 
 复跑命令（在仓库根）：
 
@@ -58,7 +58,13 @@ tests/CoordinatorProbe/bin/Release/net8.0-windows/CoordinatorProbe.exe clipboard
 # 预期：CLIP busy ok=False elapsed≈900ms / CLIP free ok=True text=http://127.0.0.1:18235/webhook
 ```
 
-## 五、待人工确认项
+## 五、推送记录
+
+- 提交：`f3b846a fix(clipboard): 复制地址增加重试与手动兜底，移除 UI 技术细节泄露`
+- 推送：`origin/main 5006946..f3b846a`（含 Phase 1 的 `83db2f1`），远端与本地 HEAD 一致
+- 工作区提交后为空（无未跟踪残留）
+
+## 六、待人工确认项
 
 1. **真机点击回归**：自动截图来自探针宿主（同一个 `AppDialog` + 同一个 `ClipboardHelper.ShowManualCopyFallback`），未在主窗口里真实点击"复制地址"。建议你手动跑一次：占用期间点复制 → 应弹兜底窗；关闭占用后点复制 → 应显示"✓ 已复制"。
 2. **Win32 直写剪贴板**：如你的常用软件（微信 / QQ / 某些编辑器）粘贴异常，请反馈，可改回 OLE 路径并接受约 1 秒阻塞。
