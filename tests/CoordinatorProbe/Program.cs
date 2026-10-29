@@ -44,6 +44,7 @@ internal static class Program
             "queuefail" => RunQueue(stub, "queuefail"),
             "queueabort" => RunQueue(stub, "queueabort"),
             "queuehalted" => RunQueueHalted(stub),
+            "bgisecondary" => RunBgiSecondary(stub),
             "anchor" => RunAnchor(stub),
             "timeoutanchor" => RunTimeoutAnchor(stub),
             "residual" => RunResidual(stub),
@@ -336,6 +337,35 @@ internal static class Program
         foreach (var r in QueueService.LastResults)
             Console.WriteLine($"RESULT {r.ToolId} state={r.State} attempts={r.Attempts} skipped={r.Skipped} reason={r.Reason}");
         return 0;
+    }
+
+    /// <summary>
+    /// v1.3.1：BGI 副信号含"进程退出"后，锚点到达 + 进程正常退出应判 Done（不再空等宽限）。
+    /// </summary>
+    private static int RunBgiSecondary(string stub)
+    {
+        var profile = Stub("stub-bgi", stub, "--seconds 3 --exit 0", maxMinutes: 5,
+            primary: CompletionSignalKind.LogPattern, grace: 1);
+        profile.SecondarySignals = new[] { CompletionSignalKind.ProcessExit0 };
+
+        var sw = Stopwatch.StartNew();
+        var task = QueueService.RunProfilesAsync(new[] { profile }, QueueTrigger.Manual);
+        Thread.Sleep(1000);
+        try
+        {
+            string dir = Path.Combine(Path.GetDirectoryName(stub) ?? "", "log");
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, "better-genshin-impact-" + DateTime.Now.ToString("yyyyMMdd") + ".log");
+            File.AppendAllText(file, "一条龙和配置组任务结束" + Environment.NewLine);
+            Console.WriteLine("FEED anchor");
+        }
+        catch (Exception ex) { Console.WriteLine("FEED-FAIL " + ex.Message); }
+
+        task.GetAwaiter().GetResult();
+        sw.Stop();
+        var r = QueueService.LastResults.FirstOrDefault();
+        Console.WriteLine($"RESULT bgisecondary state={r?.State} elapsed={sw.Elapsed.TotalSeconds:F1}s");
+        return r?.State == ToolRunState.Done && sw.Elapsed.TotalSeconds < 10 ? 0 : 1;
     }
 
     /// <summary>悬置：主信号（日志锚点）到达但进程不退 → 宽限耗尽 Halted，队列停止不再跑下一项。</summary>
