@@ -128,8 +128,12 @@ public class AppSettings
     /// <summary>队列有失败项时是否仍执行睡眠/关机（默认关）。</summary>
     public bool AfterRunOnFailure { get; set; } = false;
 
-    /// <summary>验收期 DRYRUN：只写日志不真正睡眠/关机（附录 B 通过后置 false）。</summary>
-    public bool AfterRunDryRun { get; set; } = true;
+    /// <summary>
+    /// DRYRUN：只写日志不真正睡眠/关机。
+    /// 附录 B 已通过（真实睡眠/关机各验证一次），默认关闭 DRYRUN，跑完动作真实生效。
+    /// 需要演练时把它改回 true。
+    /// </summary>
+    public bool AfterRunDryRun { get; set; } = false;
 
     /// <summary>防打扰：定时触发时若检测到用户正在用电脑则推迟（默认开）。</summary>
     public bool IdleGuardEnabled { get; set; } = true;
