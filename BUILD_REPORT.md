@@ -1,6 +1,6 @@
 # Dragon Butler / 一条龙管家 · 版本与构建记录
 
-> 当前版本 **v1.3**（程序集 1.3.0.0） · 最后更新 2026-10-29
+> 当前版本 **v1.3.1**（程序集 1.3.1.0） · 最后更新 2026-10-29
 > 本文档记录三件事：版本号怎么定、每个版本改了什么、当前产物怎么构建与发布。
 
 ---
@@ -48,6 +48,7 @@
 | **v1.1** | 10-27 | 次版本 | 自定义主题：调色板取色 / 图片背景 + 遮罩 + 实时预览 |
 | **v1.2** | 10-27 | 次版本 | 代码清理：删除无用模块与重复入口，直装版体积 -40% |
 | **v1.3** | 10-29 | 次版本 | 多游戏排队 / 跑完动作 / 防打扰 / 自动寻找 / 三层 UI 改版 / 完成判定收敛 |
+| **v1.3.1** | 10-29 | 次版本 | 完成判定补强：BGI 进程退出也作为互证，老配置自动升级 |
 
 ---
 
@@ -148,6 +149,14 @@
 - 发布产物命名带上版本号：压缩包为 `一条龙管家-v1.2-需.NET8运行时.zip` / `一条龙管家-v1.2-免安装便携版.zip`（版本取自 csproj `<Version>`，去掉末尾 `.0`）；包内顶层目录与源目录保持固定名，便于覆盖升级。
 - README 按使用者视角重写（189 行、5 张实拍截图、含"已知边界"）。
 
+### v1.3.1 · 完成判定补强（10-29）
+
+- BGI 副信号追加 `ProcessExit0`（退出码 0 才算）：解决"BGI 跑完不关游戏、又没配 Webhook"时一直等到宽限 → 悬置。
+- `RunCoordinator`：进程退出作为互证时只有 exit=0 才判 Done；非 0 继续等其它副信号/宽限（防崩溃误判完成）。
+- 老配置自动升级：`ProfileRegistry` 检测 `secondarySchema < 2` 时补一条副信号并写回 `tools/bettergi.json` 与 settings，日志记"已升级 BGI 副信号"。
+- 探针 `bgisecondary`：锚点 + 进程正常退出 → `Done` 4.1s（此前要等 60 秒宽限后 Halted）。
+- 验证老配置（`SecondarySignals=[2,0]`）启动后变为 `[2,0,1]`、`secondarySchema=2`，两处文件均已写入。
+
 ### v1.3 · 多游戏排队（10-29）
 
 - 新增 `QueueService`（队列、间隔、失败策略、汇总通知、跑完动作 DRYRUN）、`WebhookHub`（全库唯一 HttpListener + 扇出）、`ToolDiscovery`（四级自动寻找）、`FirstRunWindow`（三步向导）。
@@ -156,8 +165,10 @@
 - UI 三层布局：队列卡 / 三张工具卡（默认折叠）/ 高级设置（默认折叠）；旧哨兵四行卡删除，底部盾牌替代。
 - 版本 1.3.0；自查见 `PHASE2_REPORT.md`（队列/重试/中止/超时/悬置/锚点/防打扰/残留/冲突/度假/DRYRUN/自动寻找全部用 StubTool 跑过）。
 - 附录 B 人工验收通过；`AfterRunDryRun` 默认改为 `false`（跑完动作真实生效）。
-- 已发 tag `v1.3.0` 与 GitHub Release：<https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.3.0>
-  （资产：`Dragon-Butler-v1.3.0-win-x64.zip` 解压即用、`Dragon-Butler-v1.3-win-x64-runtime-dependent.zip`）。
+- 已发 tag `v1.3.0` 与 `v1.3.1`，Release：
+  <https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.3.1>
+  （资产：`Dragon-Butler-v1.3.1-win-x64.zip` 解压即用、`Dragon-Butler-v1.3.1-win-x64-runtime-dependent.zip`）；
+  v1.3.0 的 Release 正文已补"下载哪个"说明。
 
 ### v1.2 · 代码清理（10-27）
 
@@ -218,11 +229,11 @@ dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self
 
 | 产物 | 路径 | 体积 |
 | --- | --- | --- |
-| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 516,728 B |
-| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.3-win-x64-runtime-dependent.zip` | ≈ 0.24 MB |
-| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,069,995 B |
-| portable 压缩包 | `发布/Dragon-Butler-v1.3-win-x64-portable.zip` | ≈ 62.74 MB |
-| Release 资产（解压即用） | `发布/Dragon-Butler-v1.3.0-win-x64.zip` | 62.74 MB |
+| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 517,752 B |
+| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.3.1-win-x64-runtime-dependent.zip` | ≈ 0.24 MB |
+| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,074,091 B |
+| portable 压缩包 | `发布/Dragon-Butler-v1.3.1-win-x64-portable.zip` | ≈ 62.74 MB |
+| Release 资产（解压即用） | `发布/Dragon-Butler-v1.3.1-win-x64.zip` | 62.74 MB |
 
 压缩包内顶层目录是**不带版本**的固定名（与 `发布/` 下的源目录一致，如 `Dragon-Butler-win-x64-portable/`），内含一个 exe + `使用说明.txt`。
 这样升级时把新包解压到原目录覆盖即可，`config\`（设置）不会丢；版本信息只体现在**下载到的文件名**上。

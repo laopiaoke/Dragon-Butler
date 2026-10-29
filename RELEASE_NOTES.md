@@ -1,3 +1,18 @@
+# v1.3.1 完成判定补强
+
+> 已发布：<https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.3.1>
+
+## 修复
+- BetterGI 跑完不关游戏、又没配 Webhook 时，不再一直等到宽限后停下队列：新增"BGI 进程正常退出（退出码 0）"作为互证副信号
+- 老配置自动升级：首次启动把这条副信号补进 `tools/bettergi.json`，日志记一行"已升级 BGI 副信号"，无需手动改
+
+## 下载哪个
+- **免安装便携版（推荐）**：`Dragon-Butler-v1.3.1-win-x64.zip` —— 解压即用，自带 .NET 运行时
+- **需 .NET 8 运行时**：`Dragon-Butler-v1.3.1-win-x64-runtime-dependent.zip` —— 约 0.24 MB，机器上已装 .NET 8 桌面运行时可用
+
+## 升级注意
+- 覆盖安装即可，`config\` 设置不动；`tools/bettergi.json` 会被自动补一条副信号（只增不减）
+
 # v1.3.0 睡前一键，多游戏排队
 
 > 已发布：<https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.3.0>（tag `v1.3.0`）

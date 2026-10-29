@@ -81,7 +81,7 @@ P="tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.exe"
 
 ## 四、需要你知道的偏差与取舍
 
-1. **BGI 完成判定的实际风险（最重要）**：按勘误 F，BGI 主信号是日志锚点，副信号是 `GameProcessExit; Webhook`。若某次 BGI 跑完既不关游戏、也没配 Webhook，状态机会进 `Halted` 并停下队列（宁等勿进）。真机跑一次即可确认；若频繁出现，建议在 `tools/bettergi.json` 的 `SecondarySignals` 追加 `ProcessExit0`（BGI 自身退出也是强证据），我可以改。
+1. **BGI 完成判定的实际风险（最重要）**：按勘误 F，BGI 主信号是日志锚点，副信号是 `GameProcessExit; Webhook`（**v1.3.1 已追加 `ProcessExit0` 解决**）。若某次 BGI 跑完既不关游戏、也没配 Webhook，状态机会进 `Halted` 并停下队列（宁等勿进）。真机跑一次即可确认；若频繁出现，建议在 `tools/bettergi.json` 的 `SecondarySignals` 追加 `ProcessExit0`（BGI 自身退出也是强证据），我可以改。
 2. **通知不可点击**：任务书写的"点此立即开始/跳过本次""点此取消"在 Windows 气泡/Toast 上不可实现（现有 `NotifyService` 无动作按钮）。改为：等待空闲时队列卡出现「立即开始（跳过等待）」，关机倒计时出现「取消关机」；通知文案保留说明。
 3. **"多用户自启"未复活**：该模块在 v1.2 清理中已整体删除（178 行 WMI 实现，零调用）。本阶段没有重新实现，避免把刚删掉的死代码加回来。需要的话单独提。
 4. **哨兵崩溃重启**：队列运行中进程消失时，交由队列/协调器判定，哨兵只记日志不重复拉起（否则会双开）。非队列场景仍按原逻辑自动重启。
