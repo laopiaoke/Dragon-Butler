@@ -155,7 +155,9 @@
 - `BgiService` 门面物理删除（`git grep -i BgiService` 零结果）。
 - UI 三层布局：队列卡 / 三张工具卡（默认折叠）/ 高级设置（默认折叠）；旧哨兵四行卡删除，底部盾牌替代。
 - 版本 1.3.0；自查见 `PHASE2_REPORT.md`（队列/重试/中止/超时/悬置/锚点/防打扰/残留/冲突/度假/DRYRUN/自动寻找全部用 StubTool 跑过）。
-- **未发布**：tag、zip、GitHub Release 等附录 B 人工验收通过后再做。
+- 附录 B 人工验收通过；`AfterRunDryRun` 默认改为 `false`（跑完动作真实生效）。
+- 已发 tag `v1.3.0` 与 GitHub Release：<https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.3.0>
+  （资产：`Dragon-Butler-v1.3.0-win-x64.zip` 解压即用、`Dragon-Butler-v1.3-win-x64-runtime-dependent.zip`）。
 
 ### v1.2 · 代码清理（10-27）
 
@@ -216,10 +218,11 @@ dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self
 
 | 产物 | 路径 | 体积 |
 | --- | --- | --- |
-| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 472,696 B |
-| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.2-win-x64-runtime-dependent.zip` | ≈ 0.22 MB |
-| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,029,035 B |
-| portable 压缩包 | `发布/Dragon-Butler-v1.2-win-x64-portable.zip` | ≈ 62.72 MB |
+| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 516,728 B |
+| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.3-win-x64-runtime-dependent.zip` | ≈ 0.24 MB |
+| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,069,995 B |
+| portable 压缩包 | `发布/Dragon-Butler-v1.3-win-x64-portable.zip` | ≈ 62.74 MB |
+| Release 资产（解压即用） | `发布/Dragon-Butler-v1.3.0-win-x64.zip` | 62.74 MB |
 
 压缩包内顶层目录是**不带版本**的固定名（与 `发布/` 下的源目录一致，如 `Dragon-Butler-win-x64-portable/`），内含一个 exe + `使用说明.txt`。
 这样升级时把新包解压到原目录覆盖即可，`config\`（设置）不会丢；版本信息只体现在**下载到的文件名**上。

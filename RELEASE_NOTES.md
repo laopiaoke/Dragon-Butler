@@ -1,6 +1,6 @@
 # v1.3.0 睡前一键，多游戏排队
 
-> 本文件是 GitHub Release 正文草稿；tag 与 Release 在附录 B 人工验收通过后发布。
+> 已发布：<https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.3.0>（tag `v1.3.0`）
 
 ## 新增
 - 多游戏排队：勾选 BetterGI / 三月七助手 / ok-ww，点"一键开跑"，依次自动执行
