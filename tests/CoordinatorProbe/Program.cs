@@ -40,6 +40,18 @@ internal static class Program
             "clipboard" => RunClipboard(stub),
             "cliptry" => RunClipTry(),
             "clipdialog" => RunClipDialog(),
+            "queue" => RunQueue(stub, "queue"),
+            "queuefail" => RunQueue(stub, "queuefail"),
+            "queueabort" => RunQueue(stub, "queueabort"),
+            "queuehalted" => RunQueueHalted(stub),
+            "anchor" => RunAnchor(stub),
+            "timeoutanchor" => RunTimeoutAnchor(stub),
+            "residual" => RunResidual(stub),
+            "conflict" => RunConflict(stub),
+            "vacation" => RunVacation(),
+            "afterrun" => RunAfterRun(),
+            "idle" => RunIdle(),
+            "discover" => RunDiscover(stub),
             _ => Help(),
         };
     }
@@ -270,6 +282,223 @@ internal static class Program
         return 0;
     }
 
+
+    // ===== v1.3 排队引擎验证 =====
+
+    private static ToolProfile Stub(string name, string path, string args, int exit = 0, int retry = 0,
+                                    CompletionSignalKind primary = CompletionSignalKind.ProcessExit0,
+                                    int maxMinutes = 5, int grace = 0)
+        => new()
+        {
+            ToolId = name,
+            DisplayName = name,
+            ExecutablePath = path,
+            LaunchArguments = args,
+            ManagedProcessName = "StubTool",
+            GameProcessNames = Array.Empty<string>(),
+            PrimarySignal = primary,
+            SecondarySignals = Array.Empty<CompletionSignalKind>(),
+            LogCompletionPattern = primary == CompletionSignalKind.LogPattern ? "一条龙和配置组任务结束" : null,
+            MaxDurationMinutes = maxMinutes,
+            PostExitGraceMinutes = grace,
+            RetryCount = retry,
+        };
+
+    /// <summary>两/三工具队列：顺序、间隔、汇总。</summary>
+    private static int RunQueue(string stub, string mode)
+    {
+        QueueService.IntervalOverride = TimeSpan.FromSeconds(1);
+        AppState.Settings.FailStrategy = mode == "queueabort" ? "Abort" : "Skip";
+        AppState.Settings.AfterRunAction = "Notify";
+
+        var list = new List<ToolProfile>();
+        if (mode == "queue")
+        {
+            list.Add(Stub("stub-a", stub, "--seconds 2 --exit 0"));
+            list.Add(Stub("stub-b", stub, "--seconds 3 --exit 0"));
+        }
+        else if (mode == "queuefail")
+        {
+            list.Add(Stub("stub-a", stub, "--seconds 1 --exit 0"));
+            list.Add(Stub("stub-b", stub, "--seconds 1 --exit 3", retry: 1));
+            list.Add(Stub("stub-c", stub, "--seconds 1 --exit 0"));
+        }
+        else
+        {
+            list.Add(Stub("stub-a", stub, "--seconds 1 --exit 3", retry: 0));
+            list.Add(Stub("stub-b", stub, "--seconds 1 --exit 0"));
+        }
+
+        var sw = Stopwatch.StartNew();
+        QueueService.RunProfilesAsync(list, QueueTrigger.Manual).GetAwaiter().GetResult();
+        sw.Stop();
+        Console.WriteLine($"QUEUE mode={mode} elapsed={sw.Elapsed.TotalSeconds:F1}s");
+        foreach (var r in QueueService.LastResults)
+            Console.WriteLine($"RESULT {r.ToolId} state={r.State} attempts={r.Attempts} skipped={r.Skipped} reason={r.Reason}");
+        return 0;
+    }
+
+    /// <summary>悬置：主信号（日志锚点）到达但进程不退 → 宽限耗尽 Halted，队列停止不再跑下一项。</summary>
+    private static int RunQueueHalted(string stub)
+    {
+        QueueService.IntervalOverride = TimeSpan.FromSeconds(1);
+        var a = Stub("stub-log", stub, "--hang", maxMinutes: 5,
+            primary: CompletionSignalKind.LogPattern, grace: 1);
+        var b = Stub("stub-b", stub, "--seconds 1 --exit 0");
+
+        var task = QueueService.RunProfilesAsync(new[] { a, b }, QueueTrigger.Manual);
+        Thread.Sleep(2000);
+        try
+        {
+            string dir = Path.Combine(Path.GetDirectoryName(stub) ?? "", "log");
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, "better-genshin-impact-" + DateTime.Now.ToString("yyyyMMdd") + ".log");
+            File.AppendAllText(file, "一条龙和配置组任务结束" + Environment.NewLine);
+            Console.WriteLine("FEED anchor");
+        }
+        catch (Exception ex) { Console.WriteLine("FEED-FAIL " + ex.Message); }
+
+        task.GetAwaiter().GetResult();
+        foreach (var r in QueueService.LastResults)
+            Console.WriteLine($"RESULT {r.ToolId} state={r.State} skipped={r.Skipped}");
+        bool halted = QueueService.LastResults.Any(r => r.State == ToolRunState.Halted);
+        bool secondRan = QueueService.LastResults.Any(r => r.ToolId == "stub-b");
+        Console.WriteLine($"RESULT halted={halted} secondRan={secondRan}");
+        return halted && !secondRan ? 0 : 1;
+    }
+
+    /// <summary>锚点防误判：只有"任务结束"不得触发，完整锚点才触发。</summary>
+    private static int RunAnchor(string stub)
+    {
+        string dir = Path.Combine(Path.GetDirectoryName(stub) ?? "", "log");
+        Directory.CreateDirectory(dir);
+        string file = Path.Combine(dir, "better-genshin-impact-" + DateTime.Now.ToString("yyyyMMdd") + ".log");
+        File.WriteAllText(file, "");
+
+        int hits = 0;
+        var watcher = new LogWatcher("一条龙和配置组任务结束", dir);
+        watcher.OnEvent += ev => { if (ev.Source == "log-pattern") hits++; };
+        watcher.Start();
+
+        File.AppendAllText(file, "任务结束" + Environment.NewLine);
+        for (int i = 0; i < 3; i++) { Thread.Sleep(300); watcher.Pump(); }
+        Console.WriteLine("ANCHOR after-bare=" + hits);
+
+        File.AppendAllText(file, "一条龙和配置组任务结束" + Environment.NewLine);
+        for (int i = 0; i < 6 && hits == 0; i++) { Thread.Sleep(300); watcher.Pump(); }
+        Console.WriteLine("ANCHOR after-full=" + hits);
+        return hits == 1 ? 0 : 1;
+    }
+
+    /// <summary>超时且无锚点命中 → Timeout + WARNING 日志。</summary>
+    private static int RunTimeoutAnchor(string stub)
+    {
+        var profile = Stub("stub-timeout", stub, "--hang", maxMinutes: 1,
+            primary: CompletionSignalKind.LogPattern, grace: 0);
+        QueueService.RunProfilesAsync(new[] { profile }, QueueTrigger.Manual).GetAwaiter().GetResult();
+        var r = QueueService.LastResults.FirstOrDefault();
+        Console.WriteLine($"RESULT timeout state={r?.State} reason={r?.Reason}");
+        return r?.State == ToolRunState.Timeout ? 0 : 1;
+    }
+
+    /// <summary>残留清理：先起一个 --hang 的 StubTool，定时触发应杀掉再跑。</summary>
+    private static int RunResidual(string stub)
+    {
+        AppState.Settings.AutoKillResidual = true;
+        AppState.Settings.IdleGuardEnabled = false;
+        var proc = Process.Start(new ProcessStartInfo
+        {
+            FileName = stub,
+            Arguments = "--hang",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        });
+        Thread.Sleep(800);
+        Console.WriteLine("RESIDUAL pre-running=" + ToolRunner.IsRunning(Stub("stub", stub, "")));
+
+        var profile = Stub("stub", stub, "--seconds 1 --exit 0");
+        QueueService.RunProfilesAsync(new[] { profile }, QueueTrigger.Timer).GetAwaiter().GetResult();
+        var r = QueueService.LastResults.FirstOrDefault();
+        Console.WriteLine($"RESULT residual state={r?.State} skipped={r?.Skipped}");
+        try { if (proc is { HasExited: false }) proc.Kill(); } catch { }
+        return r?.State == ToolRunState.Done ? 0 : 1;
+    }
+
+    /// <summary>游戏进程冲突：起一个名为 StarRail 的替身 → 跳过。</summary>
+    private static int RunConflict(string stub)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "db_conflict");
+        Directory.CreateDirectory(dir);
+        string fake = Path.Combine(dir, "StarRail.exe");
+        // 用独立可执行文件做替身（StubTool 是 apphost，单独拷走会缺少 dll 起不来）
+        File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), fake, true);
+        var p = Process.Start(new ProcessStartInfo { FileName = fake, Arguments = "/c ping -n 12 127.0.0.1 >nul", UseShellExecute = false, CreateNoWindow = true });
+        Thread.Sleep(800);
+
+        var profile = Stub("stub", stub, "--seconds 1 --exit 0");
+        profile.GameProcessNames = new[] { "StarRail" };
+        QueueService.RunProfilesAsync(new[] { profile }, QueueTrigger.Manual).GetAwaiter().GetResult();
+        var r = QueueService.LastResults.FirstOrDefault();
+        Console.WriteLine($"RESULT conflict skipped={r?.Skipped} reason={r?.Reason}");
+        try { if (p is { HasExited: false }) p.Kill(); } catch { }
+        return r?.Skipped == true ? 0 : 1;
+    }
+
+    /// <summary>度假模式：定时触发不跑。</summary>
+    private static int RunVacation()
+    {
+        AppState.Settings.VacationMode = true;
+        bool ran = QueueService.StartAsync(QueueTrigger.Timer).GetAwaiter().GetResult();
+        Console.WriteLine("RESULT vacation ran=" + ran);
+        AppState.Settings.VacationMode = false;
+        return ran ? 1 : 0;
+    }
+
+    /// <summary>跑完动作 DRYRUN：关机只写日志。</summary>
+    private static int RunAfterRun()
+    {
+        AppState.Settings.AfterRunAction = "Shutdown";
+        AppState.Settings.AfterRunDryRun = true;
+        AppState.Settings.AfterRunOnFailure = false;
+        AfterRunActionService.Execute(new AfterRunContext { Total = 2, Success = 2, HasFailure = false });
+        AfterRunActionService.Execute(new AfterRunContext { Total = 2, Success = 1, HasFailure = true });
+        Console.WriteLine("RESULT afterrun done（应只有 DRYRUN 日志，无真实关机）");
+        return 0;
+    }
+
+    /// <summary>防打扰：有人在场 → 推迟；改成空闲后放行。</summary>
+    private static int RunIdle()
+    {
+        AppState.Settings.IdleGuardEnabled = true;
+        IdleGuard.PostponeDelay = TimeSpan.FromSeconds(1);
+        IdleGuard.IdleOverride = TimeSpan.Zero;
+        var sw = Stopwatch.StartNew();
+        var task = IdleGuard.WaitAsync(CancellationToken.None);
+        Thread.Sleep(1500);
+        IdleGuard.IdleOverride = TimeSpan.FromMinutes(10);
+        bool ok = task.GetAwaiter().GetResult();
+        sw.Stop();
+        Console.WriteLine($"RESULT idle ok={ok} elapsed={sw.Elapsed.TotalSeconds:F1}s");
+        return ok ? 0 : 1;
+    }
+
+    /// <summary>自动寻找：运行中的进程应命中。</summary>
+    private static int RunDiscover(string stub)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "db_find");
+        Directory.CreateDirectory(dir);
+        string exe = Path.Combine(dir, "March7 Launcher.exe");
+        File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), exe, true);
+        var p = Process.Start(new ProcessStartInfo { FileName = exe, Arguments = "/c ping -n 12 127.0.0.1 >nul", UseShellExecute = false, CreateNoWindow = true });
+        Thread.Sleep(1000);
+
+        var profile = ProfileRegistry.Get("march7th");
+        var found = ToolDiscovery.TryAutoDiscover(profile, out string source);
+        Console.WriteLine($"RESULT discover found={found} source={source}");
+        try { if (p is { HasExited: false }) p.Kill(); } catch { }
+        return string.Equals(found, exe, StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+    }
+
     private static int Help()
     {
         Console.WriteLine("CoordinatorProbe <done|failed|timeout|halted|haltedlog|logpattern|args|migrate|clipboard|clipdialog> [stubPath]");
@@ -377,15 +606,15 @@ internal static class Program
         }
         """, Encoding.UTF8);
 
-        BgiService.LoadSettings();
+        AppState.LoadSettings();
         ProfileRegistry.Initialize();
 
         var bgi = ProfileRegistry.BetterGi;
-        Console.WriteLine("MIGRATE version=" + BgiService.Settings.Version);
+        Console.WriteLine("MIGRATE version=" + AppState.Settings.Version);
         Console.WriteLine("MIGRATE bgiPath=" + bgi.ExecutablePath);
         Console.WriteLine("MIGRATE configName=" + bgi.CustomData.GetValueOrDefault("dragonConfigName"));
         Console.WriteLine("MIGRATE groups=" + bgi.CustomData.GetValueOrDefault("selectedGroups"));
-        Console.WriteLine("MIGRATE schedule=" + BgiService.Settings.ScheduleEnabled + "/" + BgiService.Settings.ScheduleHour);
+        Console.WriteLine("MIGRATE schedule=" + AppState.Settings.ScheduleEnabled + "/" + AppState.Settings.ScheduleHour);
         Console.WriteLine("MIGRATE backup=" + File.Exists(backup));
         Console.WriteLine("MIGRATE toolsJson=" + File.Exists(Path.Combine(ProfileRegistry.ToolsDir, "bettergi.json")));
         Console.WriteLine("MIGRATE profiles=" + string.Join(",", System.Linq.Enumerable.Select(ProfileRegistry.All, p => p.ToolId)));
