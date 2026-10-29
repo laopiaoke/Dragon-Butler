@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -119,7 +119,10 @@ public sealed class GameProcessExitSignalSource : ICompletionSignalSource
     }
 }
 
-/// <summary>Webhook 信号源：包装既有的 <see cref="WebhookListener"/>，端口由 profile.CustomData 提供。</summary>
+/// <summary>
+/// Webhook 信号源：订阅全局 <see cref="WebhookHub"/>（全库唯一 HttpListener），
+/// 只把 dragon.end 转成完成信号。不再自己创建监听器，避免端口冲突与双判定。
+/// </summary>
 public sealed class WebhookSignalSource : ICompletionSignalSource
 {
     /// <inheritdoc />
@@ -128,46 +131,32 @@ public sealed class WebhookSignalSource : ICompletionSignalSource
     /// <inheritdoc />
     public event Action<CompletionSignal>? SignalRaised;
 
-    private WebhookListener? _listener;
-    private Timer? _timer;
+    private int _started;
 
     /// <inheritdoc />
     public void Start(ToolRunContext ctx)
     {
-        int port = 18235;
-        if (ctx.Profile.CustomData.TryGetValue("webhookPort", out string? raw)
-            && int.TryParse(raw, out int p) && p > 0 && p < 65536)
-        {
-            port = p;
-        }
-        _listener = new WebhookListener();
-        _listener.Start(port);
-        _timer = new Timer(_ => Drain(), null, 300, 300);
+        if (Interlocked.Exchange(ref _started, 1) == 1) return;
+        WebhookHub.EventReceived += OnEvent;
     }
 
-    private void Drain()
+    private void OnEvent(SentinelEvent ev)
     {
-        if (_listener == null) return;
-        foreach (var ev in _listener.Drain())
+        if (ev.Kind != SentinelEventKind.DragonEnded) return;
+        Raise(new CompletionSignal
         {
-            if (ev.Kind != SentinelEventKind.DragonEnded) continue;
-            Raise(new CompletionSignal
-            {
-                SourceId = SourceId,
-                Kind = CompletionSignalKind.Webhook,
-                Confidence = SignalConfidence.High,
-                Detail = "dragon.end " + ev.Payload,
-            });
-        }
+            SourceId = SourceId,
+            Kind = CompletionSignalKind.Webhook,
+            Confidence = SignalConfidence.High,
+            Detail = "dragon.end " + ev.Payload,
+        });
     }
 
     /// <inheritdoc />
     public void Stop()
     {
-        try { _timer?.Dispose(); } catch { }
-        _timer = null;
-        try { _listener?.Stop(); } catch { }
-        _listener = null;
+        if (Interlocked.Exchange(ref _started, 0) == 0) return;
+        WebhookHub.EventReceived -= OnEvent;
     }
 
     private void Raise(CompletionSignal s)
@@ -231,7 +220,7 @@ public sealed class LogPatternSignalSource : ICompletionSignalSource
     }
 }
 
-/// <summary>进程工具：按名字 + 当前会话过滤（与 BgiService 原有语义一致，供 v1.3 复用）。</summary>
+/// <summary>进程工具：按名字 + 当前会话过滤（SessionId 过滤语义，v1.3 起供所有工具复用）。</summary>
 public static class ProcessTools
 {
     /// <summary>统计本会话内指定进程名的实例数（取不到 SessionId 的忽略）。</summary>

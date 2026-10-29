@@ -93,7 +93,7 @@ public sealed class LogWatcher
         {
             // 显式指定时按"日志目录本身"处理（v1.3：由 profile 的 exe 目录推导）
             if (!string.IsNullOrEmpty(_logDirOverride)) return _logDirOverride;
-            string? baseDir = Path.GetDirectoryName(BgiService.Settings.BgiPath);
+            string? baseDir = Path.GetDirectoryName(AppState.Settings.BgiPath);
             return string.IsNullOrEmpty(baseDir) ? "" : Path.Combine(baseDir, "log");
         }
         catch { return ""; }

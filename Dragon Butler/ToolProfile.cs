@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace DragonButler;
@@ -105,9 +105,11 @@ public static class ToolProfileDefaults
             LaunchArguments = "startOneDragon \"{组名}\"",
             ManagedProcessName = "BetterGI",
             GameProcessNames = new[] { "YuanShen", "GenshinImpact" },
-            PrimarySignal = CompletionSignalKind.Webhook,
-            SecondarySignals = new[] { CompletionSignalKind.GameProcessExit, CompletionSignalKind.LogPattern },
-            LogCompletionPattern = "配置组 \".*?\" 执行结束",
+            // 勘误 F：BGI 主信号改为日志锚点（Webhook 仅作互证副信号，未配置也不影响完成判定）
+            PrimarySignal = CompletionSignalKind.LogPattern,
+            SecondarySignals = new[] { CompletionSignalKind.GameProcessExit, CompletionSignalKind.Webhook },
+            // 主锚点（真实日志已验证）：严禁裸匹配"任务结束"，BGI 中途会多次打印
+            LogCompletionPattern = "一条龙和配置组任务结束",
             MaxDurationMinutes = 180,
             PostExitGraceMinutes = 5,
             RetryCount = 1,
@@ -116,6 +118,8 @@ public static class ToolProfileDefaults
                 ["webhookPort"] = "18235",
                 ["dragonConfigName"] = "",
                 ["selectedGroups"] = "",
+                ["candidatePaths"] = "",   // 待人工核对：未确证官方默认安装位置，留空不臆造
+                ["extraLogPatterns"] = "", // 备用锚点（| 分隔），默认为空
             },
         },
         new ToolProfile
@@ -131,6 +135,11 @@ public static class ToolProfileDefaults
             MaxDurationMinutes = 120,
             PostExitGraceMinutes = 0,
             RetryCount = 1,
+            CustomData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["candidatePaths"] = "",   // 待人工核对
+                ["extraLogPatterns"] = "",
+            },
         },
         new ToolProfile
         {
@@ -145,6 +154,11 @@ public static class ToolProfileDefaults
             MaxDurationMinutes = 150,
             PostExitGraceMinutes = 0,
             RetryCount = 1,
+            CustomData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["candidatePaths"] = "",   // 待人工核对
+                ["extraLogPatterns"] = "",
+            },
         },
     };
 }

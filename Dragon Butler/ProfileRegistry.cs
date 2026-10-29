@@ -55,7 +55,7 @@ public static class ProfileRegistry
             if (BetterGi.CustomData.TryGetValue("webhookPort", out string? raw)
                 && int.TryParse(raw, out int port) && port > 0 && port < 65536)
                 return port;
-            return BgiService.Settings.BgiWebhookPort;
+            return AppState.Settings.BgiWebhookPort;
         }
     }
 
@@ -96,8 +96,8 @@ public static class ProfileRegistry
             File.WriteAllText(Path.Combine(ToolsDir, profile.ToolId + ".json"),
                 JsonSerializer.Serialize(profile, WriteOpt));
 
-            BgiService.Settings.Tools[profile.ToolId] = profile.Clone();
-            BgiService.SaveSettings();
+            AppState.Settings.Tools[profile.ToolId] = profile.Clone();
+            AppState.SaveSettings();
         }
         catch (Exception ex)
         {
@@ -109,7 +109,7 @@ public static class ProfileRegistry
 
     private static void LoadInternal()
     {
-        var settings = BgiService.Settings;
+        var settings = AppState.Settings;
         settings.Tools ??= new Dictionary<string, ToolProfile>(StringComparer.OrdinalIgnoreCase);
 
         bool migrated = MigrateFromV12IfNeeded(settings);
@@ -180,7 +180,7 @@ public static class ProfileRegistry
 
         try
         {
-            string path = BgiService.SettingsPath;
+            string path = AppState.SettingsPath;
             string backup = path + ".bak.v12";
             if (File.Exists(path) && !File.Exists(backup))
                 File.Copy(path, backup, overwrite: false);
@@ -198,7 +198,7 @@ public static class ProfileRegistry
 
             settings.Tools["bettergi"] = bgi;
             settings.Version = AppSettings.CurrentVersion;
-            BgiService.SaveSettings();
+            AppState.SaveSettings();
 
             LogService.LogEvent("已迁移配置 v1.2→v1.3");
             return true;

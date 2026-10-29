@@ -1,18 +1,28 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 
 namespace DragonButler;
 
 /// <summary>
-/// 应用设置（SPBGI）：与 settings.json 字段一一对应；旧配置缺新字段时反序列化自动保持默认值。
+/// 队列中的一项：勾选的工具 + 顺序（列表顺序即执行顺序）。
+/// </summary>
+public sealed class QueueEntry
+{
+    /// <summary>工具标识（bettergi / march7th / ok-ww）。</summary>
+    public string ToolId { get; set; } = "";
+
+    /// <summary>是否启用（界面勾选）。</summary>
+    public bool Enabled { get; set; } = true;
+}
+
+/// <summary>
+/// 应用设置：与 settings.json 字段一一对应；旧配置缺新字段时反序列化自动保持默认值。
 /// </summary>
 public class AppSettings
 {
@@ -86,7 +96,7 @@ public class AppSettings
     /// <summary>只推送异常（Warning/Critical）；false=完成/启动也推送</summary>
     public bool NotifyOnlyImportant { get; set; } = false;
 
-    /// <summary>勾选的配置组（非空时按 --startGroups 执行；空则用配置名/当前选中）</summary>
+    /// <summary>勾选的配置组（BGI 专用；非空时按 --startGroups 执行）</summary>
     public string[] SelectedGroups { get; set; } = Array.Empty<string>();
 
     /// <summary>推送方式：Toast（Windows 通知，默认）/ Wecom（企业微信）/ Balloon（仅托盘气泡）</summary>
@@ -101,20 +111,55 @@ public class AppSettings
 
     /// <summary>各工具档案（键为 ToolId）。旧配置无此节时为空字典。</summary>
     public Dictionary<string, ToolProfile> Tools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    // ===== v1.3：排队引擎 =====
+    /// <summary>队列（列表顺序即执行顺序）。空=首次运行，由 <see cref="AppState.EnsureQueueDefaults"/> 补齐。</summary>
+    public List<QueueEntry> Queue { get; set; } = new();
+
+    /// <summary>工具之间的等待（分钟），默认 2。</summary>
+    public int QueueIntervalMinutes { get; set; } = 2;
+
+    /// <summary>失败策略：Skip=跳过继续（默认）/ Abort=停止剩余队列。</summary>
+    public string FailStrategy { get; set; } = "Skip";
+
+    /// <summary>跑完动作：Notify=仅通知（默认）/ Sleep=睡眠 / Shutdown=关机。</summary>
+    public string AfterRunAction { get; set; } = "Notify";
+
+    /// <summary>队列有失败项时是否仍执行睡眠/关机（默认关）。</summary>
+    public bool AfterRunOnFailure { get; set; } = false;
+
+    /// <summary>验收期 DRYRUN：只写日志不真正睡眠/关机（附录 B 通过后置 false）。</summary>
+    public bool AfterRunDryRun { get; set; } = true;
+
+    /// <summary>防打扰：定时触发时若检测到用户正在用电脑则推迟（默认开）。</summary>
+    public bool IdleGuardEnabled { get; set; } = true;
+
+    /// <summary>定时触发时自动清理上次残留的工具进程（默认开）。</summary>
+    public bool AutoKillResidual { get; set; } = true;
+
+    /// <summary>度假模式：所有定时触发暂停（手动不受限）。</summary>
+    public bool VacationMode { get; set; } = false;
+
+    /// <summary>首启向导是否已完成（或跳过）。</summary>
+    public bool FirstRunDone { get; set; } = false;
+
+    /// <summary>最近一次守护告警时间（底部盾牌转黄用），空=从未告警。</summary>
+    public DateTime? ShieldAlertAt { get; set; }
 }
 
 /// <summary>
-/// BetterGI 启停 / 进程管理 / 设置读写（SPBGI）。
-/// 铁律：所有 BGI/原神进程的检测与终止必须按 SessionId 过滤，防止 A 会话误杀 B 会话的 BGI。
+/// 应用级状态：设置读写、日志广播、运行状态轮询。
+/// 只保留"数据与总线"职责，启停工具交给 <see cref="QueueService"/> / <see cref="ToolRunner"/>。
 /// </summary>
-public static class BgiService
+public static class AppState
 {
+    /// <summary>当前设置（启动时从 settings.json 读取）。</summary>
     public static AppSettings Settings { get; private set; } = new AppSettings();
 
-    /// <summary>运行状态变化（running）</summary>
+    /// <summary>运行状态变化（有队列在跑）。</summary>
     public static event Action<bool>? OnStatusChanged;
 
-    /// <summary>最近事件广播</summary>
+    /// <summary>最近事件广播（界面日志条/日志面板）。</summary>
     public static event Action<string>? OnLog;
 
     private static readonly JsonSerializerOptions WriteOpt = new()
@@ -134,15 +179,19 @@ public static class BgiService
     /// <summary>settings.json 路径：exe 旁 config\settings.json</summary>
     public static string SettingsPath => Path.Combine(AppContext.BaseDirectory, "config", "settings.json");
 
-    /// <summary>初始化：LoadSettings + 2 秒轮询（幂等）</summary>
+    /// <summary>初始化：读设置 → 载入工具档案 → 补齐队列默认值 → 2 秒状态轮询（幂等）。</summary>
     public static void Init()
     {
         LoadSettings();
-        // v1.3：加载/迁移工具档案（内部会读写 settings.json，失败时保持原文件不动）
         ProfileRegistry.Initialize();
-        var bgi = ProfileRegistry.BetterGi;
-        if (string.IsNullOrWhiteSpace(Settings.BgiPath) && !string.IsNullOrWhiteSpace(bgi.ExecutablePath))
-            Settings.BgiPath = bgi.ExecutablePath;
+        EnsureQueueDefaults();
+
+        if (!string.IsNullOrWhiteSpace(Settings.BgiPath))
+        {
+            var bgi = ProfileRegistry.BetterGi;
+            if (string.IsNullOrWhiteSpace(bgi.ExecutablePath)) bgi.ExecutablePath = Settings.BgiPath;
+        }
+
         if (_initialized) return;
         _initialized = true;
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -150,38 +199,30 @@ public static class BgiService
         _timer.Start();
     }
 
-    /// <summary>
-    /// 本会话的 BetterGI 进程（SessionId 过滤，取不到 SessionId 的跳过）
-    /// </summary>
-    public static Process[] GetSessionBgi() => ToolRunner.GetSessionProcesses(ProfileRegistry.BetterGi);
-
-    /// <summary>本会话的原神进程（YuanShen.exe / GenshinImpact.exe，SessionId 过滤）</summary>
-    public static Process[] GetSessionGame()
+    /// <summary>队列为空时给出默认三项（仅 BetterGI 勾选），避免首屏空白。</summary>
+    public static void EnsureQueueDefaults()
     {
-        int me = Process.GetCurrentProcess().SessionId;
-        var list = new List<Process>();
-        foreach (var name in new[] { "YuanShen", "GenshinImpact" })
+        Settings.Queue ??= new List<QueueEntry>();
+        if (Settings.Queue.Count > 0) return;
+
+        foreach (var p in ProfileRegistry.All)
         {
-            foreach (var p in Process.GetProcessesByName(name))
+            Settings.Queue.Add(new QueueEntry
             {
-                try
-                {
-                    if (p.SessionId == me) list.Add(p);
-                    else p.Dispose();
-                }
-                catch
-                {
-                    try { p.Dispose(); } catch { }
-                }
-            }
+                ToolId = p.ToolId,
+                Enabled = string.Equals(p.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase),
+            });
         }
-        return list.ToArray();
     }
 
-    /// <summary>BetterGI 是否正在运行（基于本会话）</summary>
-    public static bool IsRunning => GetSessionBgi().Length > 0;
+    /// <summary>队列中启用且顺序有效的条目（按列表顺序）。</summary>
+    public static List<QueueEntry> EnabledQueue()
+        => (Settings.Queue ?? new List<QueueEntry>()).Where(e => e.Enabled).ToList();
 
-    /// <summary>仅在状态变化时广播</summary>
+    /// <summary>是否有队列在跑（托盘/界面状态用）。</summary>
+    public static bool IsRunning => QueueService.IsRunning;
+
+    /// <summary>仅状态变化时广播。</summary>
     public static void RefreshStatus()
     {
         bool running;
@@ -192,81 +233,7 @@ public static class BgiService
         RaiseStatus(running);
     }
 
-    /// <summary>
-    /// 启动核心：先杀旧进程（Task.Run 包裹防冻结）→ runas 启动 → 广播与记日志
-    /// </summary>
-    public static async Task<(bool ok, string err)> StartCore(string args, string source)
-    {
-        var profile = ProfileRegistry.BetterGi;
-        string exe = !string.IsNullOrWhiteSpace(profile.ExecutablePath) ? profile.ExecutablePath : Settings.BgiPath;
-        if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
-            return (false, "BetterGI.exe 路径无效，请先在主界面填写");
-        profile.ExecutablePath = exe;
-
-        // 对已在运行的 BGI 实例传参无效 → 先杀后启；杀进程必须 Task.Run（WaitForExit 最长 3 秒，同步会冻结界面）
-        if (IsRunning)
-        {
-            await Task.Run(() => KillAll());
-            await Task.Delay(800);
-        }
-
-        try
-        {
-            using var p = ToolRunner.StartProcess(profile, args);
-            RaiseLog($"✓ 已启动一条龙（来源：{source}）参数：{args}");
-            LogService.LogEvent($"BGI：启动一条龙（来源：{source}）参数：{args}");
-            await Task.Delay(1200);
-            RefreshStatus();
-            return (true, "");
-        }
-        catch (Exception ex)
-        {
-            RaiseLog($"✗ 启动失败：{ex.Message}");
-            LogService.LogEvent($"BGI：启动失败：{ex.Message}");
-            RefreshStatus();
-            return (false, ex.Message);
-        }
-    }
-
-    /// <summary>启动一条龙：无配置名用 startOneDragon，有配置名用 startOneDragon "配置名"</summary>
-    public static Task<(bool ok, string err)> StartDragonAsync(string source)
-    {
-        string args = ToolRunner.BuildArguments(ProfileRegistry.BetterGi, Settings.DragonConfigName);
-        return StartCore(args, source);
-    }
-
-    /// <summary>调度器模式跑多个配置组："继续跑未完成"的实现：--startGroups "组A" "组B"</summary>
-    public static Task<(bool ok, string err)> StartGroupsAsync(string[] groups, string source)
-    {
-        string joined = string.Join(" ", groups.Select(g => "\"" + g + "\""));
-        return StartCore("--startGroups " + joined, source);
-    }
-
-    /// <summary>
-    /// 统一启动入口：勾选了配置组 → 按组执行（--startGroups）；
-    /// 否则 → startOneDragon [配置名]（留空用 BGI 当前选中）
-    /// </summary>
-    public static Task<(bool ok, string err)> StartDragonOrGroupsAsync(string source)
-    {
-        var selected = Settings.SelectedGroups ?? Array.Empty<string>();
-        if (selected.Length > 0) return StartGroupsAsync(selected, source);
-        return StartDragonAsync(source);
-    }
-
-    /// <summary>停止：Task.Run(KillAll) + Delay 300 + 刷新 + 广播/日志</summary>
-    public static async Task StopAsync(string source)
-    {
-        await Task.Run(() => KillAll());
-        await Task.Delay(300);
-        RefreshStatus();
-        RaiseLog($"■ 已停止 BetterGI（来源：{source}）");
-        LogService.LogEvent($"BGI：停止（来源：{source}）");
-    }
-
-    /// <summary>只杀本会话 BGI（Kill + WaitForExit(3000) + Dispose）</summary>
-    public static void KillAll() => ToolRunner.KillAll(ProfileRegistry.BetterGi);
-
-    /// <summary>读取 settings.json，损坏回退默认值</summary>
+    /// <summary>读取 settings.json，损坏回退默认值。</summary>
     public static void LoadSettings()
     {
         try
@@ -288,14 +255,15 @@ public static class BgiService
         }
     }
 
-    /// <summary>保存 settings.json（中文不转义、缩进、写前建目录）</summary>
+    /// <summary>保存 settings.json（中文不转义、缩进、写前建目录）。</summary>
     public static void SaveSettings()
     {
         try
         {
             string dir = Path.GetDirectoryName(SettingsPath)!;
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-            // v1.3：把界面上的 BGI 路径/配置名/勾选组反写进 profile，保持单一事实来源
+
+            // 把界面上的 BGI 路径/配置名/勾选组反写进 profile，保持单一事实来源
             try
             {
                 if (ProfileRegistry.All.Count > 0)
@@ -309,6 +277,7 @@ public static class BgiService
                 }
             }
             catch { }
+
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Settings, WriteOpt));
         }
         catch (Exception ex)
@@ -317,7 +286,7 @@ public static class BgiService
         }
     }
 
-    /// <summary>对外广播一条日志（供定时任务等非 BgiService 内部场景使用）</summary>
+    /// <summary>对外广播一条日志（界面事件区/托盘提示）。</summary>
     public static void PublishLog(string msg) => RaiseLog(msg);
 
     private static void RaiseStatus(bool running)

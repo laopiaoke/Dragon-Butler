@@ -212,7 +212,7 @@ public static class Theme
     /// <summary>按设置项应用主题：Custom 走自定义通道，其余走预设三态</summary>
     public static void ApplyFromSettings()
     {
-        var s = BgiService.Settings;
+        var s = AppState.Settings;
         if (string.Equals(s.Theme, "Custom", StringComparison.OrdinalIgnoreCase))
             ApplyCustom(s.CustomBgKind, s.CustomBgColor, s.CustomBgImage, s.CustomOverlay, s.CustomScheme);
         else

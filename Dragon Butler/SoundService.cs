@@ -100,7 +100,7 @@ public static class SoundService
     {
         try
         {
-            if (!BgiService.Settings.SoundEnabled) return;
+            if (!AppState.Settings.SoundEnabled) return;
 
             // 兼容旧调用名
             if (string.Equals(name, "tap.wav", StringComparison.OrdinalIgnoreCase) ||

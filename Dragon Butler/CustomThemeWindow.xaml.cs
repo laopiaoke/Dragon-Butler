@@ -42,7 +42,7 @@ public partial class CustomThemeWindow : Window
     {
         InitializeComponent();
 
-        var s = BgiService.Settings;
+        var s = AppState.Settings;
         _origTheme = string.IsNullOrWhiteSpace(s.Theme) ? "System" : s.Theme;
         _kind = string.Equals(s.CustomBgKind, "Image", StringComparison.OrdinalIgnoreCase) ? "Image" : "Color";
         _color = string.IsNullOrWhiteSpace(s.CustomBgColor) ? "#FF1B2430" : s.CustomBgColor;
@@ -216,14 +216,14 @@ public partial class CustomThemeWindow : Window
 
     private void BtnApply_Click(object sender, RoutedEventArgs e)
     {
-        var s = BgiService.Settings;
+        var s = AppState.Settings;
         s.Theme = "Custom";
         s.CustomBgKind = _kind;
         s.CustomBgColor = _color;
         s.CustomBgImage = _image;
         s.CustomOverlay = _overlay;
         s.CustomScheme = _scheme;
-        BgiService.SaveSettings();
+        AppState.SaveSettings();
         Theme.ApplyCustom(_kind, _color, _image, _overlay, _scheme);
         _applied = true;
         DialogResult = true;
@@ -231,14 +231,14 @@ public partial class CustomThemeWindow : Window
 
     private void BtnReset_Click(object sender, RoutedEventArgs e)
     {
-        var s = BgiService.Settings;
+        var s = AppState.Settings;
         s.Theme = "System";
         s.CustomBgKind = "Color";
         s.CustomBgColor = "#FF1B2430";
         s.CustomBgImage = "";
         s.CustomOverlay = 55;
         s.CustomScheme = "Auto";
-        BgiService.SaveSettings();
+        AppState.SaveSettings();
         Theme.Set("System");
         _applied = true;
         DialogResult = true;
@@ -254,7 +254,7 @@ public partial class CustomThemeWindow : Window
         if (_applied) return;
         try
         {
-            var s = BgiService.Settings;
+            var s = AppState.Settings;
             s.Theme = _origTheme;
             Theme.ApplyFromSettings();
         }

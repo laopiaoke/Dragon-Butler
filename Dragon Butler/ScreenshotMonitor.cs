@@ -89,7 +89,7 @@ public sealed class ScreenshotMonitor
     {
         try
         {
-            if (!BgiService.Settings.ScreenshotCheckEnabled) return;
+            if (!AppState.Settings.ScreenshotCheckEnabled) return;
             if (!dragonRunning) return;
             if ((DateTime.Now - _lastShot).TotalMinutes < 2) return;
             _lastShot = DateTime.Now;
@@ -134,7 +134,8 @@ public sealed class ScreenshotMonitor
     private static (byte[]? buf, int w, int h) Capture()
     {
         IntPtr hwnd = IntPtr.Zero;
-        foreach (var p in BgiService.GetSessionGame())
+        foreach (var p in ProfileRegistry.BetterGi.GameProcessNames
+                     .SelectMany(ProcessTools.GetSessionProcesses))
         {
             try
             {

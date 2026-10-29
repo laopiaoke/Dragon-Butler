@@ -37,7 +37,7 @@ public static class BgiDiscovery
         {
             try
             {
-                string path = BgiService.Settings.BgiPath;
+                string path = AppState.Settings.BgiPath;
                 if (string.IsNullOrWhiteSpace(path)) return "";
                 string? dir = Path.GetDirectoryName(path);
                 return string.IsNullOrWhiteSpace(dir) ? "" : dir!;

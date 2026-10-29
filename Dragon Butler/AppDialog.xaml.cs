@@ -190,7 +190,7 @@ public partial class AppDialog : Window
             var res = Application.Current?.Resources;
             if (res == null) return;
             if (res.Contains("CardBgBrush") && res.Contains("BrandBrush")) return;
-            Theme.Set(BgiService.Settings.Theme);
+            Theme.Set(AppState.Settings.Theme);
         }
         catch { }
     }

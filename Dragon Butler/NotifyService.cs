@@ -101,7 +101,7 @@ Write-Output 'TOAST_OK'
     {
         try
         {
-            var ch = ParseChannel(BgiService.Settings.NotifyMode);
+            var ch = ParseChannel(AppState.Settings.NotifyMode);
 
             if (ch == PushChannel.Toast)
             {
@@ -115,7 +115,7 @@ Write-Output 'TOAST_OK'
             }
 
             // 远程渠道：默认只推异常可以少打扰；关闭开关则完成/启动也推
-            if (BgiService.Settings.NotifyOnlyImportant && level == NotifyLevel.Info) return;
+            if (AppState.Settings.NotifyOnlyImportant && level == NotifyLevel.Info) return;
             _ = SendAndLogAsync(ch, level, title, message);
         }
         catch { }
@@ -127,7 +127,7 @@ Write-Output 'TOAST_OK'
         if (!ok)
         {
             LogService.LogEvent($"推送失败（{NameOf(ch)}）：{err}");
-            try { BgiService.PublishLog($"✗ {NameOf(ch)}推送失败：{err}"); } catch { }
+            try { AppState.PublishLog($"✗ {NameOf(ch)}推送失败：{err}"); } catch { }
         }
         else
         {
@@ -165,7 +165,7 @@ Write-Output 'TOAST_OK'
     /// <summary>发送测试消息（默认当前渠道，也可指定渠道）</summary>
     public static async Task<(bool ok, string err)> SendTestAsync(PushChannel? channel = null)
     {
-        var ch = channel ?? ParseChannel(BgiService.Settings.NotifyMode);
+        var ch = channel ?? ParseChannel(AppState.Settings.NotifyMode);
         string title = "一条龙管家";
         string body = $"测试消息：{NameOf(ch)} 通道连接成功（{DateTime.Now:HH:mm:ss}）";
 
@@ -187,7 +187,7 @@ Write-Output 'TOAST_OK'
     {
         try
         {
-            var s = BgiService.Settings;
+            var s = AppState.Settings;
             string text = string.IsNullOrWhiteSpace(title) ? message : title + "\n" + message;
             switch (ch)
             {
@@ -414,7 +414,7 @@ Write-Output 'TOAST_OK'
     {
         try
         {
-            var s = BgiService.Settings;
+            var s = AppState.Settings;
             if (string.IsNullOrWhiteSpace(s.NotifyEmailHost)) return (false, "尚未填写 SMTP 服务器");
             if (string.IsNullOrWhiteSpace(s.NotifyEmailTo)) return (false, "尚未填写收件人邮箱");
             if (string.IsNullOrWhiteSpace(s.NotifyEmailUser)) return (false, "尚未填写 SMTP 用户名");

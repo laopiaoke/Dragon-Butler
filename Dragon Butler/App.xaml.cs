@@ -55,22 +55,30 @@ public partial class App : Application
         try { SoundService.EnsureSounds(); }
         catch (Exception ex) { LogService.LogEvent("音效初始化失败：" + ex.Message); }
 
-        BgiService.Init();
-        BgiService.OnStatusChanged += _ => UpdateTrayMenu(); // 托盘菜单跟随运行状态
+        AppState.Init();
+        AppState.OnStatusChanged += _ => UpdateTrayMenu(); // 托盘菜单跟随运行状态
         Theme.ApplyFromSettings();
+
+        // 全库唯一 Webhook 监听 + 组归档接驳（与完成判定解耦）
+        try
+        {
+            WebhookHub.Start(AppState.Settings.BgiWebhookPort);
+            GroupArchiveWatcher.Start();
+        }
+        catch (Exception ex) { LogService.LogEvent("事件总线启动失败：" + ex.Message); }
 
         _win = new MainWindow();
         _win.Show();
 
         BuildTray();
 
-        if (BgiService.Settings.SentinelEnabled) SentinelService.Start();
+        if (AppState.Settings.SentinelEnabled) SentinelService.Start();
 
         // 软件启动后自动跑一条龙
-        if (BgiService.Settings.AutoRunOnLaunch)
+        if (AppState.Settings.AutoRunOnLaunch)
         {
-            LogService.LogEvent("开机选项：软件启动后自动跑一条龙");
-            _ = BgiService.StartDragonOrGroupsAsync("启动自动");
+            LogService.LogEvent("开机选项：软件启动后自动开跑队列");
+            _ = QueueService.StartAsync(QueueTrigger.Manual);
         }
     }
 
@@ -102,10 +110,10 @@ public partial class App : Application
                 SoundService.Play("click.wav");
                 ShowMainWindow();
             });
-            _miStart = new wf.ToolStripMenuItem("⚡ 立刻启动一条龙", null, (_, _) =>
+            _miStart = new wf.ToolStripMenuItem("⚡ 一键开跑", null, (_, _) =>
             {
                 SoundService.Play("click.wav");   // 与主界面统一：托盘菜单也是普通点击音
-                _ = BgiService.StartDragonOrGroupsAsync("托盘");
+                _ = QueueService.StartAsync(QueueTrigger.Manual);
             });
             _miExit = new wf.ToolStripMenuItem("退出", null, (_, _) =>
             {
@@ -137,9 +145,9 @@ public partial class App : Application
         try
         {
             if (_miStart == null) return;
-            bool running = BgiService.IsRunning;
+            bool running = QueueService.IsRunning;
             _miStart.Enabled = !running;
-            _miStart.Text = running ? "一条龙运行中…（请先停止）" : "⚡ 立刻启动一条龙";
+            _miStart.Text = running ? "队列运行中…（请先在主界面停止）" : "⚡ 一键开跑";
         }
         catch { }
     }
@@ -205,6 +213,8 @@ public partial class App : Application
         try
         {
             SentinelService.Stop();
+            GroupArchiveWatcher.Stop();
+            WebhookHub.Stop();
             CrashGuard.Shutdown();
             if (_tray != null)
             {
