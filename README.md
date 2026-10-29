@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/Windows-10%2F11%20x64-0078D4">
   <img alt="dotnet" src="https://img.shields.io/badge/.NET-8.0-512BD4">
-  <img alt="version" src="https://img.shields.io/badge/version-v1.2-2EA043">
+  <img alt="version" src="https://img.shields.io/badge/version-v1.3-2EA043">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-6E7681">
 </p>
 
@@ -28,6 +28,11 @@
 
 ## 它做什么
 
+- **睡前排队**：勾选 BetterGI / 三月七助手 / ok-ww，点「一键开跑」，按顺序依次执行，跑完给你一条汇总消息。
+- **跑完动作**：仅通知 / 自动睡眠 / 自动关机（关机有 60 秒倒计时，可取消）。
+- **定时 + 防打扰**：到点自动开始；发现你还在用电脑就先等一等，空闲后再跑。
+- **自动寻找路径**：点一下自动定位工具位置，多数情况不用手填。
+
 | | |
 | --- | --- |
 | **一键启停** | 点一下启动 BGI 并跑一条龙，再点一下停止。按钮会自己变状态：灰（没配好）→ 绿（可以跑）→ 红（运行中）。 |
@@ -38,6 +43,10 @@
 | **可换外观** | 深色 / 浅色 / 跟随系统，也可以用调色板或自己的图片当背景。 |
 
 ## 界面
+
+> v1.3 改为三层布局：队列卡（Hero）→ 工具卡（默认折叠）→ 高级设置（默认折叠）；守护收进底部盾牌。
+
+<img src="docs/main_v13.png" width="820" alt="v1.3 主界面">
 
 主界面一屏装完，从上到下四块，各管一件事：
 
@@ -103,12 +112,12 @@
 
 | | runtime-dependent（需 .NET 8 运行时） | portable（免安装便携版） |
 | --- | --- | --- |
-| 压缩包 | `Dragon-Butler-v1.2-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.2-win-x64-portable.zip` |
+| 压缩包 | `Dragon-Butler-v1.3-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.3-win-x64-portable.zip` |
 | 大小 | 约 0.22 MB | 约 62.7 MB |
 | 要求 | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0) | 无，自带运行时 |
 | 适用 | 机器上已有 .NET 8，想下最小包 | 不确定有没有 .NET 8、要换电脑或放 U 盘 |
 
-> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.2` 是当前版本（与日志里 `启动：Dragon Butler v1.2.0` 一致），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
+> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.3` 是当前版本（与日志里 `启动：Dragon Butler v1.3.0` 一致），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
 > 解压出来的目录名固定为 `Dragon-Butler-win-x64-runtime-dependent\` 或 `Dragon-Butler-win-x64-portable\`，**不带版本**——升级时直接覆盖原目录，`config\` 里的设置不会丢。
 
 > **两个版本都不用"安装"**：没有安装向导、不写注册表、不注册服务，解压后双击 exe 就能用，删掉文件夹就是卸载。
@@ -179,7 +188,7 @@ Dragon Butler.exe
 - **次版本 +1**（v1.1 → v1.2）：每次可交付的改动，包括新功能、体验优化、修 bug。
 - **主版本 +1**（v1.x → v2.0）：只在核心能力或大改动时进位，比如换了运行方式、加了整套新模块。
 - 不设第三位（没有 v1.1.1）——单机桌面工具不做"只修 bug 的补丁包"，修复直接进下一个次版本。
-- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；现在在 `v1.2`。
+- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；现在在 `v1.3`。
 
 完整历史见 [BUILD_REPORT.md](BUILD_REPORT.md)。
 
