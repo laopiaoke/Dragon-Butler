@@ -145,6 +145,9 @@ public static class ProfileRegistry
             LogService.LogEvent("读取 tools/*.json 失败：" + ex.Message);
         }
 
+        // v1.3.1：老配置的 BGI 副信号只有 GameProcessExit/Webhook，补上 ProcessExit0
+        UpgradeBgiSecondaries();
+
         if (migrated)
         {
             // 迁移成功后补一份 tools/bettergi.json，方便用户直接查看/修改
@@ -209,6 +212,53 @@ public static class ProfileRegistry
             LogService.LogEvent("配置迁移失败：" + ex.Message);
             MigrationFailed?.Invoke("配置迁移失败，请联系开发者（详见日志）");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// v1.3.1 副信号升级：早期 profile 的 BGI 副信号只有"游戏退出 + Webhook"，
+    /// BGI 跑完不关游戏又没配 Webhook 时会一直等到宽限 → Halted。
+    /// 这里补一条"进程退出"（退出码 0 才算），并标记 secondarySchema=2，避免每次启动重复处理。
+    /// </summary>
+    private static void UpgradeBgiSecondaries()
+    {
+        try
+        {
+            var bgi = BetterGi;
+            bool flagged = bgi.CustomData.TryGetValue("secondarySchema", out string? schema)
+                           && string.Equals(schema, "2", StringComparison.Ordinal);
+            bool hasExit = bgi.SecondarySignals.Contains(CompletionSignalKind.ProcessExit0);
+            if (flagged && hasExit) return;
+
+            if (!hasExit)
+            {
+                bgi.SecondarySignals = bgi.SecondarySignals
+                    .Append(CompletionSignalKind.ProcessExit0)
+                    .ToArray();
+            }
+            bgi.CustomData["secondarySchema"] = "2";
+            LogService.LogEvent("已升级 BGI 副信号：追加“进程退出”互证（避免跑完不关游戏时悬置）");
+
+            // 落到 tools/bettergi.json，否则下次启动又会被旧文件覆盖
+            try
+            {
+                Directory.CreateDirectory(ToolsDir);
+                File.WriteAllText(Path.Combine(ToolsDir, "bettergi.json"),
+                    JsonSerializer.Serialize(bgi, WriteOpt));
+            }
+            catch (Exception ex) { LogService.LogEvent("写入 tools/bettergi.json 失败：" + ex.Message); }
+
+            try
+            {
+                AppState.Settings.Tools ??= new Dictionary<string, ToolProfile>(StringComparer.OrdinalIgnoreCase);
+                AppState.Settings.Tools["bettergi"] = bgi.Clone();
+                AppState.SaveSettings();
+            }
+            catch (Exception ex) { LogService.LogEvent("保存副信号升级失败：" + ex.Message); }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("升级 BGI 副信号失败：" + ex.Message);
         }
     }
 

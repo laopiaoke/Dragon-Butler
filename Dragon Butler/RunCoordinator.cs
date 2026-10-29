@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -144,6 +144,15 @@ public sealed class RunCoordinator : IDisposable
         {
             if (signal.Kind == _profile.PrimarySignal && signal.Kind != CompletionSignalKind.ProcessExit0)
                 return; // 主信号重复上报，忽略
+
+            // 进程退出作为互证时，只有退出码 0 才算"完成"；非 0 可能是崩溃，
+            // 继续等其它副信号，等不到就走宽限 → Halted（宁等勿进）
+            if (signal.Kind == CompletionSignalKind.ProcessExit0 && (signal.ExitCode ?? -1) != 0)
+            {
+                LogService.LogEvent($"[run:{_runId}] {_profile.ToolId} 忽略非 0 退出作为互证（exit={signal.ExitCode}）");
+                return;
+            }
+
             Move(ToolRunState.Done, "副信号 " + signal.Kind + " 互证完成");
             return;
         }

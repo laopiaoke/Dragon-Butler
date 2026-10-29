@@ -105,9 +105,15 @@ public static class ToolProfileDefaults
             LaunchArguments = "startOneDragon \"{组名}\"",
             ManagedProcessName = "BetterGI",
             GameProcessNames = new[] { "YuanShen", "GenshinImpact" },
-            // 勘误 F：BGI 主信号改为日志锚点（Webhook 仅作互证副信号，未配置也不影响完成判定）
+            // 勘误 F：BGI 主信号改为日志锚点；副信号三选一互证即可
+            // v1.3.1：追加“进程退出”——BGI 跑完不关游戏且没配 Webhook 时，靠它避免悬置
             PrimarySignal = CompletionSignalKind.LogPattern,
-            SecondarySignals = new[] { CompletionSignalKind.GameProcessExit, CompletionSignalKind.Webhook },
+            SecondarySignals = new[]
+            {
+                CompletionSignalKind.GameProcessExit,
+                CompletionSignalKind.Webhook,
+                CompletionSignalKind.ProcessExit0,
+            },
             // 主锚点（真实日志已验证）：严禁裸匹配"任务结束"，BGI 中途会多次打印
             LogCompletionPattern = "一条龙和配置组任务结束",
             MaxDurationMinutes = 180,
@@ -120,6 +126,7 @@ public static class ToolProfileDefaults
                 ["selectedGroups"] = "",
                 ["candidatePaths"] = "",   // 待人工核对：未确证官方默认安装位置，留空不臆造
                 ["extraLogPatterns"] = "", // 备用锚点（| 分隔），默认为空
+                ["secondarySchema"] = "2", // 副信号结构版本（v1.3.1 起为 2：含 ProcessExit0）
             },
         },
         new ToolProfile
