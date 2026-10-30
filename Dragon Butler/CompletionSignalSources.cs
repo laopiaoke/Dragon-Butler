@@ -60,6 +60,55 @@ public sealed class ProcessExitSignalSource : ICompletionSignalSource
     }
 }
 
+/// <summary>
+/// 到达时长信号源：自定义 tool 的“到达时长”完成方式。
+/// 时长从 <c>Profile.CustomData["durationMinutes"]</c> 读取；到点抛一次主信号。
+/// </summary>
+public sealed class DurationSignalSource : ICompletionSignalSource
+{
+    /// <inheritdoc />
+    public string SourceId => "duration";
+
+    /// <inheritdoc />
+    public event Action<CompletionSignal>? SignalRaised;
+
+    private Timer? _timer;
+
+    /// <summary>测试用：覆盖到达时长（null=按 profile 的分钟数）。</summary>
+    public static TimeSpan? DurationOverride { get; set; }
+
+    /// <inheritdoc />
+    public void Start(ToolRunContext ctx)
+    {
+        int minutes = 0;
+        if (ctx.Profile.CustomData.TryGetValue("durationMinutes", out string? raw))
+            int.TryParse(raw, out minutes);
+        if (minutes <= 0) return;
+
+        TimeSpan delay = DurationOverride ?? TimeSpan.FromMinutes(minutes);
+        LogService.LogEvent($"到达时长信号源：{ctx.Profile.DisplayName} 将在 {delay.TotalSeconds:F0} 秒后判定完成");
+        _timer = new Timer(_ => Raise(new CompletionSignal
+        {
+            SourceId = SourceId,
+            Kind = CompletionSignalKind.Duration,
+            Confidence = SignalConfidence.Medium,
+            Detail = $"已到达 {minutes} 分钟",
+        }), null, delay, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <inheritdoc />
+    public void Stop()
+    {
+        try { _timer?.Dispose(); } catch { }
+        _timer = null;
+    }
+
+    private void Raise(CompletionSignal s)
+    {
+        try { SignalRaised?.Invoke(s); } catch { }
+    }
+}
+
 /// <summary>游戏进程退出信号源：轮询本会话的游戏进程，从"有"变"无"时抛信号（副信号）。</summary>
 public sealed class GameProcessExitSignalSource : ICompletionSignalSource
 {

@@ -56,6 +56,7 @@ public partial class App : Application
         catch (Exception ex) { LogService.LogEvent("音效初始化失败：" + ex.Message); }
 
         AppState.Init();
+        KeepAwakeService.CompensateOnStartup();
         AppState.OnStatusChanged += _ => UpdateTrayMenu(); // 托盘菜单跟随运行状态
         Theme.ApplyFromSettings();
 
@@ -212,6 +213,7 @@ public partial class App : Application
     {
         try
         {
+            KeepAwakeService.Release();
             SentinelService.Stop();
             GroupArchiveWatcher.Stop();
             WebhookHub.Stop();

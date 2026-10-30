@@ -1015,7 +1015,11 @@
                                     <Border DockPanel.Dock="Left" Width="22" Height="22" CornerRadius="7"
                                             Background="{DynamicResource InsetBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                             BorderThickness="1">
-                                        <TextBlock Text="B" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Grid>
+                                            <TextBlock x:Name="IconText_bettergi" Text="B" FontSize="11"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Image x:Name="IconImage_bettergi" Stretch="Uniform" Margin="2" Visibility="Collapsed"/>
+                                        </Grid>
                                     </Border>
                                     <TextBlock DockPanel.Dock="Left" Text="BetterGI" FontSize="13.5" FontWeight="SemiBold"
                                                Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
@@ -1070,7 +1074,11 @@
                                     <Border DockPanel.Dock="Left" Width="22" Height="22" CornerRadius="7"
                                             Background="{DynamicResource InsetBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                             BorderThickness="1">
-                                        <TextBlock Text="七" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Grid>
+                                            <TextBlock x:Name="IconText_march7th" Text="七" FontSize="11"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Image x:Name="IconImage_march7th" Stretch="Uniform" Margin="2" Visibility="Collapsed"/>
+                                        </Grid>
                                     </Border>
                                     <TextBlock DockPanel.Dock="Left" Text="三月七助手" FontSize="13.5" FontWeight="SemiBold"
                                                Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
@@ -1103,7 +1111,7 @@
                     </Border>
                     <Border Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
-                            <Button x:Name="BtnFold_okww" Style="{StaticResource FoldHeader}" Click="ToolHeader_Click" Tag="okww">
+                            <Button x:Name="BtnFold_okww" Style="{StaticResource FoldHeader}" Click="ToolHeader_Click" Tag="ok-ww">
                                 <DockPanel LastChildFill="False">
                                     <Path DockPanel.Dock="Right" x:Name="Chev_okww" Data="M4 6l4 4 4-4"
                                           Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
@@ -1111,7 +1119,11 @@
                                     <Border DockPanel.Dock="Left" Width="22" Height="22" CornerRadius="7"
                                             Background="{DynamicResource InsetBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                             BorderThickness="1">
-                                        <TextBlock Text="W" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Grid>
+                                            <TextBlock x:Name="IconText_okww" Text="W" FontSize="11"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Image x:Name="IconImage_okww" Stretch="Uniform" Margin="2" Visibility="Collapsed"/>
+                                        </Grid>
                                     </Border>
                                     <TextBlock DockPanel.Dock="Left" Text="ok-ww" FontSize="13.5" FontWeight="SemiBold"
                                                Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
@@ -1130,17 +1142,33 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBox x:Name="TbPath_okww" Style="{StaticResource InputBox}" IsReadOnly="True" Height="32"/>
                                     <Button Grid.Column="1" Content="浏览" Style="{StaticResource MiniAction}" Margin="8,0,0,0"
-                                            Click="ToolBrowse_Click" Tag="okww"/>
+                                            Click="ToolBrowse_Click" Tag="ok-ww"/>
                                     <Button Grid.Column="2" Content="自动寻找" Style="{StaticResource MiniAction}" Margin="6,0,0,0"
-                                            Click="ToolAutoFind_Click" Tag="okww"/>
+                                            Click="ToolAutoFind_Click" Tag="ok-ww"/>
                                     <Button Grid.Column="3" Content="测试启动" Style="{StaticResource MiniAction}" Margin="6,0,0,0"
-                                            Click="ToolTest_Click" Tag="okww"/>
+                                            Click="ToolTest_Click" Tag="ok-ww"/>
                                 </Grid>
                                 <TextBlock x:Name="TbFindHint_okww" FontSize="10.5" Margin="0,6,0,0" TextWrapping="Wrap"
                                            Foreground="{DynamicResource TextTertiaryBrush}"/>
                                 
                             </StackPanel>
                         </StackPanel>
+                    </Border>
+
+                    <!-- 自定义工具（v1.4）：运行时生成卡片 -->
+                    <StackPanel x:Name="CustomToolsHost"/>
+
+                    <Border Style="{StaticResource Card}" Margin="0,10,0,0" Padding="16,12">
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Text="自定义工具" FontSize="13.5" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                <TextBlock Text="任意 exe 都能接入：填路径、进程名和完成方式即可。" FontSize="10.5"
+                                           Margin="0,4,0,0" Foreground="{DynamicResource TextTertiaryBrush}"/>
+                            </StackPanel>
+                            <Button Content="＋ 添加" Style="{StaticResource MiniAction}" HorizontalAlignment="Right"
+                                    VerticalAlignment="Center" Click="BtnAddCustomTool_Click"/>
+                        </Grid>
                     </Border>
                     </StackPanel>
 
@@ -1164,6 +1192,7 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
@@ -1212,7 +1241,48 @@
                                     </ComboBox>
                                 </Grid>
 
-                                <StackPanel Grid.Row="4" Grid.ColumnSpan="2" Margin="0,10,0,0">
+                                <Grid Grid.Row="4" Grid.Column="0" Margin="0,10,14,6">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="挂机护航" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock Text="队列运行时阻止系统睡眠、更新重启与屏保" FontSize="10"
+                                                   Margin="0,3,10,0" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <ToggleButton x:Name="TgKeepAwake" Style="{StaticResource SwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgKeepAwake_Click"/>
+                                </Grid>
+                                <Grid Grid.Row="4" Grid.Column="1" Margin="0,10,0,6">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="夜间息屏" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock Text="运行指定分钟数后关闭显示器，系统保持唤醒" FontSize="10"
+                                                   Margin="0,3,10,0" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <TextBox x:Name="TbNightMinutes" Style="{StaticResource InputBox}" Width="64" Height="30"
+                                                 Padding="4,0" FontSize="12" TextAlignment="Center"
+                                                 LostFocus="TbNightMinutes_LostFocus"/>
+                                        <TextBlock Text="分" FontSize="10.5" Margin="4,0,8,0" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        <ToggleButton x:Name="TgNightScreen" Style="{StaticResource SwitchStyle}"
+                                                      VerticalAlignment="Center" Click="TgNightScreen_Click"/>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid Grid.Row="5" Grid.Column="0" Margin="0,6,14,6">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="自动终止疑似挂起" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock Text="默认只暂停队列等你处理；打开后结束进程并按失败策略继续" FontSize="10"
+                                                   Margin="0,3,10,0" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <ToggleButton x:Name="TgStallAutoKill" Style="{StaticResource SwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStallAutoKill_Click"/>
+                                </Grid>
+                                <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,6,0,6" VerticalAlignment="Center"
+                                           FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextTertiaryBrush}"
+                                           Text="挂起判定：进程存活，但 CPU 低于 5% 且日志不增长持续 3 分钟。"/>
+
+                                <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Margin="0,10,0,0">
                                     <TextBlock Text="事件推送（可选）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBlock Margin="0,4,0,0" FontSize="10.5" TextWrapping="Wrap"
                                                Foreground="{DynamicResource TextTertiaryBrush}"

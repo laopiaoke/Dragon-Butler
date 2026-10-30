@@ -19,6 +19,9 @@ public enum CompletionSignalKind
 
     /// <summary>日志中出现约定的完成标记。</summary>
     LogPattern = 3,
+
+    /// <summary>到达设定时长即视为完成（自定义工具的“到达时长”模式）。</summary>
+    Duration = 4,
 }
 
 /// <summary>

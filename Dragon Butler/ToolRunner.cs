@@ -94,6 +94,7 @@ public static class ToolRunner
         CompletionSignalKind.Webhook => new WebhookSignalSource(),
         CompletionSignalKind.GameProcessExit => new GameProcessExitSignalSource(),
         CompletionSignalKind.LogPattern => new LogPatternSignalSource(),
+        CompletionSignalKind.Duration => new DurationSignalSource(),
         _ => new ProcessExitSignalSource(),
     };
 

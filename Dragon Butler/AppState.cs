@@ -147,6 +147,22 @@ public class AppSettings
     /// <summary>首启向导是否已完成（或跳过）。</summary>
     public bool FirstRunDone { get; set; } = false;
 
+    // ===== v1.4：挂机护航 =====
+    /// <summary>挂机护航总开关（默认开）：队列运行期间抑制睡眠、重启与屏保。</summary>
+    public bool KeepAwakeEnabled { get; set; } = true;
+
+    /// <summary>夜间息屏（默认关）：队列运行 N 分钟后关闭显示器。</summary>
+    public bool NightScreenEnabled { get; set; } = false;
+
+    /// <summary>夜间息屏延时（分钟，5~120，默认 30）。</summary>
+    public int NightScreenMinutes { get; set; } = 30;
+
+    /// <summary>STALLED 自动终止（默认关）：疑似挂起时结束进程并按失败策略处理。</summary>
+    public bool StallAutoKill { get; set; } = false;
+
+    /// <summary>护航前屏保原值（-1=未知/无需恢复；0=关闭；1=开启）。异常退出后下次启动补偿。</summary>
+    public int KeepAwakeScreenSaverOriginal { get; set; } = -1;
+
     /// <summary>最近一次守护告警时间（底部盾牌转黄用），空=从未告警。</summary>
     public DateTime? ShieldAlertAt { get; set; }
 }

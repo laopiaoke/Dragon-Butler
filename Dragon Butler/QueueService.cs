@@ -215,8 +215,11 @@ public static class QueueService
     /// <summary>队列主体循环（StartAsync / RunProfilesAsync 共用）。</summary>
     private static async Task<int> RunListAsync(List<ToolProfile> items, QueueTrigger trigger, CancellationToken ct)
     {
-        int finished = 0;
-        for (int i = 0; i < items.Count; i++)
+        KeepAwakeService.Acquire();
+        try
+        {
+            int finished = 0;
+            for (int i = 0; i < items.Count; i++)
             {
                 if (_stopRequested) break;
                 var profile = items[i];
@@ -257,7 +260,17 @@ public static class QueueService
                     break;
                 }
 
-                bool failed = result.State is ToolRunState.Failed or ToolRunState.Timeout;
+                if (result.State == ToolRunState.Stalled)
+                    LogService.LogEvent($"队列：疑似挂起判定（自动终止={(AppState.Settings.StallAutoKill ? "开" : "关")}）");
+                if (result.State == ToolRunState.Stalled && !AppState.Settings.StallAutoKill)
+                {
+                    // 疑似挂起：未开自动终止时队列停止，进程保留等用户处理。
+                    LogService.LogEvent($"队列：{profile.DisplayName} 疑似挂起，队列停止");
+                    break;
+                }
+
+                bool failed = result.State is ToolRunState.Failed or ToolRunState.Timeout
+                    or ToolRunState.Stalled;
                 if (failed && string.Equals(AppState.Settings.FailStrategy, "Abort", StringComparison.OrdinalIgnoreCase))
                 {
                     LogService.LogEvent($"队列：失败策略=中止，剩余 {items.Count - i - 1} 项不再执行");
@@ -276,8 +289,13 @@ public static class QueueService
                 }
             }
 
-        FinishQueue(trigger, finished);
-        return finished;
+            FinishQueue(trigger, finished);
+            return finished;
+        }
+        finally
+        {
+            KeepAwakeService.Release();
+        }
     }
 
     /// <summary>
@@ -326,6 +344,45 @@ public static class QueueService
             }
             RaiseState();
             AppState.RefreshStatus();
+        }
+    }
+
+    /// <summary>
+    /// 哨兵检测到疑似挂起时调用：状态机转 Stalled；按设置决定是否结束进程。
+    /// 队列由 RunListAsync 看到 Stalled 后停止。
+    /// </summary>
+    internal static void HandleStall(ToolProfile profile, string reason)
+    {
+        RunCoordinator? coord;
+        Process? proc;
+        lock (Gate)
+        {
+            coord = _currentCoordinator;
+            proc = _currentProcess;
+        }
+        if (coord == null) return;
+        if (!string.Equals(QueueService.CurrentToolId, profile.ToolId, StringComparison.OrdinalIgnoreCase)) return;
+
+        bool autoKill = AppState.Settings.StallAutoKill;
+        LogService.LogEvent($"队列：{profile.DisplayName} {reason}（自动终止={(autoKill ? "开" : "关")}）");
+        coord.MarkStalled(reason);
+
+        if (autoKill)
+        {
+            try
+            {
+                if (proc is { HasExited: false })
+                {
+                    int pid = SafePid(proc);
+                    proc.Kill();
+                    proc.WaitForExit(3000);
+                    LogService.LogEvent($"队列：疑似挂起，已结束 {profile.ManagedProcessName} pid={pid}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogService.LogEvent("队列：结束疑似挂起进程失败 " + ex.Message);
+            }
         }
     }
 
@@ -394,7 +451,7 @@ public static class QueueService
                 Skipped = false,
             };
 
-            if (result.State == ToolRunState.Done || result.State == ToolRunState.Halted) break;
+            if (result.State is ToolRunState.Done or ToolRunState.Halted or ToolRunState.Stalled) break;
             if (ct.IsCancellationRequested) break;
 
             if (attempts < maxAttempts)
@@ -471,6 +528,7 @@ public static class QueueService
                 ToolRunState.Failed => "异常退出",
                 ToolRunState.Timeout => $"超时 {profile.MaxDurationMinutes} 分钟未完成",
                 ToolRunState.Halted => "报告完成但进程未退出",
+                ToolRunState.Stalled => "疑似挂起（3 分钟无任何活动）",
                 _ => "未完成",
             };
 
@@ -486,6 +544,11 @@ public static class QueueService
             else if (state == ToolRunState.Failed)
             {
                 KillCurrent(profile, "失败清理");
+            }
+            else if (state == ToolRunState.Done && profile.PrimarySignal == CompletionSignalKind.Duration)
+            {
+                // “到达时长”是到时收尾：进程通常还活着，主动结束，避免占着下一个工具
+                KillCurrent(profile, "到达时长清理");
             }
 
             return new SingleOutcome(state, reason);
@@ -598,7 +661,9 @@ public static class QueueService
         int total = ran.Count;
         int ok = ran.Count(r => r.State == ToolRunState.Done);
         bool anyHalted = ran.Any(r => r.State == ToolRunState.Halted);
-        bool anyFailed = ran.Any(r => r.State is ToolRunState.Failed or ToolRunState.Timeout or ToolRunState.Halted);
+        bool anyStalled = ran.Any(r => r.State == ToolRunState.Stalled);
+        bool anyFailed = ran.Any(r => r.State is ToolRunState.Failed or ToolRunState.Timeout
+            or ToolRunState.Halted or ToolRunState.Stalled);
         TimeSpan elapsed = TimeSpan.FromSeconds(ran.Sum(r => r.Elapsed.TotalSeconds));
 
         string text;
@@ -606,6 +671,18 @@ public static class QueueService
         {
             var h = ran.First(r => r.State == ToolRunState.Halted);
             text = $"【龙管家】{h.DisplayName}报告完成但进程未退出，队列已暂停等你处理。";
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
+        }
+        else if (anyStalled && !AppState.Settings.StallAutoKill)
+        {
+            var st = ran.First(r => r.State == ToolRunState.Stalled);
+            text = $"【龙管家】{st.DisplayName} 疑似挂起（3 分钟无任何活动），队列已暂停等你处理。";
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
+        }
+        else if (anyStalled && AppState.Settings.StallAutoKill)
+        {
+            var st = ran.First(r => r.State == ToolRunState.Stalled);
+            text = $"【龙管家】队列结束：{ok}/{total} 成功。⚠ {st.DisplayName} 疑似挂起，已自动终止并继续。";
             NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
         }
         else if (total == 0)

@@ -77,6 +77,20 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _groupScanTimer = new() { Interval = TimeSpan.FromSeconds(8) };
     private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
+    private readonly Dictionary<string, CustomToolCard> _customCards = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed class CustomToolCard
+    {
+        public Border Card = null!;
+        public Button Header = null!;
+        public StackPanel Body = null!;
+        public TextBlock State = null!;
+        public TextBox Path = null!;
+        public TextBlock Hint = null!;
+        public Image Icon = null!;
+        public TextBlock IconFallback = null!;
+    }
+
     private readonly List<GroupPickItem> _groupPicks = new();
     private readonly List<string> _selectedOrder = new();
     private string _groupSignature = "\u0000";
@@ -108,6 +122,7 @@ public partial class MainWindow : Window
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(AnyInteractivePress), true);
 
         LoadSettingsToUi();
+        RebuildCustomToolCards();
         RenderQueue();
         RefreshToolCards();
         RefreshShield();
@@ -140,6 +155,7 @@ public partial class MainWindow : Window
         try
         {
             ApplyNotifyMode();
+            RebuildCustomToolCards();
             RenderQueue();
             RefreshShield();
             RefreshToolCards();
@@ -218,6 +234,11 @@ public partial class MainWindow : Window
         TgIdleGuard.IsChecked = s.IdleGuardEnabled;
         TgAutoKill.IsChecked = s.AutoKillResidual;
         TgAfterRunOnFailure.IsChecked = s.AfterRunOnFailure;
+        TgKeepAwake.IsChecked = s.KeepAwakeEnabled;
+        TgNightScreen.IsChecked = s.NightScreenEnabled;
+        TgStallAutoKill.IsChecked = s.StallAutoKill;
+        TbNightMinutes.Text = Math.Clamp(s.NightScreenMinutes, 5, 120).ToString();
+        TbNightMinutes.IsEnabled = s.NightScreenEnabled;
         TgVacation.IsChecked = s.VacationMode;
         SelectComboByTag(CbAfterRun, s.AfterRunAction);
         SelectComboByTag(CbFailStrategy, s.FailStrategy);
@@ -443,7 +464,8 @@ public partial class MainWindow : Window
                 case ToolRunState.Done: glyph = "✓"; color = BrushOf("SuccessBrush") ?? DotGreen; break;
                 case ToolRunState.Failed:
                 case ToolRunState.Timeout: glyph = "✗"; color = BrushOf("DangerBrush") ?? DotRed; break;
-                case ToolRunState.Halted: glyph = "‖"; color = BrushOf("WarningBrush") ?? DotYellow; break;
+                case ToolRunState.Halted:
+                case ToolRunState.Stalled: glyph = "‖"; color = BrushOf("WarningBrush") ?? DotYellow; break;
             }
         }
 
@@ -699,10 +721,20 @@ public partial class MainWindow : Window
         {
             try { RefreshToolCard(id); } catch { }
         }
+        foreach (string id in _customCards.Keys.ToList())
+        {
+            try { RefreshCustomToolCard(id); } catch { }
+        }
     }
 
     private void RefreshToolCard(string toolId)
     {
+        if (!ProfileRegistry.IsBuiltIn(toolId))
+        {
+            RefreshCustomToolCard(toolId);
+            return;
+        }
+
         var profile = ProfileRegistry.Get(toolId);
         var box = PathBoxOf(toolId);
         box.Text = string.IsNullOrWhiteSpace(profile.ExecutablePath) ? "" : profile.ExecutablePath;
@@ -716,6 +748,301 @@ public partial class MainWindow : Window
         {
             state.Text = "运行中";
             state.Foreground = BrushOf("BrandBrush") ?? DotGreen;
+        }
+        ApplyBuiltInIcon(toolId, profile);
+    }
+
+    /// <summary>内置工具卡图标：能提取就显示 exe 图标，否则回退首字母。</summary>
+    private void ApplyBuiltInIcon(string toolId, ToolProfile profile)
+    {
+        Image? img = toolId switch
+        {
+            "bettergi" => IconImage_bettergi,
+            "march7th" => IconImage_march7th,
+            _ => IconImage_okww,
+        };
+        TextBlock? txt = toolId switch
+        {
+            "bettergi" => IconText_bettergi,
+            "march7th" => IconText_march7th,
+            _ => IconText_okww,
+        };
+        if (img == null || txt == null) return;
+        var bmp = ToolIconService.GetBitmap(profile);
+        if (bmp != null)
+        {
+            img.Source = bmp;
+            img.Visibility = Visibility.Visible;
+            txt.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            img.Visibility = Visibility.Collapsed;
+            txt.Visibility = Visibility.Visible;
+        }
+    }
+
+    // ===== 自定义工具卡（v1.4）=====
+
+    private void BtnAddCustomTool_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new CustomToolWindow { Owner = this };
+        if (dlg.ShowDialog() != true || dlg.Result == null) return;
+
+        RebuildCustomToolCards();
+        RenderQueue();
+        RefreshToolCards();
+        AppState.PublishLog($"✓ 已添加自定义工具：{dlg.Result.DisplayName}");
+    }
+
+    private void RebuildCustomToolCards()
+    {
+        try
+        {
+            CustomToolsHost.Children.Clear();
+            _customCards.Clear();
+
+            var custom = new List<ToolProfile>();
+            foreach (var entry in AppState.Settings.Queue ?? new List<QueueEntry>())
+            {
+                var p = ProfileRegistry.All.FirstOrDefault(x =>
+                    string.Equals(x.ToolId, entry.ToolId, StringComparison.OrdinalIgnoreCase));
+                if (p != null && !ProfileRegistry.IsBuiltIn(p.ToolId) && !custom.Contains(p)) custom.Add(p);
+            }
+            foreach (var p in ProfileRegistry.All)
+                if (!ProfileRegistry.IsBuiltIn(p.ToolId) && !custom.Contains(p)) custom.Add(p);
+
+            foreach (var profile in custom)
+                CustomToolsHost.Children.Add(BuildCustomToolCard(profile));
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("重建自定义工具卡失败：" + ex.Message);
+        }
+    }
+
+    private Border BuildCustomToolCard(ToolProfile profile)
+    {
+        var fallback = new TextBlock
+        {
+            Text = string.IsNullOrEmpty(profile.DisplayName) ? "?" : profile.DisplayName[..1].ToUpperInvariant(),
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var icon = new Image { Stretch = Stretch.Uniform, Margin = new Thickness(2), Visibility = Visibility.Collapsed };
+        var iconGrid = new Grid();
+        iconGrid.Children.Add(fallback);
+        iconGrid.Children.Add(icon);
+        var iconBox = new Border
+        {
+            Width = 22,
+            Height = 22,
+            CornerRadius = new CornerRadius(7),
+            Background = BrushOf("InsetBrush") ?? Brushes.Transparent,
+            BorderBrush = BrushOf("BorderBrush") ?? Brushes.Transparent,
+            BorderThickness = new Thickness(1),
+            Child = iconGrid,
+        };
+        DockPanel.SetDock(iconBox, Dock.Left);
+
+        var name = new TextBlock
+        {
+            Text = profile.DisplayName,
+            FontSize = 13.5,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(8, 0, 0, 0),
+            Foreground = BrushOf("TextPrimaryBrush") ?? Brushes.White,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        DockPanel.SetDock(name, Dock.Left);
+
+        var state = new TextBlock
+        {
+            Text = "未配置",
+            FontSize = 11,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 0, 0),
+        };
+        DockPanel.SetDock(state, Dock.Left);
+
+        var dock = new DockPanel { LastChildFill = false };
+        dock.Children.Add(iconBox);
+        dock.Children.Add(name);
+        dock.Children.Add(state);
+
+        var header = new Button
+        {
+            Style = TryFindResource("FoldHeader") as Style,
+            Tag = profile.ToolId,
+            Content = dock,
+        };
+        header.Click += CustomToolHeader_Click;
+
+        var path = new TextBox
+        {
+            Style = TryFindResource("InputBox") as Style,
+            IsReadOnly = true,
+            Height = 32,
+            Text = profile.ExecutablePath,
+        };
+        var edit = new Button
+        {
+            Content = "编辑",
+            Style = TryFindResource("MiniAction") as Style,
+            Margin = new Thickness(8, 0, 0, 0),
+            Tag = profile.ToolId,
+        };
+        edit.Click += CustomToolEdit_Click;
+        var test = new Button
+        {
+            Content = "测试启动",
+            Style = TryFindResource("MiniAction") as Style,
+            Margin = new Thickness(6, 0, 0, 0),
+            Tag = profile.ToolId,
+        };
+        test.Click += CustomToolTest_Click;
+
+        var pathGrid = new Grid();
+        pathGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        pathGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        pathGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        pathGrid.Children.Add(path);
+        Grid.SetColumn(edit, 1);
+        pathGrid.Children.Add(edit);
+        Grid.SetColumn(test, 2);
+        pathGrid.Children.Add(test);
+
+        var hint = new TextBlock
+        {
+            FontSize = 10.5,
+            Margin = new Thickness(0, 6, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        };
+
+        var body = new StackPanel
+        {
+            Margin = new Thickness(16, 0, 16, 14),
+            Visibility = Visibility.Collapsed,
+        };
+        body.Children.Add(new TextBlock
+        {
+            Text = "程序位置",
+            FontSize = 11,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        });
+        body.Children.Add(pathGrid);
+        body.Children.Add(hint);
+
+        var stack = new StackPanel();
+        stack.Children.Add(header);
+        stack.Children.Add(body);
+
+        var card = new Border
+        {
+            Style = TryFindResource("Card") as Style,
+            Margin = new Thickness(0, 10, 0, 0),
+            Padding = new Thickness(0),
+            Child = stack,
+        };
+
+        _customCards[profile.ToolId] = new CustomToolCard
+        {
+            Card = card,
+            Header = header,
+            Body = body,
+            State = state,
+            Path = path,
+            Hint = hint,
+            Icon = icon,
+            IconFallback = fallback,
+        };
+        return card;
+    }
+
+    private void CustomToolHeader_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string toolId) return;
+        if (!_customCards.TryGetValue(toolId, out var card)) return;
+        bool expand = card.Body.Visibility != Visibility.Visible;
+        card.Body.Visibility = expand ? Visibility.Visible : Visibility.Collapsed;
+        if (expand) RefreshCustomToolCard(toolId);
+    }
+
+    private void RefreshCustomToolCard(string toolId)
+    {
+        if (!_customCards.TryGetValue(toolId, out var card)) return;
+        var profile = ProfileRegistry.Get(toolId);
+        card.Path.Text = profile.ExecutablePath;
+
+        bool ok = ToolRunner.HasExecutable(profile);
+        card.State.Text = ok ? "已就绪" : "未配置";
+        card.State.Foreground = ok ? (BrushOf("SuccessBrush") ?? DotGreen) : (BrushOf("WarningBrush") ?? DotYellow);
+        if (QueueService.IsRunning && string.Equals(QueueService.CurrentToolId, toolId, StringComparison.OrdinalIgnoreCase))
+        {
+            card.State.Text = "运行中";
+            card.State.Foreground = BrushOf("BrandBrush") ?? DotGreen;
+        }
+
+        string done = profile.PrimarySignal == CompletionSignalKind.Duration
+            ? $"到达 {profile.CustomData.GetValueOrDefault("durationMinutes", "60")} 分钟"
+            : "进程退出（退出码 0）";
+        card.Hint.Text = $"完成方式：{done} · 最大 {profile.MaxDurationMinutes} 分钟";
+
+        var bmp = ToolIconService.GetBitmap(profile);
+        if (bmp != null)
+        {
+            card.Icon.Source = bmp;
+            card.Icon.Visibility = Visibility.Visible;
+            card.IconFallback.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            card.Icon.Visibility = Visibility.Collapsed;
+            card.IconFallback.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void CustomToolEdit_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string toolId) return;
+        var profile = ProfileRegistry.Get(toolId);
+        var dlg = new CustomToolWindow(profile) { Owner = this };
+        if (dlg.ShowDialog() != true) return;
+
+        RebuildCustomToolCards();
+        RenderQueue();
+        RefreshToolCards();
+        AppState.PublishLog(dlg.Deleted ? $"已删除工具：{profile.DisplayName}" : $"✓ 已更新工具：{profile.DisplayName}");
+    }
+
+    private void CustomToolTest_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string toolId) return;
+        if (!_customCards.TryGetValue(toolId, out var card)) return;
+        var profile = ProfileRegistry.Get(toolId);
+        if (!ToolRunner.HasExecutable(profile))
+        {
+            card.Hint.Text = "还没有可用路径，点「编辑」重新选择。";
+            card.Hint.Foreground = BrushOf("WarningBrush") ?? DotYellow;
+            return;
+        }
+        try
+        {
+            string args = ToolRunner.BuildArguments(profile, null);
+            ToolRunner.StartProcess(profile, args);
+            card.Hint.Text = $"已启动（测试）：{args}";
+            card.Hint.Foreground = BrushOf("SuccessBrush") ?? DotGreen;
+            AppState.PublishLog($"✓ 已启动 {profile.DisplayName}（测试）");
+            LogService.LogEvent($"测试启动（自定义）：{toolId} 参数：{args}");
+        }
+        catch (Exception ex)
+        {
+            card.Hint.Text = "启动失败：请确认路径正确、并允许管理员权限。";
+            card.Hint.Foreground = BrushOf("DangerBrush") ?? DotRed;
+            LogService.LogEvent("测试启动失败：" + ex.Message);
         }
     }
 
@@ -733,6 +1060,7 @@ public partial class MainWindow : Window
         profile.ExecutablePath = dlg.FileName;
         if (string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase))
             AppState.Settings.BgiPath = dlg.FileName;
+        ToolIconService.Invalidate(toolId);
         ProfileRegistry.Save(profile);
         RefreshToolCard(toolId);
         FindHintOf(toolId).Text = "";
@@ -803,6 +1131,7 @@ public partial class MainWindow : Window
         profile.ExecutablePath = path;
         if (string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase))
             AppState.Settings.BgiPath = path;
+        ToolIconService.Invalidate(toolId);
         ProfileRegistry.Save(profile);
 
         btn.Visibility = Visibility.Collapsed;
@@ -1399,6 +1728,52 @@ public partial class MainWindow : Window
         AppState.SaveSettings();
     }
 
+    private void TgKeepAwake_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgKeepAwake.IsChecked == true;
+        AppState.Settings.KeepAwakeEnabled = on;
+        AppState.SaveSettings();
+        if (!on && KeepAwakeService.IsActive) KeepAwakeService.Release();
+        else if (on && QueueService.IsRunning) KeepAwakeService.Acquire();
+        LogService.LogEvent("挂机护航：" + (on ? "开启" : "关闭"));
+        AppState.PublishLog(on ? "✓ 已开启挂机护航" : "挂机护航已关闭");
+        RefreshShield();
+    }
+
+    private void TgNightScreen_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgNightScreen.IsChecked == true;
+        AppState.Settings.NightScreenEnabled = on;
+        AppState.SaveSettings();
+        TbNightMinutes.IsEnabled = on;
+        KeepAwakeService.RefreshNightScreen();
+        LogService.LogEvent("夜间息屏：" + (on ? $"开启（{AppState.Settings.NightScreenMinutes} 分钟）" : "关闭"));
+        RefreshShield();
+    }
+
+    private void TbNightMinutes_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        if (!int.TryParse(TbNightMinutes.Text.Trim(), out int minutes)) minutes = 30;
+        minutes = Math.Clamp(minutes, 5, 120);
+        TbNightMinutes.Text = minutes.ToString();
+        if (AppState.Settings.NightScreenMinutes == minutes) return;
+        AppState.Settings.NightScreenMinutes = minutes;
+        AppState.SaveSettings();
+        KeepAwakeService.RefreshNightScreen();
+        LogService.LogEvent($"夜间息屏：延时改为 {minutes} 分钟");
+    }
+
+    private void TgStallAutoKill_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        AppState.Settings.StallAutoKill = TgStallAutoKill.IsChecked == true;
+        AppState.SaveSettings();
+        LogService.LogEvent("疑似挂起自动终止：" + (AppState.Settings.StallAutoKill ? "开启" : "关闭"));
+    }
+
     private void CbFailStrategy_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressToggle) return;
@@ -1426,18 +1801,24 @@ public partial class MainWindow : Window
         {
             bool enabled = AppState.Settings.SentinelEnabled;
             bool alerted = AppState.Settings.ShieldAlertAt is DateTime t && (DateTime.Now - t).TotalMinutes < 30;
+            bool escort = QueueService.IsRunning && KeepAwakeService.IsActive;
 
-            ShieldDot.Fill = !enabled ? DotGray : alerted ? DotYellow : DotGreen;
-            ShieldText.Text = !enabled ? "守护已关闭" : alerted ? "守护中 · 近期有告警" : "守护中";
+            ShieldDot.Fill = escort ? DotYellow : !enabled ? DotGray : alerted ? DotYellow : DotGreen;
+            ShieldText.Text = escort ? "护航中" : !enabled ? "守护已关闭"
+                : alerted ? "守护中 · 近期有告警" : "守护中";
 
             var h = SentinelService.HealthSnapshot();
+            var escortItems = KeepAwakeService.ActiveSummary();
             ShieldTipText.Text =
                 $"守护：{(enabled ? "开启" : "关闭")}\n" +
                 $"心跳：{h.TickCount} 次 · 最近 {h.LastTick:HH:mm:ss}\n" +
                 $"内存：{h.MemUsedPercent:F0}% · 工具工作集 {h.BgiWorkingSetMb}MB\n" +
+                $"CPU：{h.ToolCpuPercent:F1}% · 挂起观察 {(h.StallSince == DateTime.MinValue ? "未触发" : h.StallSince.ToString("HH:mm:ss"))}\n" +
                 $"截图检测：{(AppState.Settings.ScreenshotCheckEnabled ? "开" : "关")} · 冻结 {h.FrozenCount} 次\n" +
                 $"Webhook：{(SentinelService.WebhookRunning ? "监听中" : "未监听")} · 端口 {AppState.Settings.BgiWebhookPort}\n" +
-                $"自动重启：{(AppState.Settings.AutoRestartBgi ? "开" : "关")} · 已重启 {h.RestartCount} 次";
+                $"自动重启：{(AppState.Settings.AutoRestartBgi ? "开" : "关")} · 已重启 {h.RestartCount} 次\n" +
+                $"护航：{(AppState.Settings.KeepAwakeEnabled ? "开" : "关")}" +
+                (escortItems.Count > 0 ? " · " + string.Join(" / ", escortItems) : " · 未生效");
         }
         catch { }
     }

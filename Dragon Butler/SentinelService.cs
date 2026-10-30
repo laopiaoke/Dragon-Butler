@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -39,6 +40,8 @@ public sealed class SentinelHealth
     public double LastScreenScore;
     public double MemUsedPercent;
     public long BgiWorkingSetMb;
+    public double ToolCpuPercent;
+    public DateTime StallSince;
     public int RestartCount;
     public int FrozenCount;
     public DateTime LastFrozenAt;
@@ -81,6 +84,8 @@ public static class SentinelService
                 LastScreenScore = Health.LastScreenScore,
                 MemUsedPercent = Health.MemUsedPercent,
                 BgiWorkingSetMb = Health.BgiWorkingSetMb,
+                ToolCpuPercent = Health.ToolCpuPercent,
+                StallSince = Health.StallSince,
                 RestartCount = Health.RestartCount,
                 FrozenCount = Health.FrozenCount,
                 WebhookEvents = Health.WebhookEvents,
@@ -111,6 +116,19 @@ public static class SentinelService
     private static int _activeSession = -1;
     private static ToolProfile? _runProfile;
 
+    // ===== v1.4：STALLED 观测（复用 5 秒轮询，不另起线程）=====
+    /// <summary>判定疑似挂起所需的持续时长（测试可调小）。</summary>
+    public static TimeSpan StallThreshold { get; set; } = TimeSpan.FromMinutes(3);
+
+    /// <summary>CPU 低于该百分比视为"无活动"。</summary>
+    public static double StallCpuPercent { get; set; } = 5;
+
+    private static DateTime _lastCpuAt = DateTime.MinValue;
+    private static double _lastCpuTotalMs;
+    private static long _lastLogSize = -1;
+    private static DateTime _stallSince = DateTime.MinValue;
+    private static bool _stallNotified;
+
     /// <summary>启动（幂等）。</summary>
     public static void Start()
     {
@@ -140,6 +158,7 @@ public static class SentinelService
             _timer = null;
             ScreenshotInstance.OnEvent -= OnSourceEvent;
             State = SentinelState.Idle;
+            ResetStallWatch();
             LogService.LogEvent("守护已停止");
         }
         catch (Exception ex)
@@ -154,6 +173,7 @@ public static class SentinelService
         _runProfile = profile;
         State = SentinelState.Running;
         _missCount = 0;
+        ResetStallWatch();
     }
 
     /// <summary>队列该项结束：回到 Idle。</summary>
@@ -163,6 +183,7 @@ public static class SentinelService
             return;
         State = SentinelState.Idle;
         _missCount = 0;
+        ResetStallWatch();
     }
 
     private static void OnSourceEvent(SentinelEvent ev) => HandleEvent(ev.Kind, ev.Payload, ev.Source);
@@ -172,6 +193,7 @@ public static class SentinelService
         MutateHealth(h => { h.TickCount++; h.LastTick = DateTime.Now; });
         try { CheckProcesses(); } catch (Exception ex) { LogService.LogEvent("守护-进程检测异常：" + ex.Message); }
         MutateHealth(h => h.LastProcessCheck = DateTime.Now);
+        try { CheckStall(); } catch (Exception ex) { LogService.LogEvent("守护-挂起检测异常：" + ex.Message); }
         try { CheckMemory(); } catch (Exception ex) { LogService.LogEvent("守护-内存检测异常：" + ex.Message); }
         try { ScreenshotInstance.Heartbeat(State == SentinelState.Running); } catch (Exception ex) { LogService.LogEvent("守护-截图驱动异常：" + ex.Message); }
         try { CheckSession(); } catch (Exception ex) { LogService.LogEvent("守护-会话检测异常：" + ex.Message); }
@@ -263,6 +285,121 @@ public static class SentinelService
             LogService.LogEvent("守护：判定崩溃，未开启自动重启，只通知");
             NotifyService.Show(NotifyLevel.Warning, "龙管家", "检测到工具意外退出，未开启自动重启。");
         }
+    }
+
+    /// <summary>重置挂起观测（每次运行开始/结束时调用）。</summary>
+    private static void ResetStallWatch()
+    {
+        _lastCpuAt = DateTime.MinValue;
+        _lastCpuTotalMs = 0;
+        _lastLogSize = -1;
+        _stallSince = DateTime.MinValue;
+        _stallNotified = false;
+        MutateHealth(h => { h.ToolCpuPercent = 0; h.StallSince = DateTime.MinValue; });
+    }
+
+    /// <summary>
+    /// 疑似挂起：目标进程存活 + CPU &lt;5% 持续 3 分钟 + 关联日志大小无增长。
+    /// 观测复用本服务的 5 秒轮询；无日志文件的工具退化为"仅看 CPU"（见交付说明待确认项）。
+    /// </summary>
+    private static void CheckStall()
+    {
+        if (State != SentinelState.Running || _runProfile == null || !QueueService.IsRunning) return;
+
+        var profile = _runProfile;
+        var procs = ToolRunner.GetSessionProcesses(profile);
+        if (procs.Length == 0) { ResetStallWatch(); return; }
+
+        double cpu = SampleCpu(procs);
+        long logSize = GetLogSize(profile, out bool hasLog);
+        bool cpuLow = cpu >= 0 && cpu < StallCpuPercent;
+        bool logFlat = !hasLog || logSize == _lastLogSize;
+
+        MutateHealth(h => h.ToolCpuPercent = cpu);
+        _lastLogSize = logSize;
+
+        if (!(cpuLow && logFlat))
+        {
+            _stallSince = DateTime.MinValue;
+            MutateHealth(h => h.StallSince = DateTime.MinValue);
+            return;
+        }
+
+        if (_stallSince == DateTime.MinValue)
+        {
+            _stallSince = DateTime.Now;
+            MutateHealth(h => h.StallSince = _stallSince);
+            LogService.LogEvent($"守护：{profile.DisplayName} 进入挂起观察（CPU {cpu:F1}%，日志不增长）");
+        }
+
+        if (_stallNotified) return;
+        if (DateTime.Now - _stallSince < StallThreshold) return;
+
+        _stallNotified = true;
+        string detail = hasLog
+            ? $"CPU {cpu:F1}%，日志 {StallThreshold.TotalMinutes:F0} 分钟无增长"
+            : $"CPU {cpu:F1}%，{StallThreshold.TotalMinutes:F0} 分钟无活动";
+        LogService.LogEvent($"守护：{profile.DisplayName} 疑似挂起（{detail}）");
+        QueueService.HandleStall(profile, "疑似挂起（" + detail + "）");
+    }
+
+    /// <summary>本会话内该工具进程的总 CPU 占比（首次采样返回 -1）。</summary>
+    private static double SampleCpu(System.Diagnostics.Process[] procs)
+    {
+        try
+        {
+            double total = 0;
+            foreach (var p in procs)
+            {
+                try { total += p.TotalProcessorTime.TotalMilliseconds; }
+                catch { }
+                finally { try { p.Dispose(); } catch { } }
+            }
+            DateTime now = DateTime.Now;
+            if (_lastCpuAt == DateTime.MinValue)
+            {
+                _lastCpuAt = now;
+                _lastCpuTotalMs = total;
+                return -1;
+            }
+            double wallMs = (now - _lastCpuAt).TotalMilliseconds;
+            double delta = total - _lastCpuTotalMs;
+            _lastCpuAt = now;
+            _lastCpuTotalMs = total;
+            if (wallMs <= 0) return -1;
+            double pct = delta / (wallMs * Math.Max(1, Environment.ProcessorCount)) * 100.0;
+            return Math.Clamp(pct, 0, 100);
+        }
+        catch { return -1; }
+    }
+
+    /// <summary>关联日志目录的总大小；无目录/无日志返回 -1。</summary>
+    private static long GetLogSize(ToolProfile profile, out bool hasLog)
+    {
+        hasLog = false;
+        try
+        {
+            string? dir = null;
+            if (profile.CustomData.TryGetValue("logDir", out string? custom) && !string.IsNullOrWhiteSpace(custom))
+                dir = custom;
+            if (string.IsNullOrWhiteSpace(dir))
+            {
+                string? exeDir = Path.GetDirectoryName(profile.ExecutablePath);
+                if (!string.IsNullOrEmpty(exeDir)) dir = Path.Combine(exeDir, "log");
+            }
+            if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return -1;
+
+            var files = Directory.GetFiles(dir, "*.log");
+            if (files.Length == 0) return -1;
+            hasLog = true;
+            long total = 0;
+            foreach (string f in files)
+            {
+                try { total += new FileInfo(f).Length; } catch { }
+            }
+            return total;
+        }
+        catch { return -1; }
     }
 
     /// <summary>内存检测：系统已用 &gt;85% 或工具工作集 &gt;4096MB → 只通知。</summary>

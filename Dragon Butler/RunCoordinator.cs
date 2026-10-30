@@ -31,6 +31,9 @@ public enum ToolRunState
 
     /// <summary>终态：悬置（无法确定，已通知，绝不自动推进）。</summary>
     Halted = 7,
+
+    /// <summary>终态：疑似挂起（进程存活但长时间无 CPU/日志活动），队列暂停等人。</summary>
+    Stalled = 8,
 }
 
 /// <summary>
@@ -76,7 +79,7 @@ public sealed class RunCoordinator : IDisposable
 
     /// <summary>是否已进入终态。</summary>
     public bool IsFinished => State is ToolRunState.Done or ToolRunState.Failed
-        or ToolRunState.Timeout or ToolRunState.Halted;
+        or ToolRunState.Timeout or ToolRunState.Halted or ToolRunState.Stalled;
 
     /// <summary>注册主信号源（同一时刻只允许一个）。</summary>
     public void SetPrimary(ICompletionSignalSource source)
@@ -107,6 +110,16 @@ public sealed class RunCoordinator : IDisposable
     /// <summary>进程启动失败：Launching → Failed。</summary>
     public void LaunchFailed(string reason) => Move(ToolRunState.Failed, "启动失败：" + reason);
 
+    /// <summary>
+    /// 疑似挂起：Running → Stalled。队列会因此停止；是否杀进程由 QueueService 按设置决定。
+    /// </summary>
+    public void MarkStalled(string reason)
+    {
+        if (State != ToolRunState.Running) return;
+        Move(ToolRunState.Stalled, reason);
+        LogService.LogEvent($"[run:{_runId}] {_profile.ToolId} 疑似挂起，已通知队列处理");
+    }
+
     /// <summary>手动中止（用户点停止）：Running/Resolving → Failed（不计完成）。</summary>
     public void Abort(string reason = "用户中止")
     {
@@ -132,6 +145,12 @@ public sealed class RunCoordinator : IDisposable
                 int code = signal.ExitCode ?? -1;
                 if (code == 0) Move(ToolRunState.Done, "进程正常退出 exit=0");
                 else Move(ToolRunState.Failed, "进程异常退出 exit=" + code);
+                return;
+            }
+
+            if (signal.Kind == CompletionSignalKind.Duration)
+            {
+                Move(ToolRunState.Done, "已到达设定时长");
                 return;
             }
 
@@ -192,7 +211,8 @@ public sealed class RunCoordinator : IDisposable
         lock (_gate)
         {
             if (_state == to) return;
-            if (_state is ToolRunState.Done or ToolRunState.Failed or ToolRunState.Timeout or ToolRunState.Halted) return;
+            if (_state is ToolRunState.Done or ToolRunState.Failed or ToolRunState.Timeout
+                or ToolRunState.Halted or ToolRunState.Stalled) return;
             from = _state;
             _state = to;
         }
@@ -201,7 +221,8 @@ public sealed class RunCoordinator : IDisposable
         LogService.LogEvent($"[run:{_runId}] {_profile.ToolId} {from}→{to}（{reason}）");
         try { Transition?.Invoke(from, to, reason); } catch { }
 
-        if (to is ToolRunState.Done or ToolRunState.Failed or ToolRunState.Timeout or ToolRunState.Halted)
+        if (to is ToolRunState.Done or ToolRunState.Failed or ToolRunState.Timeout
+            or ToolRunState.Halted or ToolRunState.Stalled)
             StopTimers();
     }
 

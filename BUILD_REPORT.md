@@ -49,6 +49,7 @@
 | **v1.2** | 10-27 | 次版本 | 代码清理：删除无用模块与重复入口，直装版体积 -40% |
 | **v1.3** | 10-29 | 次版本 | 多游戏排队 / 跑完动作 / 防打扰 / 自动寻找 / 三层 UI 改版 / 完成判定收敛 |
 | **v1.3.1** | 10-29 | 次版本 | 完成判定补强：BGI 进程退出也作为互证，老配置自动升级 |
+| **v1.4** | 10-30 | 次版本 | 挂机护航三合一、夜间息屏、疑似挂起仲裁、自定义工具与图标提取 |
 
 ---
 
@@ -149,6 +150,18 @@
 - 发布产物命名带上版本号：压缩包为 `一条龙管家-v1.2-需.NET8运行时.zip` / `一条龙管家-v1.2-免安装便携版.zip`（版本取自 csproj `<Version>`，去掉末尾 `.0`）；包内顶层目录与源目录保持固定名，便于覆盖升级。
 - README 按使用者视角重写（189 行、5 张实拍截图、含"已知边界"）。
 
+### v1.4 · 挂机护航与自定义工具（10-30）
+
+- **挂机护航三合一**（`KeepAwakeService`）：队列运行期间 `SetThreadExecutionState` 阻止空闲睡眠与显示器关闭、`ShutdownBlockReasonCreate` 拦下更新重启、屏保用 `SPI_SETSCREENSAVEACTIVE` + 注册表兜底关掉；队列结束（含失败/停止/异常退出）只还原真正改过的项，进程重启时按残留标记补偿。
+- **夜间息屏**：运行 N 分钟后关显示器、系统保持唤醒，默认关闭；`NightScreenDryRun` 只记日志不动屏，供验证。
+- **疑似挂起仲裁**（`STALLED`）：`SentinelService.CheckStall` 采样 CPU 与日志长度，连续 3 分钟都无活动判 `Stalled`，暂停队列并发通知；未开「自动终止」时停在原地等人工，开了则结束进程继续下一项。
+- **自定义工具**：`tools\<id>.json` 一份档案；`CustomToolWindow` 增删改，填路径 / 进程名 / 完成方式即可接入任意 exe。
+- **到达时长完成信号**：新增 `DurationSignalSource`，跑满 N 分钟判 Done 并结束进程，给不会自己退出的工具用。
+- **图标自动提取**（`ToolIconService`）：`ExtractIconEx` / `SHGetFileInfo` 取 exe 图标转 PNG 缓存到 `cache\icons\`，没有图标回退首字母。
+- 修 `ProfileRegistry.Get` 对未知 ID 回退到第一个档案（BetterGI）的问题，改为返回同 ID 空档案；新增 `IsBuiltIn` / `Remove` / `Save`。
+- 修 ok-ww 工具卡 Tag 写成 `okww` 导致操作落到 BetterGI 档案的问题。
+- 探针新增 `custom` / `duration` / `stall` / `stallkill` / `keepawake` / `screensaver` / `nightscreen` / `icon` / `gdiicons` 九个模式，全部通过。
+
 ### v1.3.1 · 完成判定补强（10-29）
 
 - BGI 副信号追加 `ProcessExit0`（退出码 0 才算）：解决"BGI 跑完不关游戏、又没配 Webhook"时一直等到宽限 → 悬置。
@@ -213,7 +226,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 ```bash
 # 构建
 dotnet build "Dragon Butler/Dragon Butler.csproj" -c Release
-# → 0 错误，4 个既有警告（wf 别名 CS8981 ×2、DPI manifest WFAC010 ×2）
+# → 0 错误 0 警告
 
 # runtime-dependent（框架依赖，体积最小）
 dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self-contained false \
@@ -229,11 +242,12 @@ dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self
 
 | 产物 | 路径 | 体积 |
 | --- | --- | --- |
-| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 517,752 B |
-| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.3.1-win-x64-runtime-dependent.zip` | ≈ 0.24 MB |
-| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,074,091 B |
-| portable 压缩包 | `发布/Dragon-Butler-v1.3.1-win-x64-portable.zip` | ≈ 62.74 MB |
-| Release 资产（解压即用） | `发布/Dragon-Butler-v1.3.1-win-x64.zip` | 62.74 MB |
+| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 555,640 B |
+| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.4-win-x64-runtime-dependent.zip` | ≈ 0.26 MB |
+| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,110,955 B |
+| portable 压缩包 | `发布/Dragon-Butler-v1.4-win-x64-portable.zip` | ≈ 62.75 MB |
+
+v1.3.1 的 `Dragon-Butler-v1.3.1-win-x64.zip`（便携版曾用的短名）已停用，v1.4 起只发上面两个**带变体后缀**的包，下载页不再有两个内容相同、名字不同的文件。
 
 压缩包内顶层目录是**不带版本**的固定名（与 `发布/` 下的源目录一致，如 `Dragon-Butler-win-x64-portable/`），内含一个 exe + `使用说明.txt`。
 这样升级时把新包解压到原目录覆盖即可，`config\`（设置）不会丢；版本信息只体现在**下载到的文件名**上。
@@ -272,30 +286,29 @@ Dragon-Butler  -v1.2   -win-x64  -portable .zip
 
 ## 五、验证状态
 
-**v1.1 / v1.2 未执行自动化验证**，仅完成编译、发布与一次启动级冒烟，功能由使用者自行验收（自定义主题的验收点见 README「已知边界」与下表）。
+v1.2 及以前只有编译 + 一次启动级冒烟。**v1.3 起引入 `tests/CoordinatorProbe` 控制台探针**：用假 BGI 进程拉起真实的 `QueueService` / `RunCoordinator`，把状态机、完成信号、队列行为和系统副作用跑成可重复的用例；不需要游戏，也不碰真实 BGI。
 
-历史基线（v1.0 时的自动化验证台结果，供回归时对照，**不代表 v1.1 现状**）：
+v1.4 全量回归（`dotnet build` 0 错误 0 警告）：
 
-| 套件 | 结果 | 覆盖 |
+| 探针模式 | 断言 | v1.4 结果 |
 | --- | --- | --- |
-| `--shot` | 21/0 | 三主题离屏渲染、关键尺寸 |
-| `--layout` | 39/0 | 卡片高度、折叠展开、滚动区 |
-| `--transition` | 10/0 | 定时卡换页时序、返回后高度校正 |
-| `--picker` | 34/0 | 圆盘点选/拖动、键盘输入 |
-| `--center` | 6/0 | 多屏居中、DPI 缩放 |
-| `--discover` | 17/0 | 配置组识别与目录同步 |
-| `--push` | 24/0 | 11 种推送报文构造 |
-| `--ui` | 59/0 | 大按钮四态、守护条、心电图 |
-| `--sound` | 29/0 | 按键音时长/峰值/按下即响 |
-| `--dialog` | 40/0 | 应用内弹窗四类型 |
+| `queue` | 三项按勾选顺序跑完，汇总 3/3 | 通过 |
+| `queuefail` | 失败重试一次，仍失败按 Skip 跳过 | 通过 |
+| `queueabort` | `Abort` 策略下失败即中止队列 | 通过 |
+| `queuehalted` | 报完成但进程不退 → `Halted` 并停队列 | 通过 |
+| `bgisecondary` | 锚点 + BGI 进程退出码 0 → `Done`（4.1s） | 通过 |
+| `custom` | 自定义档案落盘、图标提取、队列判 `Done` | 通过 |
+| `duration` | 到达时长判 `Done` 并结束进程 | 通过 |
+| `stall` | 无 CPU/日志活动 → `Stalled`，队列暂停 | 通过 |
+| `stallkill` | 开自动终止 → 结束进程后继续下一项并 `Done` | 通过 |
+| `keepawake` | `powercfg /requests` 可见进程级请求，结束自动撤销 | 通过 |
+| `screensaver` | 屏保被关掉，结束后恢复原值 | 通过 |
+| `nightscreen` | DRYRUN 按分钟触发日志，不真的动屏 | 通过 |
+| `icon` | exe 图标提取并写入 `cache\icons\*.png` | 通过 |
+| `gdiicons` | 预热后反复取图，GDI 对象数不增长 | 通过 |
+| `clipboard` | 剪贴板被占用时返回 false（≈960 ms）、释放后 true | 通过 |
 
-v1.1 建议重点手测：
-
-1. 标题栏「自定义」打开编辑器，左侧预览随参数实时变化；
-2. 调色板选色 / 选图 / 拖遮罩，卡片与文字仍清晰，读数随动；
-3. 「应用」后重启仍是自定义；「取消」回到原主题；
-4. 「恢复默认主题」后 `settings.json` 的 `Theme` 为 `System`；
-5. 切回深/浅/跟随系统时，图片层与遮罩层不残留。
+v1.1 时代的离屏渲染 / 布局 / 圆盘选择器 / 按键音 / 弹窗等验证台（原 `--shot`、`--layout` 等）已随早期界面重构退役，其覆盖点改由上面这些行为级用例与人工截图检查承担。
 
 ---
 

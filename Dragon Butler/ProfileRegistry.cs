@@ -36,13 +36,19 @@ public static class ProfileRegistry
     /// <summary>全部已加载的工具档案（只读视图）。</summary>
     public static IReadOnlyList<ToolProfile> All => _all;
 
-    /// <summary>按 ToolId 取档案；找不到时回退到 bettergi（保持旧行为）。</summary>
+    /// <summary>按 ToolId 取档案；找不到时返回同 ID 的空档案（绝不回退到 BGI，避免误改内置配置）。</summary>
     public static ToolProfile Get(string toolId)
     {
         if (_all.Count == 0) _all.AddRange(ToolProfileDefaults.CreateAll());
         return _all.FirstOrDefault(p => string.Equals(p.ToolId, toolId, StringComparison.OrdinalIgnoreCase))
-               ?? _all[0];
+               ?? new ToolProfile { ToolId = toolId, DisplayName = toolId };
     }
+
+    /// <summary>是否内置工具（不允许删除/改 ID）。</summary>
+    public static bool IsBuiltIn(string toolId)
+        => string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(toolId, "march7th", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(toolId, "ok-ww", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>BGI 档案（旧代码的唯一入口，等价于 Get("bettergi")）。</summary>
     public static ToolProfile BetterGi => Get("bettergi");
@@ -86,7 +92,7 @@ public static class ProfileRegistry
         LoadInternal();
     }
 
-    /// <summary>保存单个档案：写 tools/{ToolId}.json，并同步到 settings.Tools。</summary>
+    /// <summary>保存单个档案：写 tools/{ToolId}.json，同步 settings.Tools 与内存注册表。</summary>
     public static void Save(ToolProfile profile)
     {
         try
@@ -97,11 +103,44 @@ public static class ProfileRegistry
                 JsonSerializer.Serialize(profile, WriteOpt));
 
             AppState.Settings.Tools[profile.ToolId] = profile.Clone();
+            int idx = _all.FindIndex(p => string.Equals(p.ToolId, profile.ToolId, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) _all[idx] = profile.Clone();
+            else _all.Add(profile.Clone());
+
             AppState.SaveSettings();
         }
         catch (Exception ex)
         {
             LogService.LogEvent($"保存工具档案 {profile.ToolId} 失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 删除自定义工具：档案文件、settings、队列项与图标缓存一并清理。内置工具拒绝删除。
+    /// </summary>
+    public static bool Remove(string toolId)
+    {
+        if (IsBuiltIn(toolId)) return false;
+        try
+        {
+            _all.RemoveAll(p => string.Equals(p.ToolId, toolId, StringComparison.OrdinalIgnoreCase));
+            AppState.Settings.Tools.Remove(toolId);
+            AppState.Settings.Queue?.RemoveAll(e => string.Equals(e.ToolId, toolId, StringComparison.OrdinalIgnoreCase));
+            try
+            {
+                string file = Path.Combine(ToolsDir, toolId + ".json");
+                if (File.Exists(file)) File.Delete(file);
+            }
+            catch (Exception ex) { LogService.LogEvent("删除工具档案文件失败：" + ex.Message); }
+            ToolIconService.Invalidate(toolId);
+            AppState.SaveSettings();
+            LogService.LogEvent($"已删除自定义工具：{toolId}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent($"删除工具 {toolId} 失败：{ex.Message}");
+            return false;
         }
     }
 
