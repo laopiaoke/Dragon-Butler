@@ -10,9 +10,9 @@
     <ApplicationIcon>Dragon Butler.ico</ApplicationIcon>
     <AssemblyName>Dragon Butler</AssemblyName>
     <RootNamespace>DragonButler</RootNamespace>
-    <Version>1.4.0</Version>
-    <FileVersion>1.4.0.0</FileVersion>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
+    <Version>1.5.0</Version>
+    <FileVersion>1.5.0.0</FileVersion>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
     <Product>一条龙管家</Product>
     <Company>Dragon Butler</Company>
     <Description>BetterGI 一条龙的启停管家与守护工具</Description>

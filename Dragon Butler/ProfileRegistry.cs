@@ -132,6 +132,7 @@ public static class ProfileRegistry
                 if (File.Exists(file)) File.Delete(file);
             }
             catch (Exception ex) { LogService.LogEvent("删除工具档案文件失败：" + ex.Message); }
+            ToolIconService.ClearOverride(toolId);
             ToolIconService.Invalidate(toolId);
             AppState.SaveSettings();
             LogService.LogEvent($"已删除自定义工具：{toolId}");

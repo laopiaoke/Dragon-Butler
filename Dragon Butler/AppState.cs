@@ -19,6 +19,12 @@ public sealed class QueueEntry
 
     /// <summary>是否启用（界面勾选）。</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// v1.5 按日计划：bit0=周一 … bit6=周日，默认 0x7F（每天）。
+    /// 只对定时触发生效；手动「一键开跑」永远跑当前勾选，不受它限制。
+    /// </summary>
+    public int WeekdayMask { get; set; } = 0x7F;
 }
 
 /// <summary>
@@ -162,6 +168,13 @@ public class AppSettings
 
     /// <summary>护航前屏保原值（-1=未知/无需恢复；0=关闭；1=开启）。异常退出后下次启动补偿。</summary>
     public int KeepAwakeScreenSaverOriginal { get; set; } = -1;
+
+    // ===== v1.5：晨报 =====
+    /// <summary>晨报（默认关）：每天首次启动时用一句话汇报昨日的队列情况。</summary>
+    public bool MorningReportEnabled { get; set; } = false;
+
+    /// <summary>上次播报晨报的日期（yyyy-MM-dd），防止同一天重复播报。</summary>
+    public string MorningReportDate { get; set; } = "";
 
     /// <summary>最近一次守护告警时间（底部盾牌转黄用），空=从未告警。</summary>
     public DateTime? ShieldAlertAt { get; set; }

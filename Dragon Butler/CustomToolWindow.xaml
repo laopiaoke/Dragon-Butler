@@ -39,8 +39,33 @@
             </Setter>
         </Style>
 
-        <Style x:Key="Label" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11.5"/>
+        <!-- 多行输入：内容从顶部开始，滚动而不是垂直居中 -->
+        <Style x:Key="FieldMulti" TargetType="TextBox">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource InsetBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Bd" CornerRadius="7" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Label" TargetType="TextBlock">            <Setter Property="FontSize" Value="11.5"/>
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
             <Setter Property="Margin" Value="0,12,0,6"/>
         </Style>
@@ -197,6 +222,8 @@
                                      Style="{StaticResource Seg}" Checked="DoneMode_Checked" Tag="exit"/>
                         <RadioButton x:Name="RbDuration" Content="到达时长" GroupName="done"
                                      Style="{StaticResource Seg}" Checked="DoneMode_Checked" Tag="duration"/>
+                        <RadioButton x:Name="RbCustom" Content="自定义信号" GroupName="done"
+                                     Style="{StaticResource Seg}" Checked="DoneMode_Checked" Tag="custom"/>
                     </StackPanel>
                     <Grid x:Name="DurationRow" Margin="0,8,0,0" Visibility="Collapsed">
                         <Grid.ColumnDefinitions>
@@ -212,7 +239,39 @@
                         <TextBlock Grid.Column="2" Text="分钟视为完成" FontSize="11.5" Margin="8,0,0,0"
                                    VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}"/>
                     </Grid>
-                    <TextBlock Text="进程退出：等程序自己结束；到达时长：跑满 N 分钟后自动收尾（会结束进程）。"
+
+                    <StackPanel x:Name="CustomSignalPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                        <TextBlock x:Name="TbCustomError" FontSize="10.5" Margin="0,0,0,8" Visibility="Collapsed"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource DangerBrush}"/>
+
+                        <TextBlock Text="日志包含文本" FontSize="11" Margin="0,0,0,5"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <TextBox x:Name="TbCustomLog" Style="{StaticResource FieldMulti}" Height="64"
+                                 AcceptsReturn="True" TextWrapping="Wrap"/>
+                        <TextBlock Text="一行一条，命中任意一行就算完成；只看程序目录（含 log / logs）下 *.log、*.txt 的新增内容。"
+                                   Style="{StaticResource Hint}"/>
+
+                        <TextBlock Text="等待文件出现" FontSize="11" Margin="0,12,0,5"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="TbCustomFile" Style="{StaticResource Field}"/>
+                            <Button Grid.Column="1" Content="浏览…" Style="{StaticResource Ghost}" Height="32"
+                                    Margin="8,0,0,0" Padding="14,0" Click="BtnCustomFile_Click"/>
+                        </Grid>
+                        <TextBlock Text="文件出现即视为完成；可以填一个还没生成的文件名。" Style="{StaticResource Hint}"/>
+
+                        <TextBlock Text="主窗口标题包含" FontSize="11" Margin="0,12,0,5"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <TextBox x:Name="TbCustomTitle" Style="{StaticResource Field}"/>
+                        <TextBlock Text="例如工具跑完会弹出「任务完成」窗口，填这四个字即可。"
+                                   Style="{StaticResource Hint}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="进程退出：等程序自己结束；到达时长：跑满 N 分钟后自动收尾（会结束进程）；自定义信号：三种条件任填至少一项，命中后进入互证。"
                                Style="{StaticResource Hint}"/>
 
                     <TextBlock Text="最大运行时长（分钟）" Style="{StaticResource Label}"/>

@@ -134,13 +134,23 @@ public static class QueueService
                 return false;
             }
 
-            var items = BuildItems();
+            var items = BuildItems(trigger);
             if (items.Count == 0)
             {
                 if (trigger == QueueTrigger.Timer)
                 {
-                    LogService.LogEvent("队列：定时触发但队列为空");
-                    NotifyService.Show(NotifyLevel.Warning, "龙管家", "定时触发但队列为空，请先勾选要运行的工具。");
+                    bool hasEnabled = (AppState.Settings.Queue ?? new List<QueueEntry>()).Any(e => e.Enabled);
+                    if (hasEnabled)
+                    {
+                        // v1.5 按日计划：勾了工具但今天这一天空着 → 不算异常，跳过并说明
+                        LogService.LogEvent("队列：今日计划为空，已跳过定时触发");
+                        NotifyService.Show(NotifyLevel.Warning, "龙管家", "今日计划为空，已跳过定时触发。");
+                    }
+                    else
+                    {
+                        LogService.LogEvent("队列：定时触发但队列为空");
+                        NotifyService.Show(NotifyLevel.Warning, "龙管家", "定时触发但队列为空，请先勾选要运行的工具。");
+                    }
                 }
                 else
                 {
@@ -408,19 +418,50 @@ public static class QueueService
         LogService.LogEvent("队列：收到停止请求");
     }
 
-    /// <summary>队列中的条目 → 已配置可执行的 profile 列表（保持顺序）。</summary>
-    private static List<ToolProfile> BuildItems()
+    /// <summary>
+    /// 队列中的条目 → 已配置可执行的 profile 列表（保持顺序）。
+    /// v1.5：定时触发只取"今天这一位为 1"的条目；手动触发不看按日计划（手动永远跑当前勾选）。
+    /// </summary>
+    private static List<ToolProfile> BuildItems(QueueTrigger trigger)
     {
+        int todayBit = WeekdayBit(DateTime.Now);
         var list = new List<ToolProfile>();
+        int skippedByPlan = 0;
+
         foreach (var entry in AppState.Settings.Queue ?? new List<QueueEntry>())
         {
             if (!entry.Enabled) continue;
+            if (trigger == QueueTrigger.Timer && (entry.WeekdayMask & (1 << todayBit)) == 0)
+            {
+                skippedByPlan++;
+                continue;
+            }
             var p = ProfileRegistry.Get(entry.ToolId);
             if (string.Equals(p.ToolId, entry.ToolId, StringComparison.OrdinalIgnoreCase))
                 list.Add(p);
         }
+
+        if (trigger == QueueTrigger.Timer && skippedByPlan > 0)
+            LogService.LogEvent($"队列：今日计划命中 {list.Count} 项，按计划跳过 {skippedByPlan} 项");
+
         return list;
     }
+
+    /// <summary>今天星期对应 <see cref="QueueEntry.WeekdayMask"/> 的位号：周一=0 … 周日=6。</summary>
+    public static int WeekdayBit(DateTime day) => ((int)day.DayOfWeek + 6) % 7;
+
+    /// <summary>今天按计划会执行哪些工具（UI 摘要用；停用的不算）。</summary>
+    public static List<QueueEntry> PlanForToday(DateTime day)
+    {
+        int bit = WeekdayBit(day);
+        return (AppState.Settings.Queue ?? new List<QueueEntry>())
+            .Where(e => e.Enabled && (e.WeekdayMask & (1 << bit)) != 0)
+            .ToList();
+    }
+
+    /// <summary>按日计划是否被改过（不是"每天全选"）。</summary>
+    public static bool HasCustomPlan()
+        => (AppState.Settings.Queue ?? new List<QueueEntry>()).Any(e => (e.WeekdayMask & 0x7F) != 0x7F);
 
     /// <summary>单个工具执行（含一次重试）。</summary>
     public static async Task<QueueItemResult> RunItemAsync(ToolProfile profile, QueueTrigger trigger, CancellationToken ct)

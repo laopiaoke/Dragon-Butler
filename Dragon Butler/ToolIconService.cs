@@ -28,29 +28,129 @@ public static class ToolIconService
     /// <summary>图标缓存目录。</summary>
     public static string CacheDir => Path.Combine(AppContext.BaseDirectory, "cache", "icons");
 
-    /// <summary>取工具图标（失败返回 null，调用方回退到首字母）。</summary>
+    /// <summary>取工具图标（失败返回 null，调用方回退到首字母）。手动换过的图标优先。</summary>
     public static BitmapSource? GetBitmap(ToolProfile profile)
     {
         if (string.IsNullOrWhiteSpace(profile.ToolId)) return null;
+
+        string ov = OverridePath(profile.ToolId);
+        try
+        {
+            if (File.Exists(ov))
+            {
+                DateTime write = File.GetLastWriteTimeUtc(ov);
+                lock (Gate)
+                {
+                    string key = "ov:" + profile.ToolId;
+                    if (Memory.TryGetValue(key, out var hit) && hit.SourceWrite == write) return hit.Bitmap;
+                    BitmapSource? bmp = Load(ov);
+                    Memory[key] = new CacheEntry { Source = ov, SourceWrite = write, Bitmap = bmp };
+                    return bmp;
+                }
+            }
+        }
+        catch { }
+
         if (string.IsNullOrWhiteSpace(profile.ExecutablePath) || !File.Exists(profile.ExecutablePath)) return null;
 
         string source = profile.ExecutablePath;
-        DateTime write;
-        try { write = File.GetLastWriteTimeUtc(source); }
+        DateTime sourceWrite;
+        try { sourceWrite = File.GetLastWriteTimeUtc(source); }
         catch { return null; }
 
         lock (Gate)
         {
             if (Memory.TryGetValue(profile.ToolId, out var hit)
                 && string.Equals(hit.Source, source, StringComparison.OrdinalIgnoreCase)
-                && hit.SourceWrite == write)
+                && hit.SourceWrite == sourceWrite)
                 return hit.Bitmap;
 
-            string? file = EnsureIconFile(profile, source, write);
+            string? file = EnsureIconFile(profile, source, sourceWrite);
             BitmapSource? bmp = file == null ? null : Load(file);
-            Memory[profile.ToolId] = new CacheEntry { Source = source, SourceWrite = write, Bitmap = bmp };
+            Memory[profile.ToolId] = new CacheEntry { Source = source, SourceWrite = sourceWrite, Bitmap = bmp };
             return bmp;
         }
+    }
+
+    /// <summary>手动图标文件（<c>cache\icons\ov_{toolId}.png</c>）。</summary>
+    public static string OverridePath(string toolId)
+        => Path.Combine(CacheDir, "ov_" + SafeName(toolId) + ".png");
+
+    /// <summary>这个工具是否手动换过图标。</summary>
+    public static bool HasOverride(string toolId)
+    {
+        try { return File.Exists(OverridePath(toolId)); } catch { return false; }
+    }
+
+    /// <summary>
+    /// 手动设置图标：支持 .ico / .exe / .png / .jpg / .bmp，统一转成 PNG 存进缓存。
+    /// 返回 null 表示成功，否则为给用户看的失败原因。
+    /// </summary>
+    public static string? SetOverride(string toolId, string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(toolId)) return "工具标识为空。";
+        if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath)) return "找不到这个文件，重新选一次。";
+
+        try
+        {
+            BitmapSource? bmp = DecodeAny(sourcePath);
+            if (bmp == null) return "这个文件里读不出图标，换一张图片或 .ico 试试。";
+
+            Directory.CreateDirectory(CacheDir);
+            string target = OverridePath(toolId);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bmp));
+            using (var fs = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
+                encoder.Save(fs);
+
+            lock (Gate) Memory.Remove("ov:" + toolId);
+            LogService.LogEvent($"图标：{toolId} 已更换为 {Path.GetFileName(sourcePath)}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("设置图标失败：" + ex.Message);
+            return "这个文件读不出来，换一张试试。";
+        }
+    }
+
+    /// <summary>恢复默认图标（删掉手动图标，回到从 exe 提取）。</summary>
+    public static void ClearOverride(string toolId)
+    {
+        try
+        {
+            string file = OverridePath(toolId);
+            if (File.Exists(file)) File.Delete(file);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("恢复默认图标失败：" + ex.Message);
+        }
+        lock (Gate) Memory.Remove("ov:" + toolId);
+        Invalidate(toolId);
+    }
+
+    /// <summary>把任意图片/ico/exe 解码成 BitmapSource（优先取最大的一帧）。</summary>
+    private static BitmapSource? DecodeAny(string path)
+    {
+        string ext = Path.GetExtension(path).ToLowerInvariant();
+        if (ext is ".exe" or ".dll") return Extract(path);
+
+        if (ext == ".ico")
+        {
+            var decoder = new IconBitmapDecoder(new Uri(path, UriKind.Absolute),
+                BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            BitmapSource? best = null;
+            foreach (var frame in decoder.Frames)
+                if (best == null || frame.PixelWidth > best.PixelWidth) best = frame;
+            if (best != null) best.Freeze();
+            return best;
+        }
+
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var bmp = BitmapFrame.Create(fs, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        bmp.Freeze();
+        return bmp;
     }
 
     /// <summary>清除某工具的图标缓存（改路径/删除工具时调用）。</summary>

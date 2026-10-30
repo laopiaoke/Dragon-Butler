@@ -95,6 +95,8 @@ public static class ToolRunner
         CompletionSignalKind.GameProcessExit => new GameProcessExitSignalSource(),
         CompletionSignalKind.LogPattern => new LogPatternSignalSource(),
         CompletionSignalKind.Duration => new DurationSignalSource(),
+        CompletionSignalKind.WindowTitle => new WindowTitleSignalSource(),
+        CompletionSignalKind.CustomSignal => new CustomSignalSource(),
         _ => new ProcessExitSignalSource(),
     };
 

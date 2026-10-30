@@ -161,13 +161,16 @@ public static class GroupArchive
     }
 
     /// <summary>当天全部配置组记录</summary>
-    public static List<GroupRecord> GetTodayGroups()
+    public static List<GroupRecord> GetTodayGroups() => GetDay(DateTime.Now);
+
+    /// <summary>指定某天的配置组记录（v1.5 晨报用；无记录返回空列表）。</summary>
+    public static List<GroupRecord> GetDay(DateTime day)
     {
         lock (Gate)
         {
             EnsureLoaded();
-            string today = DateTime.Now.ToString("yyyy-MM-dd");
-            if (_data.TryGetValue(today, out var list))
+            string key = day.ToString("yyyy-MM-dd");
+            if (_data.TryGetValue(key, out var list))
                 return list.Select(r => new GroupRecord
                 {
                     Name = r.Name, Start = r.Start, End = r.End, Segments = r.Segments, Source = r.Source,

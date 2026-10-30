@@ -237,6 +237,7 @@ public partial class MainWindow : Window
         TgKeepAwake.IsChecked = s.KeepAwakeEnabled;
         TgNightScreen.IsChecked = s.NightScreenEnabled;
         TgStallAutoKill.IsChecked = s.StallAutoKill;
+        TgMorningReport.IsChecked = s.MorningReportEnabled;
         TbNightMinutes.Text = Math.Clamp(s.NightScreenMinutes, 5, 120).ToString();
         TbNightMinutes.IsEnabled = s.NightScreenEnabled;
         TgVacation.IsChecked = s.VacationMode;
@@ -438,6 +439,7 @@ public partial class MainWindow : Window
             bool anyEnabled = queue.Any(e => e.Enabled);
             QueueEmptyHint.Visibility = anyEnabled ? Visibility.Collapsed : Visibility.Visible;
             _suppressQueueUi = false;
+            RefreshPlanSummary();
             UpdateQueueButtons();
         }
         catch (Exception ex)
@@ -474,6 +476,7 @@ public partial class MainWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
 
         var drag = new TextBlock
@@ -521,6 +524,27 @@ public partial class MainWindow : Window
         Grid.SetColumn(name, 3);
         grid.Children.Add(name);
 
+        // v1.5：这一项每周跑几天（点一下打开按日计划矩阵）
+        int planMask = entry.WeekdayMask & 0x7F;
+        int planDays = 0;
+        for (int d = 0; d < 7; d++) if ((planMask & (1 << d)) != 0) planDays++;
+        var plan = new TextBlock
+        {
+            Text = planDays == 7 ? "每天" : $"{planDays}天",
+            FontSize = 9.5,
+            Tag = "plan",
+            Cursor = Cursors.Hand,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            ToolTip = "按日计划：" + WeeklyPlanWindow.MaskText(planMask) + "（点一下修改）",
+            Foreground = planDays == 0
+                ? (BrushOf("WarningBrush") ?? DotYellow)
+                : (BrushOf("TextTertiaryBrush") ?? DotGray),
+        };
+        plan.MouseLeftButtonUp += (_, _) => OpenWeeklyPlan();
+        Grid.SetColumn(plan, 4);
+        grid.Children.Add(plan);
+
         var chev = new TextBlock
         {
             Text = "☰",
@@ -529,7 +553,7 @@ public partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
-        Grid.SetColumn(chev, 4);
+        Grid.SetColumn(chev, 5);
         grid.Children.Add(chev);
 
         var border = new Border
@@ -566,6 +590,7 @@ public partial class MainWindow : Window
 
     private void QueueRow_MouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (e.OriginalSource is TextBlock { Tag: "plan" }) return;
         if (sender is Border b && b.Tag is int idx && e.OriginalSource is not CheckBox)
         {
             _dragFrom = idx;
@@ -652,6 +677,66 @@ public partial class MainWindow : Window
     {
         QueueService.CancelShutdown();
         BtnQueueCancelShutdown.Visibility = Visibility.Collapsed;
+    }
+
+    // ===== v1.5 按日计划 =====
+
+    private void BtnWeeklyPlan_Click(object sender, RoutedEventArgs e) => OpenWeeklyPlan();
+
+    private void OpenWeeklyPlan()
+    {
+        try
+        {
+            if ((AppState.Settings.Queue ?? new List<QueueEntry>()).Count == 0)
+            {
+                NotifyService.Show(NotifyLevel.Info, "龙管家", "队列里还没有工具：先在下方工具卡添加或勾选一个。");
+                return;
+            }
+            var dlg = new WeeklyPlanWindow { Owner = this };
+            if (dlg.ShowDialog() == true && dlg.Saved)
+            {
+                RenderQueue();
+                AppState.PublishLog("✓ 已保存按日计划");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开按日计划失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>队列卡上的一句话摘要：今天按计划跑几项。</summary>
+    private void RefreshPlanSummary()
+    {
+        try
+        {
+            var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
+            bool any = queue.Any(e => e.Enabled);
+            TbPlanSummary.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+            if (!any) return;
+
+            var today = QueueService.PlanForToday(DateTime.Now);
+            int bit = QueueService.WeekdayBit(DateTime.Now);
+            string[] names = { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
+
+            if (!QueueService.HasCustomPlan())
+            {
+                TbPlanSummary.Text = $"按日计划：每天全选 · 今天 {today.Count} 项";
+                TbPlanSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+            }
+            else if (today.Count == 0)
+            {
+                TbPlanSummary.Text = $"按日计划：今天（{names[bit]}）为空，定时触发会跳过";
+                TbPlanSummary.Foreground = BrushOf("WarningBrush") ?? DotYellow;
+            }
+            else
+            {
+                TbPlanSummary.Text = $"按日计划：今天（{names[bit]}）跑 {today.Count} 项 · "
+                    + string.Join("、", today.Select(t => ProfileRegistry.Get(t.ToolId).DisplayName));
+                TbPlanSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+            }
+        }
+        catch { }
     }
 
     private void CbAfterRun_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -903,9 +988,19 @@ public partial class MainWindow : Window
             Tag = profile.ToolId,
         };
         test.Click += CustomToolTest_Click;
+        var iconBtn = new Button
+        {
+            Content = "换图标",
+            Style = TryFindResource("MiniAction") as Style,
+            Margin = new Thickness(6, 0, 0, 0),
+            Tag = profile.ToolId,
+            ToolTip = "换成你喜欢的图标（.ico / .exe / .png）",
+        };
+        iconBtn.Click += ToolIcon_Click;
 
         var pathGrid = new Grid();
         pathGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        pathGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         pathGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         pathGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         pathGrid.Children.Add(path);
@@ -913,6 +1008,8 @@ public partial class MainWindow : Window
         pathGrid.Children.Add(edit);
         Grid.SetColumn(test, 2);
         pathGrid.Children.Add(test);
+        Grid.SetColumn(iconBtn, 3);
+        pathGrid.Children.Add(iconBtn);
 
         var hint = new TextBlock
         {
@@ -986,9 +1083,13 @@ public partial class MainWindow : Window
             card.State.Foreground = BrushOf("BrandBrush") ?? DotGreen;
         }
 
-        string done = profile.PrimarySignal == CompletionSignalKind.Duration
-            ? $"到达 {profile.CustomData.GetValueOrDefault("durationMinutes", "60")} 分钟"
-            : "进程退出（退出码 0）";
+        string done = profile.PrimarySignal switch
+        {
+            CompletionSignalKind.Duration =>
+                $"到达 {profile.CustomData.GetValueOrDefault("durationMinutes", "60")} 分钟",
+            CompletionSignalKind.CustomSignal => "自定义信号 · " + CustomSignalSummary(profile),
+            _ => "进程退出（退出码 0）",
+        };
         card.Hint.Text = $"完成方式：{done} · 最大 {profile.MaxDurationMinutes} 分钟";
 
         var bmp = ToolIconService.GetBitmap(profile);
@@ -1005,8 +1106,65 @@ public partial class MainWindow : Window
         }
     }
 
-    private void CustomToolEdit_Click(object sender, RoutedEventArgs e)
+    // ===== v1.5 图标更换 =====
+
+    private void ToolIcon_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is not Button btn || btn.Tag is not string toolId) return;
+        var profile = ProfileRegistry.Get(toolId);
+        bool has = ToolIconService.HasOverride(toolId);
+        bool pick = AppDialog.Show(
+            $"给「{profile.DisplayName}」换一个图标？",
+            has ? "当前用的是你手动设置的图标；也可以恢复成程序自带的。"
+                : "支持 .ico / .png / .jpg，也可以直接选另一个 exe 借它的图标。",
+            AppDialog.Kind.Info,
+            "更换图标",
+            "选择图片…",
+            has ? "恢复默认" : null,
+            has ? () => ResetToolIcon(toolId) : null,
+            this);
+        if (!pick) return;
+        ChangeToolIcon(toolId);
+    }
+
+    private void ChangeToolIcon(string toolId)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "选择图标",
+            Filter = "图标或图片|*.ico;*.png;*.jpg;*.jpeg;*.bmp;*.exe|所有文件|*.*",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        string? err = ToolIconService.SetOverride(toolId, dlg.FileName);
+        if (err != null)
+        {
+            AppDialog.Show(err, null, AppDialog.Kind.Warning, "更换图标", "知道了", null, null, this);
+            return;
+        }
+        RefreshToolCards();
+        AppState.PublishLog($"✓ 已更换图标：{ProfileRegistry.Get(toolId).DisplayName}");
+    }
+
+    private void ResetToolIcon(string toolId)
+    {
+        ToolIconService.ClearOverride(toolId);
+        RefreshToolCards();
+        AppState.PublishLog($"已恢复默认图标：{ProfileRegistry.Get(toolId).DisplayName}");
+    }
+
+    /// <summary>自定义信号的一句话摘要（卡片提示用）。</summary>
+    private static string CustomSignalSummary(ToolProfile profile)
+    {
+        var parts = new List<string>();
+        var (texts, file, title) = CustomSignalSource.ReadConfig(profile);
+        if (texts.Length > 0) parts.Add($"日志 {texts.Length} 条");
+        if (file.Length > 0) parts.Add("等文件");
+        if (title.Length > 0) parts.Add("等窗口标题");
+        return parts.Count > 0 ? string.Join(" / ", parts) : "未配置";
+    }
+
+    private void CustomToolEdit_Click(object sender, RoutedEventArgs e)    {
         if (sender is not Button btn || btn.Tag is not string toolId) return;
         var profile = ProfileRegistry.Get(toolId);
         var dlg = new CustomToolWindow(profile) { Owner = this };
@@ -1772,6 +1930,16 @@ public partial class MainWindow : Window
         AppState.Settings.StallAutoKill = TgStallAutoKill.IsChecked == true;
         AppState.SaveSettings();
         LogService.LogEvent("疑似挂起自动终止：" + (AppState.Settings.StallAutoKill ? "开启" : "关闭"));
+    }
+
+    private void TgMorningReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgMorningReport.IsChecked == true;
+        AppState.Settings.MorningReportEnabled = on;
+        AppState.SaveSettings();
+        LogService.LogEvent("晨报：" + (on ? "开启" : "关闭"));
+        if (on) AppState.PublishLog("晨报已开启：每天首次打开时用一句话汇报昨天的情况");
     }
 
     private void CbFailStrategy_SelectionChanged(object sender, SelectionChangedEventArgs e)

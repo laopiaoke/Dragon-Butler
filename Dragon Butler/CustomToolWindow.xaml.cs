@@ -39,9 +39,22 @@ public partial class CustomToolWindow : Window
             TbProcess.Text = _original.ManagedProcessName;
             TbGames.Text = string.Join(";", _original.GameProcessNames ?? Array.Empty<string>());
             TbMax.Text = Math.Max(1, _original.MaxDurationMinutes).ToString();
-            bool duration = _original.PrimarySignal == CompletionSignalKind.Duration;
-            RbDuration.IsChecked = duration;
-            RbExit.IsChecked = !duration;
+            switch (_original.PrimarySignal)
+            {
+                case CompletionSignalKind.Duration:
+                    RbDuration.IsChecked = true;
+                    break;
+                case CompletionSignalKind.CustomSignal:
+                    RbCustom.IsChecked = true;
+                    var (texts, file, title) = CustomSignalSource.ReadConfig(_original);
+                    TbCustomLog.Text = string.Join(Environment.NewLine, texts);
+                    TbCustomFile.Text = file;
+                    TbCustomTitle.Text = title;
+                    break;
+                default:
+                    RbExit.IsChecked = true;
+                    break;
+            }
             if (_original.CustomData.TryGetValue("durationMinutes", out string? d)
                 && int.TryParse(d, out int minutes))
                 TbDuration.Text = minutes.ToString();
@@ -75,8 +88,26 @@ public partial class CustomToolWindow : Window
     {
         if (!_loaded) return;
         bool duration = RbDuration.IsChecked == true;
+        bool custom = RbCustom.IsChecked == true;
         if (DurationRow != null)
             DurationRow.Visibility = duration ? Visibility.Visible : Visibility.Collapsed;
+        if (CustomSignalPanel != null)
+            CustomSignalPanel.Visibility = custom ? Visibility.Visible : Visibility.Collapsed;
+        if (!custom && TbCustomError != null) TbCustomError.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>「等待文件出现」的路径可能还不存在，所以允许选一个尚未生成的文件名。</summary>
+    private void BtnCustomFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "选择要等待的文件（可以填还没生成的）",
+            Filter = "所有文件|*.*",
+            CheckFileExists = false,
+            ValidateNames = false,
+        };
+        if (dlg.ShowDialog(this) == true && !string.IsNullOrWhiteSpace(dlg.FileName))
+            TbCustomFile.Text = dlg.FileName;
     }
 
     private void BtnBrowse_Click(object sender, RoutedEventArgs e)
@@ -188,6 +219,7 @@ public partial class CustomToolWindow : Window
             }
 
             bool duration = RbDuration.IsChecked == true;
+            bool custom = RbCustom.IsChecked == true;
             int durationMinutes = 60;
             if (duration
                 && (!int.TryParse(TbDuration.Text.Trim(), out durationMinutes)
@@ -197,6 +229,17 @@ public partial class CustomToolWindow : Window
                 TbDuration.Focus();
                 return;
             }
+
+            string customLog = (TbCustomLog.Text ?? "").Trim();
+            string customFile = (TbCustomFile.Text ?? "").Trim();
+            string customTitle = (TbCustomTitle.Text ?? "").Trim();
+            if (custom && customLog.Length == 0 && customFile.Length == 0 && customTitle.Length == 0)
+            {
+                ShowCustomError("自定义信号至少要填一项：日志文本 / 等待文件 / 窗口标题，三项全空不算完成条件。");
+                TbCustomLog.Focus();
+                return;
+            }
+            TbCustomError.Visibility = Visibility.Collapsed;
 
             if (!int.TryParse(TbMax.Text.Trim(), out int maxMinutes)
                 || maxMinutes < 1 || maxMinutes > 1440)
@@ -222,14 +265,28 @@ public partial class CustomToolWindow : Window
             profile.LaunchArguments = (TbArgs.Text ?? "").Trim();
             profile.ManagedProcessName = process;
             profile.GameProcessNames = games;
-            profile.PrimarySignal = duration ? CompletionSignalKind.Duration : CompletionSignalKind.ProcessExit0;
-            profile.SecondarySignals = Array.Empty<CompletionSignalKind>();
+            profile.PrimarySignal = custom
+                ? CompletionSignalKind.CustomSignal
+                : (duration ? CompletionSignalKind.Duration : CompletionSignalKind.ProcessExit0);
+            // 自定义信号命中后进入 Resolving，靠"进程退出（退出码 0）"或宽限收尾
+            profile.SecondarySignals = custom
+                ? new[] { CompletionSignalKind.ProcessExit0 }
+                : Array.Empty<CompletionSignalKind>();
             profile.LogCompletionPattern = null;
             profile.MaxDurationMinutes = maxMinutes;
-            profile.PostExitGraceMinutes = 0;
+            profile.PostExitGraceMinutes = custom ? 5 : 0;
             profile.RetryCount = 1;
             profile.CustomData["custom"] = "1";
             profile.CustomData["durationMinutes"] = durationMinutes.ToString();
+            profile.CustomData.Remove(CustomSignalKeys.LogTexts);
+            profile.CustomData.Remove(CustomSignalKeys.FilePath);
+            profile.CustomData.Remove(CustomSignalKeys.WindowTitle);
+            if (custom)
+            {
+                if (customLog.Length > 0) profile.CustomData[CustomSignalKeys.LogTexts] = customLog;
+                if (customFile.Length > 0) profile.CustomData[CustomSignalKeys.FilePath] = customFile;
+                if (customTitle.Length > 0) profile.CustomData[CustomSignalKeys.WindowTitle] = customTitle;
+            }
 
             ToolIconService.Invalidate(profile.ToolId);
             ProfileRegistry.Save(profile);
@@ -279,5 +336,14 @@ public partial class CustomToolWindow : Window
     {
         TbError.Text = message;
         TbError.Visibility = Visibility.Visible;
+        try { TbError.BringIntoView(); } catch { }
+    }
+
+    /// <summary>自定义信号区域的错误（三项全空时用，位置在面板顶部，避免滚出视野）。</summary>
+    private void ShowCustomError(string message)
+    {
+        TbCustomError.Text = message;
+        TbCustomError.Visibility = Visibility.Visible;
+        try { TbCustomError.BringIntoView(); } catch { }
     }
 }

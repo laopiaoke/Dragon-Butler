@@ -71,6 +71,9 @@ public partial class App : Application
         _win = new MainWindow();
         _win.Show();
 
+        // v1.5 晨报：每天首次启动播报一句（默认关）
+        MorningReportService.MaybeShow();
+
         BuildTray();
 
         if (AppState.Settings.SentinelEnabled) SentinelService.Start();

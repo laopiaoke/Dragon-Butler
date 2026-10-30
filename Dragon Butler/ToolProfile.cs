@@ -22,6 +22,12 @@ public enum CompletionSignalKind
 
     /// <summary>到达设定时长即视为完成（自定义工具的“到达时长”模式）。</summary>
     Duration = 4,
+
+    /// <summary>工具主窗口标题包含指定文本（v1.5；也可作为自定义信号的一项）。</summary>
+    WindowTitle = 5,
+
+    /// <summary>自定义信号（v1.5）：日志文本 / 文件出现 / 窗口标题，任一命中即算完成。</summary>
+    CustomSignal = 6,
 }
 
 /// <summary>
@@ -93,6 +99,22 @@ public sealed class ToolProfile
         copy.CustomData = new Dictionary<string, string>(CustomData, StringComparer.OrdinalIgnoreCase);
         return copy;
     }
+}
+
+/// <summary>
+/// v1.5 自定义信号的 CustomData 键名。三项都可空，但至少要填一项；
+/// 统一放在这里，避免字符串散落到 UI、信号源与探针里。
+/// </summary>
+public static class CustomSignalKeys
+{
+    /// <summary>日志包含文本（多行或 | 分隔，任一命中即可）。</summary>
+    public const string LogTexts = "customLogTexts";
+
+    /// <summary>等待出现的文件绝对路径。</summary>
+    public const string FilePath = "customFilePath";
+
+    /// <summary>主窗口标题包含文本。</summary>
+    public const string WindowTitle = "customWindowTitle";
 }
 
 /// <summary>v1.3 内置的三个工具档案（本阶段只建数据，仅 bettergi 接 UI）。</summary>
