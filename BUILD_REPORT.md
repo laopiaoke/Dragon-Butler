@@ -50,6 +50,7 @@
 | **v1.3** | 10-29 | 次版本 | 多游戏排队 / 跑完动作 / 防打扰 / 自动寻找 / 三层 UI 改版 / 完成判定收敛 |
 | **v1.3.1** | 10-29 | 次版本 | 完成判定补强：BGI 进程退出也作为互证，老配置自动升级 |
 | **v1.4** | 10-30 | 次版本 | 挂机护航三合一、夜间息屏、疑似挂起仲裁、自定义工具与图标提取 |
+| **v1.5** | 10-30 | 次版本 | 按日计划、自定义信号三合一、窗口标题信号源、手动换图标、晨报 |
 
 ---
 
@@ -150,6 +151,18 @@
 - 发布产物命名带上版本号：压缩包为 `一条龙管家-v1.2-需.NET8运行时.zip` / `一条龙管家-v1.2-免安装便携版.zip`（版本取自 csproj `<Version>`，去掉末尾 `.0`）；包内顶层目录与源目录保持固定名，便于覆盖升级。
 - README 按使用者视角重写（189 行、5 张实拍截图、含"已知边界"）。
 
+### v1.5 · 按日计划与自由接入（10-30）
+
+- **按日计划**：`QueueEntry.WeekdayMask`（bit0=周一…bit6=周日，默认 0x7F）让每个队列项按星期生效；`QueueService.BuildItems` 只在 `Timer` 触发时过滤，手动与崩溃重启不受限。今日子集为空时跳过并发「今日计划为空，已跳过定时触发」。
+- **周计划编辑器**：`WeeklyPlanWindow` 7 天 × N 工具矩阵，点行/列标题整行整列切换，保存写回 `settings.Queue`；队列卡右上「按日计划」入口、每行显示「每天 / N天」、卡下方一句话写明今天跑哪几项。
+- **自定义信号**：`CustomSignalSource` 把三条路径合成一个主信号——日志文本（程序目录及其 `log` / `logs` 下的 `.log`、`.txt`，只看启动后新增内容）、等待文件出现、主窗口标题（委托 `WindowTitleSignalSource`），命中任一进入 `Resolving`，靠 `ProcessExit0` 互证或宽限收尾。
+- **窗口标题信号源**：`WindowTitleSignalSource` 用 `EnumWindows` 按 PID 枚举全部可见顶层窗口（不只 `MainWindowHandle`，兼容控制台程序带子窗口的情况），标题包含即抛信号；作为 `CompletionSignalKind.WindowTitle` 与其它信号源并列注册，可在 `tools/*.json` 里声明式装配。
+- **自定义工具表单**：完成方式从两选一扩到三选一，选「自定义信号」时展开三组输入；三项全空禁止保存，错误提示放在面板顶部并 `BringIntoView`，不会被滚动条藏住。
+- **图标手动上传**：`ToolIconService.SetOverride` / `ClearOverride` / `HasOverride`，支持 `.ico` / `.exe` / `.png` / `.jpg` / `.bmp`（`.ico` 取最大帧），统一转 PNG 存 `cache\icons\ov_{toolId}.png`，取图时 override 优先；内置三工具同样可用，删除工具时连带清理。
+- **晨报**：`MorningReportService` 每天首次启动读 `GroupArchive.GetDay(昨天)`，一句话汇报（N 次运行 / 全部成功 / 总耗时），默认关、同一天只播一次、无记录不播；开关在高级设置。
+- **探针**：新增 `weekplan`、`customsig-log`、`customsig-file`、`customsig-title`、`iconoverride`、`morning` 六个模式；`StubTool` 增加 `--log/--log-text/--log-after`、`--create-file/--file-after`、`--window`（创建真实顶层窗口）三种副作用。
+- 修 `icon` 探针自身的断言顺序问题（先 `Invalidate` 再判文件是否存在，永远为假）。
+
 ### v1.4 · 挂机护航与自定义工具（10-30）
 
 - **挂机护航三合一**（`KeepAwakeService`）：队列运行期间 `SetThreadExecutionState` 阻止空闲睡眠与显示器关闭、`ShutdownBlockReasonCreate` 拦下更新重启、屏保用 `SPI_SETSCREENSAVEACTIVE` + 注册表兜底关掉；队列结束（含失败/停止/异常退出）只还原真正改过的项，进程重启时按残留标记补偿。
@@ -242,10 +255,10 @@ dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self
 
 | 产物 | 路径 | 体积 |
 | --- | --- | --- |
-| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 555,640 B |
-| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.4-win-x64-runtime-dependent.zip` | ≈ 0.26 MB |
-| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,110,955 B |
-| portable 压缩包 | `发布/Dragon-Butler-v1.4-win-x64-portable.zip` | ≈ 62.75 MB |
+| runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 585,848 B |
+| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.5-win-x64-runtime-dependent.zip` | ≈ 0.26 MB |
+| portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,139,627 B |
+| portable 压缩包 | `发布/Dragon-Butler-v1.5-win-x64-portable.zip` | ≈ 62.77 MB |
 
 v1.3.1 的 `Dragon-Butler-v1.3.1-win-x64.zip`（便携版曾用的短名）已停用，v1.4 起只发上面两个**带变体后缀**的包，下载页不再有两个内容相同、名字不同的文件。
 
@@ -288,25 +301,26 @@ Dragon-Butler  -v1.2   -win-x64  -portable .zip
 
 v1.2 及以前只有编译 + 一次启动级冒烟。**v1.3 起引入 `tests/CoordinatorProbe` 控制台探针**：用假 BGI 进程拉起真实的 `QueueService` / `RunCoordinator`，把状态机、完成信号、队列行为和系统副作用跑成可重复的用例；不需要游戏，也不碰真实 BGI。
 
-v1.4 全量回归（`dotnet build` 0 错误 0 警告）：
+v1.5 全量回归（`dotnet build` 0 错误 0 警告，26 个模式全绿）：
 
-| 探针模式 | 断言 | v1.4 结果 |
+| 探针模式 | 断言 | v1.5 结果 |
 | --- | --- | --- |
-| `queue` | 三项按勾选顺序跑完，汇总 3/3 | 通过 |
-| `queuefail` | 失败重试一次，仍失败按 Skip 跳过 | 通过 |
-| `queueabort` | `Abort` 策略下失败即中止队列 | 通过 |
-| `queuehalted` | 报完成但进程不退 → `Halted` 并停队列 | 通过 |
-| `bgisecondary` | 锚点 + BGI 进程退出码 0 → `Done`（4.1s） | 通过 |
+| `queue` / `queuefail` / `queueabort` / `queuehalted` | 顺序、重试、失败策略、悬置停队列 | 通过 |
+| `bgisecondary` | 锚点 + BGI 进程退出码 0 → `Done`（4.4s） | 通过 |
 | `custom` | 自定义档案落盘、图标提取、队列判 `Done` | 通过 |
 | `duration` | 到达时长判 `Done` 并结束进程 | 通过 |
-| `stall` | 无 CPU/日志活动 → `Stalled`，队列暂停 | 通过 |
-| `stallkill` | 开自动终止 → 结束进程后继续下一项并 `Done` | 通过 |
-| `keepawake` | `powercfg /requests` 可见进程级请求，结束自动撤销 | 通过 |
-| `screensaver` | 屏保被关掉，结束后恢复原值 | 通过 |
-| `nightscreen` | DRYRUN 按分钟触发日志，不真的动屏 | 通过 |
-| `icon` | exe 图标提取并写入 `cache\icons\*.png` | 通过 |
-| `gdiicons` | 预热后反复取图，GDI 对象数不增长 | 通过 |
-| `clipboard` | 剪贴板被占用时返回 false（≈960 ms）、释放后 true | 通过 |
+| `stall` / `stallkill` | 无活动 → `Stalled`；开自动终止则继续下一项 | 通过 |
+| `keepawake` / `screensaver` / `nightscreen` | 护航请求可见并撤销、屏保原值恢复、息屏 DRYRUN | 通过 |
+| `icon` / `gdiicons` | 图标提取落盘；20 次提取 GDI 不增长 | 通过 |
+| `clipboard` | 占用时 false（975 ms）、释放后 true | 通过 |
+| `weekplan` | 定时只跑当日子集（`plan-a`）、手动跑全部、子集为空跳过且日志记「今日计划为空」、掩码持久化 | 通过 |
+| `customsig-log` | 日志新增「一条龙完成」→ `Resolving` → `Done`（4.9s） | 通过 |
+| `customsig-file` | 文件出现 → `Resolving` → `Done`（5.0s） | 通过 |
+| `customsig-title` | 窗口标题命中 → `Resolving` → `Done`（5.0s） | 通过 |
+| `iconoverride` | png / exe 两种来源换图标、`HasOverride`、恢复默认；20 次换图 GDI 40→40 | 通过 |
+| `morning` | 默认关；摘要「2 次运行，全部成功，总耗时 3小时12分」；同日不重播；无记录不播 | 通过 |
+
+**v1.5 首次由 agent 亲自做 GUI 冒烟**（发布版实机，非探针）：启动冒烟实例 → 主界面渲染 → 按日计划弹窗（7×3 矩阵、今天高亮）→ 取消周六 BetterGI 并保存（`WeekdayMask` 127→95、日志「已保存按日计划」、队列行变「6天」）→ 自定义工具表单切到「自定义信号」（三项回填正确）→ 清空三项点保存（红色提示可见、表单不关闭）→ 换图标弹窗 → 高级设置展开（晨报条目与开关）→ 晨报实机播报（`[晨报] 昨日队列：2 次运行，全部成功，总耗时 3小时12分`）。截图存于 `docs/`（`main_v15`、`weekly_plan`、`tool_card_v15`、`advanced_v15`、`custom_tool_v15`）。
 
 v1.1 时代的离屏渲染 / 布局 / 圆盘选择器 / 按键音 / 弹窗等验证台（原 `--shot`、`--layout` 等）已随早期界面重构退役，其覆盖点改由上面这些行为级用例与人工截图检查承担。
 
