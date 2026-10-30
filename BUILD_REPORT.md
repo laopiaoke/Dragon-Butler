@@ -256,7 +256,7 @@ dotnet publish "Dragon Butler/Dragon Butler.csproj" -c Release -r win-x64 --self
 | 产物 | 路径 | 体积 |
 | --- | --- | --- |
 | runtime-dependent exe | `发布/Dragon-Butler-win-x64-runtime-dependent/Dragon Butler.exe` | 585,848 B |
-| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.5-win-x64-runtime-dependent.zip` | ≈ 0.26 MB |
+| runtime-dependent 压缩包 | `发布/Dragon-Butler-v1.5-win-x64-runtime-dependent.zip` | ≈ 0.27 MB |
 | portable exe | `发布/Dragon-Butler-win-x64-portable/Dragon Butler.exe` | 162,139,627 B |
 | portable 压缩包 | `发布/Dragon-Butler-v1.5-win-x64-portable.zip` | ≈ 62.77 MB |
 

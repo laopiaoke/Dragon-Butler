@@ -212,7 +212,7 @@
 | | runtime-dependent（需 .NET 8 运行时） | portable（免安装便携版） |
 | --- | --- | --- |
 | 压缩包 | `Dragon-Butler-v1.5-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.5-win-x64-portable.zip` |
-| 大小 | 约 0.26 MB | 约 62.8 MB |
+| 大小 | 约 0.27 MB | 约 62.8 MB |
 | 要求 | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0) | 无，自带运行时 |
 | 适用 | 机器上已有 .NET 8，想下最小包 | 不确定有没有 .NET 8、要换电脑或放 U 盘 |
 
