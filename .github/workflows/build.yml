@@ -161,10 +161,11 @@ jobs:
           $zips = @(Get-ChildItem "发布\*.zip")
           $portable = ($zips | Where-Object { $_.Name -like '*portable*' }).FullName
           $dep      = ($zips | Where-Object { $_.Name -like '*runtime-dependent*' }).FullName
-          $args = @('release', 'create', $tag, '--title', $title, '--notes-file', $notes)
-          if ($tag -like '*-*') { $args += '--prerelease' } else { $args += '--latest' }
+          $ghArgs = @('release', 'create', $tag, '--title', $title, '--notes-file', $notes)
+          if ($tag -like '*-*') { $ghArgs += '--prerelease' } else { $ghArgs += '--latest' }
 
-          gh @args
+          # 变量特意不叫 $args：那是 PowerShell 的自动变量，在脚本作用域里赋值可能被静默忽略
+          gh @ghArgs
           if ($LASTEXITCODE -ne 0) { Write-Host "Release 可能已存在，改为覆盖资产" }
 
           gh release upload $tag "$portable#免安装便携版（自带运行时，推荐）" "$dep#需 .NET 8 运行时" --clobber
