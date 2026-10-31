@@ -374,6 +374,8 @@ dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
 powershell -ExecutionPolicy Bypass -File scripts\package.ps1
 ```
 
+**关于 `docs/` 里的截图**：它们走 Git LFS。没装 git-lfs 也能正常克隆和构建——程序图标是真实字节入库、不经过 LFS——只是本地打开 README 时看不到那几张图。
+
 **依赖情况（可自行核对）**：`Dragon Butler.csproj` 里没有任何 `PackageReference`，全部功能只用 .NET 8 自带类库；仓库中没有 `package.json`、`node_modules` 或任何 JS/TS 文件，**构建与运行都不需要 Node.js / npm**。`tests\CoordinatorProbe` 通过 `ProjectReference` 引用主项目，同样不引入外部包。Release 构建保持 **0 warning / 0 error**，打开 .NET 分析器（`EnableNETAnalyzers=true`、`AnalysisLevel=latest`）后仍然为 0。
 
 **持续集成**：推送到 `main` 或提交 PR 时，GitHub Actions 会自动跑三步验收——依赖审计（出现 `PackageReference` 或前端产物就直接失败）、0 警告构建（`-warnaserror`）、用 `tests\StubTool` 驱动 `RunCoordinator` 的集成探针（验证"日志命中完成判定"这条主链路真的通）。给提交打上 `v*` 标签并推送，验收通过后自动打包两个变体、发到 Releases，发布说明直接取自 `RELEASE_NOTES.md` 的同名小节，不需要手写。也可以手动触发（Actions → build → Run workflow）：只打包、不发 Release，产物留在 Artifacts 里。
