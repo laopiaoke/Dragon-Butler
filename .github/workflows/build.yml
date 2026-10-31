@@ -87,13 +87,16 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF_NAME
+          # 预发布写法形如 v1.5.2-rc1：比版本号时只比 - 之前的部分
+          $base = $tag
+          if ($base -match '^(.+?)-') { $base = $matches[1] }
           $node = ([xml](Get-Content "Dragon Butler\Dragon Butler.csproj" -Raw)).SelectSingleNode('//*[local-name()="Version"]')
           if ($null -eq $node) { throw "csproj 里没有 <Version>" }
           $ver = $node.InnerText.Trim()
           $parts = $ver.Split('.')
           if ($parts.Count -ge 3 -and $parts[-1] -eq '0') { $parts = $parts[0..($parts.Count - 2)] }
           $expect = 'v' + ($parts -join '.')
-          if ($expect -ne $tag) { throw "版本对不上：tag 是 $tag，csproj 是 $ver（对应 $expect）" }
+          if ($expect -ne $base) { throw "版本对不上：tag 是 $tag（基准 $base），csproj 是 $ver（对应 $expect）" }
           Write-Host "OK · tag $tag 与 csproj $ver 一致"
 
   release:
