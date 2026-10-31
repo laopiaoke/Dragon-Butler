@@ -19,8 +19,8 @@
 
 唯一的区别是「运行时」放在哪。下载时按压缩包名区分：
 
-  Dragon-Butler-v1.5-win-x64-runtime-dependent.zip   ← 需 .NET 8 运行时版
-  Dragon-Butler-v1.5-win-x64-portable.zip            ← 免安装便携版
+  Dragon-Butler-v1.5.1-win-x64-runtime-dependent.zip   ← 需 .NET 8 运行时版
+  Dragon-Butler-v1.5.1-win-x64-portable.zip            ← 免安装便携版
 
 （名字规则：Dragon-Butler-v版本-平台-变体）
 
@@ -147,4 +147,4 @@ A：退出程序后直接删掉整个文件夹即可（若开过开机自启，�
 
 七、版本
 ------------------------------------------------
-v1.5 · Windows 10/11 x64 · 需要 BetterGI 本体（另装）
+v1.5.1 · Windows 10/11 x64 · 需要 BetterGI 本体（另装）

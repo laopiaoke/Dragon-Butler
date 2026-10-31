@@ -63,7 +63,14 @@
 | **疑似挂起** | 进程活着但 3 分钟无 CPU/日志活动 → 暂停队列并通知；可选自动终止。 |
 | **可换外观** | 深色 / 浅色 / 跟随系统，也可以用调色板或自己的图片当背景。 |
 
-## 最近更新（v1.5.0）
+## 最近更新（v1.5.1）
+
+- **清理**：删掉 v1.4 布局重构后遗留的死代码——心电图组件 `EcgMeter`（482 行）、已失效的红色横幅与它的计时器、两个零引用查询方法；**界面与行为完全不变**。
+- **文档**：README 补上「构建与依赖」「隐私与联网」「使用须知」「相关项目」，许可一节写全 MIT 的授权范围与第三方素材边界；徽章换成实时数据。
+- **依赖**：已核对——0 个 NuGet 包，仓库里没有 npm / Node 产物，构建只需要 .NET 8 SDK。
+
+<details>
+<summary>v1.5.0 按日计划 · 自由接入</summary>
 
 - **按日计划**：一周七天各跑各的工具组合，周本和日常自动分开；空着的那天到点跳过并提醒。
 - **自定义信号**：自定义工具的完成方式多了第三选——日志文本 / 文件出现 / 窗口标题，可任意组合。
@@ -71,14 +78,16 @@
 - **晨报**（默认关）：每天第一次打开时用一句话汇报昨天的运行情况。
 - **队列更直观**：每个工具后面显示「每天 / 6天」，队列下方写明今天跑哪几项。
 
+</details>
+
 ## 界面
 
 > 三层布局：队列卡（Hero）→ 工具卡（默认折叠）→ 高级设置（默认折叠）；守护收进底部盾牌。
 
 <p align="center">
-  <img src="docs/main_v15.png" width="900" alt="v1.5.0 主界面（深色）">
+  <img src="docs/main_v15.png" width="900" alt="v1.5 主界面（深色）">
   <br>
-  <sub>图 1 · v1.5.0 主界面（深色）：定时卡 · 睡前队列（含按日计划）· 工具卡 · 自定义工具 · 底部盾牌</sub>
+  <sub>图 1 · v1.5 主界面（深色）：定时卡 · 睡前队列（含按日计划）· 工具卡 · 自定义工具 · 底部盾牌</sub>
 </p>
 
 主界面一屏三块，从上往下就是使用顺序：
@@ -95,32 +104,32 @@
 ### 按日计划（v1.5）
 
 <p align="center">
-  <img src="docs/weekly_plan.png" width="760" alt="v1.5.0 按日计划矩阵">
+  <img src="docs/weekly_plan.png" width="760" alt="v1.5 按日计划矩阵">
   <br>
-  <sub>图 2 · v1.5.0 按日计划：7 天 × 各工具矩阵，点日期切整行、点工具名切整列</sub>
+  <sub>图 2 · v1.5 按日计划：7 天 × 各工具矩阵，点日期切整行、点工具名切整列</sub>
 </p>
 
 按星期给每个工具勾选跑不跑：周本放周末、日常放工作日都行。**只在定时触发时生效**，
 手动点「一键开跑」永远跑当前勾选；某天一个都没勾，到点会跳过并发一条「今日计划为空」。
 
 <p align="center">
-  <img src="docs/tool_card_v15.png" width="860" alt="v1.5.0 工具卡（展开 BetterGI）">
+  <img src="docs/tool_card_v15.png" width="860" alt="v1.5 工具卡（展开 BetterGI）">
   <br>
-  <sub>图 3 · v1.5.0 工具卡：路径 / 浏览 / 自动寻找 / 测试启动 / 换图标；BetterGI 另带配置名与配置组</sub>
+  <sub>图 3 · v1.5 工具卡：路径 / 浏览 / 自动寻找 / 测试启动 / 换图标；BetterGI 另带配置名与配置组</sub>
 </p>
 
 <p align="center">
-  <img src="docs/advanced_v15.png" width="900" alt="v1.5.0 高级设置">
+  <img src="docs/advanced_v15.png" width="900" alt="v1.5 高级设置">
   <br>
-  <sub>图 4 · v1.5.0 高级设置：挂机护航、夜间息屏、疑似挂起、晨报，以及原有的守护与队列选项</sub>
+  <sub>图 4 · v1.5 高级设置：挂机护航、夜间息屏、疑似挂起、晨报，以及原有的守护与队列选项</sub>
 </p>
 
 ### 自定义工具与自定义信号（v1.5）
 
 <p align="center">
-  <img src="docs/custom_tool_v15.png" width="720" alt="v1.5.0 自定义工具 · 自定义信号">
+  <img src="docs/custom_tool_v15.png" width="720" alt="v1.5 自定义工具 · 自定义信号">
   <br>
-  <sub>图 5 · v1.5.0 自定义工具：进程退出 / 到达时长 / 自定义信号三种完成方式</sub>
+  <sub>图 5 · v1.5 自定义工具：进程退出 / 到达时长 / 自定义信号三种完成方式</sub>
 </p>
 
 工具卡最下方点「＋ 添加」，填三样就能用：**程序路径**、**进程名**（通常与 exe 同名）、**完成方式**。完成方式有三种：
@@ -171,9 +180,9 @@
 ## 定时
 
 <p align="center">
-  <img src="docs/time_picker_dark.png" width="720" alt="v1.5.0 定时编辑页">
+  <img src="docs/time_picker_dark.png" width="720" alt="v1.5 定时编辑页">
   <br>
-  <sub>图 6 · v1.5.0 定时编辑页：24 小时双圈圆盘，外圈 1–12、内圈 13–23 与 0</sub>
+  <sub>图 6 · v1.5 定时编辑页：24 小时双圈圆盘，外圈 1–12、内圈 13–23 与 0</sub>
 </p>
 
 - 圆盘：外圈 1–12、内圈 13–23 与 0，点选或按住拖动；选完小时自动进分钟盘。
@@ -186,17 +195,17 @@
 四档：深色 / 浅色 / 跟随系统 / 自定义。前三个是预设：
 
 <p align="center">
-  <img src="docs/main_light.png" width="880" alt="v1.5.0 浅色主题">
+  <img src="docs/main_light.png" width="880" alt="v1.5 浅色主题">
   <br>
-  <sub>图 7 · v1.5.0 浅色主题：同一套布局，深浅只换配色</sub>
+  <sub>图 7 · v1.5 浅色主题：同一套布局，深浅只换配色</sub>
 </p>
 
 自定义可以做两件事：
 
 <p align="center">
-  <img src="docs/theme_editor.png" width="820" alt="v1.5.0 自定义主题编辑器">
+  <img src="docs/theme_editor.png" width="820" alt="v1.5 自定义主题编辑器">
   <br>
-  <sub>图 8 · v1.5.0 自定义主题：左侧实时预览、右侧参数、底部对比度读数</sub>
+  <sub>图 8 · v1.5 自定义主题：左侧实时预览、右侧参数、底部对比度读数</sub>
 </p>
 
 - **调色板取色**：18 个预设色 + 系统取色器。
@@ -214,12 +223,12 @@
 
 | | runtime-dependent（需 .NET 8 运行时） | portable（免安装便携版） |
 | --- | --- | --- |
-| 压缩包 | `Dragon-Butler-v1.5-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.5-win-x64-portable.zip` |
+| 压缩包 | `Dragon-Butler-v1.5.1-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.5.1-win-x64-portable.zip` |
 | 大小 | 约 0.27 MB | 约 62.8 MB |
 | 要求 | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0) | 无，自带运行时 |
 | 适用 | 机器上已有 .NET 8，想下最小包 | 不确定有没有 .NET 8、要换电脑或放 U 盘 |
 
-> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.5` 是当前版本（程序里显示为 `1.5.0`，包名按惯例省掉补位的 `.0`），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
+> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.5.1` 是当前版本（程序里显示为 `1.5.1`；末位是 `0` 时包名按惯例省掉补位，比如 `1.5.0` 打成 `v1.5`），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
 > 解压出来的目录名固定为 `Dragon-Butler-win-x64-runtime-dependent\` 或 `Dragon-Butler-win-x64-portable\`，**不带版本**——升级时直接覆盖原目录，`config\` 里的设置不会丢。
 
 > **两个版本都不用"安装"**：没有安装向导、不写注册表、不注册服务，解压后双击 exe 就能用，删掉文件夹就是卸载。
@@ -232,13 +241,13 @@
 ```
 
 <p align="center">
-  <img src="docs/wizard.png" width="700" alt="v1.5.0 首启向导">
+  <img src="docs/wizard.png" width="700" alt="v1.5 首启向导">
   <br>
-  <sub>图 9 · v1.5.0 首启向导：勾选工具 → 自动寻找 → 完成</sub>
+  <sub>图 9 · v1.5 首启向导：勾选工具 → 自动寻找 → 完成</sub>
 </p>
 
-> Release 页有两个附件：`Dragon-Butler-v1.5-win-x64-portable.zip` 是免安装便携版（解压即用，推荐）；
-> `Dragon-Butler-v1.5-win-x64-runtime-dependent.zip` 是需 .NET 8 运行时的小包。
+> Release 页有两个附件：`Dragon-Butler-v1.5.1-win-x64-portable.zip` 是免安装便携版（解压即用，推荐）；
+> `Dragon-Butler-v1.5.1-win-x64-runtime-dependent.zip` 是需 .NET 8 运行时的小包。
 
 跑起来之后建议再补三步：
 
@@ -331,7 +340,7 @@ Dragon Butler.exe
 - **修订位 +1**（v1.3.0 → v1.3.1）：只修 bug、不加新功能时使用；能省则省，不连续发修订版。
 - **次版本 +1**（v1.3.1 → v1.4.0）：有新功能或可感知的体验改动。
 - **主版本 +1**（v1.x → v2.0）：只在核心能力或大改动时进位，比如换了运行方式、加了整套新模块。
-- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；当前在 `v1.5.0`。
+- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；当前在 `v1.5.1`。
 
 完整历史见 [BUILD_REPORT.md](BUILD_REPORT.md)。
 
