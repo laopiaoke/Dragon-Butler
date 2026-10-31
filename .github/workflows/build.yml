@@ -24,10 +24,22 @@ jobs:
       contents: read
     steps:
       - name: 检出
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      # 曾经踩过：图标被 LFS 接管，CI 检出后是指针文本，csc 报 CS7065。把这件事变成断言
+      - name: 构建输入必须是真实字节（不是 LFS 指针）
+        shell: pwsh
+        run: |
+          $bad = @(Get-ChildItem -Path "Dragon Butler" -Recurse -Include *.ico,*.png,*.bmp,*.jpg |
+                   Where-Object { $_.Length -lt 200 -and (Get-Content $_.FullName -TotalCount 1) -match 'git-lfs\.github\.com/spec' })
+          if ($bad.Count -gt 0) {
+              $bad | ForEach-Object { "  指针：$($_.FullName)（$($_.Length) 字节）" }
+              throw "构建输入被 LFS 接管了：检出后只剩指针文本，csc 编不进 Win32 资源"
+          }
+          Write-Host "OK · 图标等构建输入是真实字节"
 
       - name: 安装 .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
@@ -94,10 +106,10 @@ jobs:
       contents: write
     steps:
       - name: 检出
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
@@ -121,7 +133,7 @@ jobs:
           }
 
       - name: 保存产物（7 天）
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ github.ref_name }}
           path: |

@@ -12,7 +12,10 @@
 *.jpg   filter=lfs diff=lfs merge=lfs -text
 *.jpeg  filter=lfs diff=lfs merge=lfs -text
 *.gif   filter=lfs diff=lfs merge=lfs -text
-*.ico   filter=lfs diff=lfs merge=lfs -text
+
+# 例外：程序图标不进 LFS。它是构建输入，csc 会把这些字节直接编进 Win32 资源；
+# 一旦走 LFS，没装 git-lfs 的检出（例如 CI 的干净 clone）只能拿到 130 字节的指针文本，
+# 编译就会报 CS7065 "Icon stream is not in the expected format"。
 
 # 明确按文本处理，避免被误判为二进制
 *.cs        text diff=csharp
