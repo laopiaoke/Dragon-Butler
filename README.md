@@ -12,8 +12,11 @@
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/Windows-10%2F11%20x64-0078D4">
   <img alt="dotnet" src="https://img.shields.io/badge/.NET-8.0-512BD4">
-  <img alt="version" src="https://img.shields.io/badge/version-v1.5.0-2EA043">
+  <a href="https://github.com/laopiaoke/Dragon-Butler/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/laopiaoke/Dragon-Butler?color=2EA043"></a>
   <img alt="license" src="https://img.shields.io/badge/license-MIT-6E7681">
+  <a href="https://github.com/laopiaoke/Dragon-Butler/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/laopiaoke/Dragon-Butler?color=2EA043"></a>
+  <a href="https://github.com/laopiaoke/Dragon-Butler/issues"><img alt="issues" src="https://img.shields.io/github/issues/laopiaoke/Dragon-Butler"></a>
+  <a href="https://github.com/laopiaoke/Dragon-Butler/commits/main"><img alt="last commit" src="https://img.shields.io/github/last-commit/laopiaoke/Dragon-Butler"></a>
 </p>
 
 > [!IMPORTANT]
@@ -316,6 +319,11 @@ Dragon Butler.exe
 程序是单实例的。托盘右键可以「打开主界面」或「退出」。
 </details>
 
+<details>
+<summary><b>Windows 提示「已保护你的电脑」/ 杀毒软件报毒</b></summary>
+发行包没有做代码签名，SmartScreen 会拦一下：点「更多信息 → 仍要运行」。若杀软直接隔离，把程序目录加入信任，或按上面「构建与依赖」自己从源码构建——源码级构建不需要任何第三方包。
+</details>
+
 ## 版本号规则
 
 用 `主版本.次版本[.修订]`：
@@ -340,6 +348,50 @@ Dragon Butler.exe
 - 晨报按配置组归档统计，「N 次运行」= 昨天有记录的配置组条数，不是精确的队列次数；同一天只播一次。
 - 疑似挂起对没有日志文件的工具只看 CPU；屏保受系统策略控制，恢复失败会在下次启动补偿。
 
+## 构建与依赖
+
+需要 Windows 10/11 x64 与 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)（本版本在 8.0.427 上验证）：
+
+```powershell
+git clone https://github.com/laopiaoke/Dragon-Butler.git
+cd Dragon-Butler
+dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
+```
+
+产物在 `Dragon Butler\bin\Release\net8.0-windows\`。要打成可直接分发的压缩包，运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1
+```
+
+**依赖情况（可自行核对）**：`Dragon Butler.csproj` 里没有任何 `PackageReference`，全部功能只用 .NET 8 自带类库；仓库中没有 `package.json`、`node_modules` 或任何 JS/TS 文件，**构建与运行都不需要 Node.js / npm**。`tests\CoordinatorProbe` 通过 `ProjectReference` 引用主项目，同样不引入外部包。Release 构建保持 **0 warning / 0 error**，打开 .NET 分析器（`EnableNETAnalyzers=true`、`AnalysisLevel=latest`）后仍然为 0。
+
+## 隐私与联网
+
+- **没有遥测、没有统计、没有崩溃上报**：程序不会向任何第三方服务器发送使用数据、日志或设备信息。
+- 唯一的对外连接是你自己在「通知」里填的推送地址（企业微信 / 飞书 / 钉钉 / Telegram / Bark / 自定义 Webhook），内容只有那条汇总消息。
+- 本地会开一个 `http://127.0.0.1:{端口}/webhook` 的监听口，只接受本机请求，用于接收 BetterGI 的完成事件；不用可以关掉。
+- 「自动寻找」读的是注册表、开始菜单快捷方式和常见安装目录，不联网查询。
+
+## 使用须知
+
+- **本项目免费开源，仅供个人在自己电脑上使用。** 请勿用于售卖、代练、打包收费或其他商业分发。
+- **与游戏厂商、本文列出的工具作者均无关联，也未获任何授权。** 游戏名、工具名与图标归各自权利人所有。本软件只调用你自己已装好的工具，不改游戏、不改工具文件，不提供账号服务，也不绕过任何游戏机制。
+- **自动化本身有风险。** 使用第三方自动化工具可能违反游戏用户协议并导致账号受限，风险由使用者自行承担。
+- **不接触你的账号信息。** 程序不登录游戏、不读游戏数据，只读工具自己写在磁盘上的日志。
+
+## 相关项目
+
+本项目不实现游戏日常，全部交给下面这些工具，感谢它们的作者：
+
+- [BetterGI · 更好的原神](https://github.com/babalae/better-genshin-impact)：原神一条龙
+- [三月七助手 March7thAssistant](https://github.com/moesnow/March7thAssistant)：崩坏：星穹铁道
+- [ok-ww](https://github.com/ok-oldking/ok-wuthering-waves)：鸣潮
+
 ## 许可
 
-[MIT](LICENSE)。本项目与 miHoYo / HoYoverse、BetterGI 官方均无关联；使用自动化工具存在账号风险，请自行评估。
+本项目以 [MIT 许可](LICENSE) 发布，你可以自由使用、修改和再分发（含商业使用），条件是保留版权声明与许可全文；作者不对使用后果提供任何担保。
+
+- **代码与文档**：按上面这份 MIT 许可授权，全文见仓库根目录的 [LICENSE](LICENSE)。
+- **游戏名、工具名与第三方图标**：不在本许可范围内，归各自权利人所有；`docs/` 下的截图与界面素材仅用于展示本软件。
+- **再分发时**：请一并保留「使用须知」里的风险提示，不要让下游使用者误以为这是官方产品或安全无风险的代练服务。
