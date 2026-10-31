@@ -789,17 +789,10 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- 红色横幅（Critical 通知） -->
-                    <Border Grid.Row="0" x:Name="BannerBorder" Visibility="Collapsed" CornerRadius="9" Padding="12,8"
-                            Margin="0,0,0,12" Background="{DynamicResource DangerBrush}">
-                        <TextBlock x:Name="BannerText" Foreground="White" FontSize="12" TextWrapping="Wrap"/>
-                    </Border>
-
                     <!-- 第一层：定时卡（左）/ 队列卡（右，Hero） -->
-                    <Grid Grid.Row="1">
+                    <Grid Grid.Row="0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.02*"/>
                             <ColumnDefinition Width="1*"/>
@@ -1010,7 +1003,7 @@
                     </Grid>
 
                     <!-- 第二层：工具卡（默认折叠） -->
-                    <StackPanel Grid.Row="2">
+                    <StackPanel Grid.Row="1">
 
                     <Border Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
@@ -1190,7 +1183,7 @@
 
                     <!-- 第三层：高级设置（默认折叠） -->
 
-                    <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldAdvanced" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -1329,7 +1322,7 @@
                     </Border>
 
                     <!-- ===== E 系统（折叠，默认收起；6 开关两列网格）===== -->
-                    <Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldSystem" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -1379,7 +1372,7 @@
                     </Border>
 
                     <!-- ===== F 通知（折叠，默认收起）===== -->
-                    <Border x:Name="NotifyCard" Grid.Row="5" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border x:Name="NotifyCard" Grid.Row="4" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">

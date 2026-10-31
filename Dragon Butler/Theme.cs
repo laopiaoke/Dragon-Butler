@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
@@ -22,7 +22,7 @@ public static class Theme
         "WindowBg", "CardBg", "CardBg2", "ControlBg", "Inset", "DialBg",
         "Border", "BorderStrong", "Hover",
         "TextPrimary", "TextSecondary", "TextTertiary",
-        "Brand", "BrandPressed", "BrandOn", "BrandSoft", "BrandText", "Ecg",
+        "Brand", "BrandPressed", "BrandOn", "BrandSoft", "BrandText",
         "Success", "Warning", "Danger", "DangerPressed",
     };
 
@@ -74,7 +74,6 @@ public static class Theme
         ["BrandOn"] = "#FF0B1410",
         ["BrandSoft"] = "#FF1B302B",
         ["BrandText"] = "#FF3DDC84",
-        ["Ecg"] = "#FF3DDC84",
         ["Success"] = "#FF3DDC84",
         ["Warning"] = "#FFE8B64B",
         ["Danger"] = "#FFF0616B",
@@ -101,7 +100,6 @@ public static class Theme
         ["BrandOn"] = "#FF08130D",
         ["BrandSoft"] = "#FFE2F3EB",
         ["BrandText"] = "#FF0C6B3D",
-        ["Ecg"] = "#FF0B7A43",
         ["Success"] = "#FF0F9D58",
         ["Warning"] = "#FF8A5F12",
         ["Danger"] = "#FFC93A45",

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
@@ -73,7 +73,6 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _scheduleTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _statusBarTimer = new();
-    private readonly DispatcherTimer _bannerTimer = new();
     private readonly DispatcherTimer _groupScanTimer = new() { Interval = TimeSpan.FromSeconds(8) };
     private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
@@ -749,13 +748,6 @@ public partial class MainWindow : Window
 
     // ===== 工具卡 =====
 
-    private static string XamlId(string toolId) => toolId switch
-    {
-        "bettergi" => "bettergi",
-        "march7th" => "march7th",
-        _ => "okww",
-    };
-
     private StackPanel BodyOf(string toolId) => toolId switch
     {
         "bettergi" => Body_bettergi,
@@ -782,13 +774,6 @@ public partial class MainWindow : Window
         "bettergi" => TbToolState_bettergi,
         "march7th" => TbToolState_march7th,
         _ => TbToolState_okww,
-    };
-
-    private Button ToolHeaderOf(string toolId) => toolId switch
-    {
-        "bettergi" => BtnFold_bettergi,
-        "march7th" => BtnFold_march7th,
-        _ => BtnFold_okww,
     };
 
     private void ToolHeader_Click(object sender, RoutedEventArgs e)
@@ -2285,27 +2270,6 @@ public partial class MainWindow : Window
         _statusBarTimer.Stop();
         StatusBarBorder.Background = BrushOf("InsetBrush");
         TbLog.Foreground = BrushOf("TextSecondaryBrush");
-    }
-
-    private void ShowBanner(string msg)
-    {
-        try
-        {
-            BannerText.Text = msg;
-            BannerBorder.Visibility = Visibility.Visible;
-            _bannerTimer.Stop();
-            _bannerTimer.Interval = TimeSpan.FromSeconds(8);
-            _bannerTimer.Tick -= BannerTimer_Tick;
-            _bannerTimer.Tick += BannerTimer_Tick;
-            _bannerTimer.Start();
-        }
-        catch { }
-    }
-
-    private void BannerTimer_Tick(object? sender, EventArgs e)
-    {
-        _bannerTimer.Stop();
-        BannerBorder.Visibility = Visibility.Collapsed;
     }
 
     // ===== 标题栏 / 关闭 =====
