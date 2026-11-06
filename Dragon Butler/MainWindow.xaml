@@ -913,6 +913,14 @@
                                                                FontFamily="JetBrains Mono, Cascadia Mono, Consolas, Microsoft YaHei UI"
                                                                Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0"/>
                                                 </StackPanel>
+                                                <!-- v1.6 补跑窗口：睡眠/关机错过整分钟也能补跑一次，点一下轮换档位 -->
+                                                <Button x:Name="BtnCatchUp" Style="{StaticResource LinkButton}"
+                                                        HorizontalAlignment="Center" Margin="0,2,0,0"
+                                                        Click="BtnCatchUp_Click"
+                                                        ToolTip="电脑睡眠或程序没开而错过计划时间时，在这个时间窗口内仍会自动补跑一次。点击切换档位。">
+                                                    <TextBlock x:Name="TbCatchUp" Text="补跑：错过 2 小时内会补跑" TextWrapping="Wrap"
+                                                               HorizontalAlignment="Center" TextAlignment="Center"/>
+                                                </Button>
                                             </StackPanel>
                                         </Grid>
 
@@ -988,6 +996,11 @@
                                     </Grid>
                                     <Button x:Name="BtnQueueStart" Style="{StaticResource LaunchPrimary}" Height="44"
                                             Content="一键开跑" Click="BtnQueueStart_Click"/>
+                                    <!-- v1.6 / F2 接着跑：只补今天没跑成的项，已完成的组不重跑 -->
+                                    <Button x:Name="BtnQueueContinue" Style="{StaticResource LaunchGhost}" Height="32"
+                                            Content="接着跑（今天还剩 0 项）" Margin="0,7,0,0" Visibility="Collapsed"
+                                            Click="BtnQueueContinue_Click"
+                                            ToolTip="只跑今天还没跑成的工具；已完成的不会重复跑。"/>
                                     <Button x:Name="BtnQueueIdleSkip" Style="{StaticResource LaunchGhost}" Height="32"
                                             Content="立即开始（跳过等待）" Margin="0,7,0,0" Visibility="Collapsed"
                                             Click="BtnQueueIdleSkip_Click"/>

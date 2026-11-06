@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Windows;
 using wf = System.Windows.Forms;
@@ -23,7 +23,7 @@ public partial class App : Application
 
     private static Mutex? _mutex;
     private wf.NotifyIcon? _tray;
-    private wf.ToolStripMenuItem? _miOpen, _miStart, _miExit;
+    private wf.ToolStripMenuItem? _miOpen, _miStart, _miContinue, _miExit;
     private MainWindow? _win;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -119,6 +119,13 @@ public partial class App : Application
                 SoundService.Play("click.wav");   // 与主界面统一：托盘菜单也是普通点击音
                 _ = QueueService.StartAsync(QueueTrigger.Manual);
             });
+            // v1.6 / F2：只在「今天跑成过至少一项，且还有没跑成的」时出现
+            _miContinue = new wf.ToolStripMenuItem("接着跑", null, (_, _) =>
+            {
+                SoundService.Play("click.wav");
+                _ = QueueService.StartContinueAsync();
+            });
+            _miContinue.Visible = false;
             _miExit = new wf.ToolStripMenuItem("退出", null, (_, _) =>
             {
                 SoundService.Play("click.wav");
@@ -127,6 +134,7 @@ public partial class App : Application
             });
             menu.Items.Add(_miOpen);
             menu.Items.Add(_miStart);
+            menu.Items.Add(_miContinue);
             menu.Items.Add(new wf.ToolStripSeparator());
             menu.Items.Add(_miExit);
             menu.Opening += (_, _) => UpdateTrayMenu(); // 展开前刷新状态
@@ -152,6 +160,16 @@ public partial class App : Application
             bool running = QueueService.IsRunning;
             _miStart.Enabled = !running;
             _miStart.Text = running ? "队列运行中…（请先在主界面停止）" : "⚡ 一键开跑";
+
+            if (_miContinue != null)
+            {
+                int left = 0;
+                if (!running && QueueService.DoneToolIdsToday().Count > 0)
+                    left = QueueService.UnfinishedToday().Count;
+                _miContinue.Visible = left > 0;
+                _miContinue.Enabled = left > 0;
+                _miContinue.Text = left > 0 ? $"接着跑（今天还剩 {left} 项）" : "接着跑";
+            }
         }
         catch { }
     }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -242,7 +242,10 @@ public sealed class LogPatternSignalSource : ICompletionSignalSource
         _watcher = new LogWatcher(pattern, logDir);
         _watcher.OnEvent += ev =>
         {
+            // v1.6 / F4：日志行是通知里最有价值的一句话，命中了就留一份
+            if (ev.Kind == SentinelEventKind.LogErrorLine) RunEvidence.NoteErrorLine(ev.Payload);
             if (!string.Equals(ev.Source, "log-pattern", StringComparison.Ordinal)) return;
+            RunEvidence.NoteAnchorLine(ev.Payload);
             Raise(new CompletionSignal
             {
                 SourceId = SourceId,

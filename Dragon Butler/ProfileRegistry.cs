@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -315,6 +315,8 @@ public static class ProfileRegistry
         if (from.MaxDurationMinutes > 0) to.MaxDurationMinutes = from.MaxDurationMinutes;
         to.PostExitGraceMinutes = from.PostExitGraceMinutes;
         if (from.RetryCount > 0) to.RetryCount = from.RetryCount;
+        to.RetryDelaySeconds = from.RetryDelaySeconds;
+        to.RetryBackoff = from.RetryBackoff;
         if (from.CustomData is { Count: > 0 })
         {
             foreach (var kv in from.CustomData) to.CustomData[kv.Key] = kv.Value;

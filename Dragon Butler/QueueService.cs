@@ -19,6 +19,9 @@ public enum QueueTrigger
 
     /// <summary>哨兵崩溃后自动重启（不等待空闲）。</summary>
     Sentinel = 2,
+
+    /// <summary>「接着跑」：只跑今天还没跑成的项（v1.6 / F2）。</summary>
+    Continue = 3,
 }
 
 /// <summary>单个队列项的执行结果。</summary>
@@ -222,6 +225,103 @@ public static class QueueService
         }
     }
 
+    // ===== v1.6 / F2「接着跑」 =====
+
+    /// <summary>
+    /// 今天「已经跑成的队列项」——注意只看今天、只看 Done。
+    /// 数据源是 <see cref="RunJournal"/>（按 ToolId 记），不是 GroupArchive（按 BGI 组名记），
+    /// 因为「接着跑」要判断的是队列项，不是组。
+    /// </summary>
+    public static HashSet<string> DoneToolIdsToday() => RunJournal.DoneToolsToday();
+
+    /// <summary>今天还没跑成的队列项（保持队列顺序，已停用的不算）。</summary>
+    public static List<ToolProfile> UnfinishedToday()
+    {
+        var list = new List<ToolProfile>();
+        foreach (var entry in AppState.Settings.Queue ?? new List<QueueEntry>())
+        {
+            if (!entry.Enabled) continue;
+            var p = ProfileRegistry.Get(entry.ToolId);
+            if (string.Equals(p.ToolId, entry.ToolId, StringComparison.OrdinalIgnoreCase))
+                list.Add(p);
+        }
+        return FilterUnfinished(list);
+    }
+
+    /// <summary>
+    /// 从给定列表里挑出「今天还没跑成的」——纯函数，不读 settings，
+    /// 这样 probe 能拿任意列表断言，不用改动用户真实队列配置。
+    /// </summary>
+    public static List<ToolProfile> FilterUnfinished(IEnumerable<ToolProfile> items)
+    {
+        var done = DoneToolIdsToday();
+        var list = new List<ToolProfile>();
+        foreach (var p in items)
+        {
+            if (done.Contains(p.ToolId)) continue;
+            list.Add(p);
+        }
+        return list;
+    }
+
+    /// <summary>今天是否有可「接着跑」的项（界面与托盘用它决定按钮/菜单可见）。</summary>
+    public static bool HasUnfinishedToday() => UnfinishedToday().Count > 0;
+
+    /// <summary>
+    /// 接着跑（v1.6 / F2）：只跑今天还没跑成的项，已跑成的不重复跑。
+    /// 与 <see cref="StartAsync"/> 的区别只有「挑哪些项」，执行链路完全复用它，
+    /// 所以悬置/挂起/失败策略/间隔/防打扰的行为都不会跑偏。
+    /// </summary>
+    public static async Task<bool> StartContinueAsync()
+    {
+        lock (Gate)
+        {
+            if (_running) return false;
+            _running = true;
+            _stopRequested = false;
+            CurrentToolId = "";
+            _cts = new CancellationTokenSource();
+        }
+        LastResults.Clear();
+        RaiseState();
+
+        try
+        {
+            var items = UnfinishedToday();
+            if (items.Count == 0)
+            {
+                LogService.LogEvent("队列：接着跑——今天已经没有未完成的项");
+                NotifyService.Show(NotifyLevel.Info, "龙管家", "今天要跑的都已经跑完了，没有可接着跑的项目。");
+                return false;
+            }
+
+            LogService.LogEvent($"队列：接着跑，今天还有 {items.Count} 项没完成（{string.Join("、", items.Select(p => p.DisplayName))}）");
+            await RunListAsync(items, QueueTrigger.Continue, _cts!.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("队列异常（接着跑）：" + ex);
+            return false;
+        }
+        finally
+        {
+            lock (Gate)
+            {
+                _running = false;
+                _stopRequested = false;
+                _currentCoordinator = null;
+                _currentProcess = null;
+                CurrentToolId = "";
+                IsWaitingIdle = false;
+                _cts?.Dispose();
+                _cts = null;
+            }
+            RaiseState();
+            AppState.RefreshStatus();
+        }
+    }
+
     /// <summary>队列主体循环（StartAsync / RunProfilesAsync 共用）。</summary>
     private static async Task<int> RunListAsync(List<ToolProfile> items, QueueTrigger trigger, CancellationToken ct)
     {
@@ -236,7 +336,7 @@ public static class QueueService
                 CurrentToolId = profile.ToolId;
                 RaiseState();
 
-                // 防打扰只约束定时触发
+                // 防打扰只约束定时触发；接着跑等同手动，不等空闲
                 if (trigger == QueueTrigger.Timer)
                 {
                     bool canStart = await IdleGuard.WaitAsync(ct).ConfigureAwait(false);
@@ -375,6 +475,12 @@ public static class QueueService
 
         bool autoKill = AppState.Settings.StallAutoKill;
         LogService.LogEvent($"队列：{profile.DisplayName} {reason}（自动终止={(autoKill ? "开" : "关")}）");
+
+        // v1.6 / F3：挂起正是最需要现场的场合——进程还活着，但什么都不做。
+        // 这份包要在杀进程之前抓，否则截到的是桌面而不是卡住的那个画面。
+        try { IncidentBundle.Capture($"队列挂起：{profile.DisplayName}（{reason}）", profile); }
+        catch { }
+
         coord.MarkStalled(reason);
 
         if (autoKill)
@@ -497,8 +603,10 @@ public static class QueueService
 
             if (attempts < maxAttempts)
             {
-                LogService.LogEvent($"队列：{profile.DisplayName} 第 {attempts} 次失败（{result.Reason}），重试一次");
-                try { await Task.Delay(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false); }
+                // v1.6 / F5：等多久由档案决定，并可逐次翻倍——固定 3 秒硬撞对慢机器没意义
+                TimeSpan wait = RetryDelayFor(profile, attempts);
+                LogService.LogEvent($"队列：{profile.DisplayName} 第 {attempts} 次失败（{result.Reason}），{DescribeWait(wait)}后重试");
+                try { await Task.Delay(wait, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { break; }
             }
         }
@@ -506,7 +614,44 @@ public static class QueueService
         if (last.State is ToolRunState.Failed or ToolRunState.Timeout)
             NotifyService.Show(NotifyLevel.Warning, "龙管家", $"{profile.DisplayName} 未完成：{last.Reason}");
 
+        // v1.6 / F2：把终态记进台账，「接着跑」靠它判断今天哪些项还没成
+        RunJournal.Record(last);
+
         return last;
+    }
+
+    /// <summary>
+    /// v1.6 / F5：重试等多久。基线由档案给，开着退避就逐次翻倍；
+    /// 封顶 300 秒——再长就不如让用户自己决定要不要等，硬拖着反而像卡死。
+    /// </summary>
+    internal static TimeSpan RetryDelayFor(ToolProfile profile, int attempts)
+    {
+        return RetryDelayCore(profile.RetryDelaySeconds, profile.RetryBackoff, attempts);
+    }
+
+    /// <summary>
+    /// v1.6 / F5：纯函数版本，探针直接断言这一层（不起进程、不读配置）。
+    /// </summary>
+    public static TimeSpan RetryDelayCore(int baseSeconds, bool backoff, int attempts)
+    {
+        baseSeconds = Math.Max(0, baseSeconds);
+        if (!backoff) return TimeSpan.FromSeconds(baseSeconds);
+        int doublings = Math.Max(0, attempts - 1);
+        // 先封顶指数再乘，避免 attempts 很大时溢出
+        long seconds = baseSeconds;
+        for (int i = 0; i < doublings && seconds < MaxRetryDelaySeconds; i++) seconds *= 2;
+        if (seconds > MaxRetryDelaySeconds) seconds = MaxRetryDelaySeconds;
+        return TimeSpan.FromSeconds(seconds);
+    }
+
+    public const int MaxRetryDelaySeconds = 300;
+
+    /// <summary>v1.6 / F5：把等待时长说成人话，写进日志和通知。</summary>
+    public static string DescribeWait(TimeSpan t)
+    {        if (t.TotalSeconds <= 0) return "立刻";
+        if (t.TotalSeconds < 60) return $"{(int)t.TotalSeconds} 秒";
+        double minutes = t.TotalMinutes;
+        return minutes % 1 == 0 ? $"{(int)minutes} 分钟" : $"{minutes:F1} 分钟";
     }
 
     private sealed record SingleOutcome(ToolRunState State, string Reason);
@@ -515,6 +660,8 @@ public static class QueueService
     private static async Task<SingleOutcome> RunOnceAsync(ToolProfile profile, QueueTrigger trigger, int attempt, CancellationToken ct)
     {
         string args = BuildLaunchArguments(profile);
+        // v1.6 / F4：每一轮都从干净的证据开始，别把上一轮的错误行带过来
+        RunEvidence.Reset();
         var coord = ToolRunner.CreateCoordinator(profile, msg =>
             NotifyService.Show(NotifyLevel.Warning, "龙管家", msg));
 
@@ -563,6 +710,9 @@ public static class QueueService
             }
 
             var state = coord.State;
+            int? exitCode = null;
+            try { if (proc.HasExited) exitCode = proc.ExitCode; } catch { }
+
             string reason = state switch
             {
                 ToolRunState.Done => "已完成",
@@ -572,6 +722,11 @@ public static class QueueService
                 ToolRunState.Stalled => "疑似挂起（3 分钟无任何活动）",
                 _ => "未完成",
             };
+
+            // v1.6 / F4：把「为什么」攒进 reason——退出码与最后一条错误日志行。
+            // Done 不改（成功通知里塞错误行只会让人以为出了问题）。
+            if (state != ToolRunState.Done)
+                reason = RunEvidence.Describe(reason, exitCode, RunEvidence.LastErrorLine);
 
             if (state == ToolRunState.Timeout)
             {
@@ -707,46 +862,66 @@ public static class QueueService
             or ToolRunState.Halted or ToolRunState.Stalled);
         TimeSpan elapsed = TimeSpan.FromSeconds(ran.Sum(r => r.Elapsed.TotalSeconds));
 
+        // v1.6 / F3：有事才留现场——成功时打一份包只是往硬盘扔垃圾。
+        // 先打包再发通知，这样通知正文里能直接给出文件夹路径。
+        string bundleNote = "";
+        if (anyFailed)
+        {
+            var blamed = ran.FirstOrDefault(r => r.State is ToolRunState.Failed or ToolRunState.Timeout
+                or ToolRunState.Halted or ToolRunState.Stalled);
+            ToolProfile? blamedProfile = null;
+            try
+            {
+                if (blamed != null) blamedProfile = ProfileRegistry.Get(blamed.ToolId);
+            }
+            catch { }
+            string why = blamed == null ? "队列失败" : $"{blamed.DisplayName} {blamed.State}（{blamed.Reason}）";
+            string? dir = IncidentBundle.Capture("队列结束：" + why, blamedProfile);
+            if (!string.IsNullOrEmpty(dir)) bundleNote = " 现场：" + dir;
+        }
+
         string text;
+        NotifyLevel level = NotifyLevel.Warning;
         if (anyHalted)
         {
             var h = ran.First(r => r.State == ToolRunState.Halted);
-            text = $"【龙管家】{h.DisplayName}报告完成但进程未退出，队列已暂停等你处理。";
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
+            text = $"【龙管家】{h.DisplayName}报告完成但进程未退出，队列已暂停等你处理。原因：{h.Reason}";
         }
         else if (anyStalled && !AppState.Settings.StallAutoKill)
         {
             var st = ran.First(r => r.State == ToolRunState.Stalled);
-            text = $"【龙管家】{st.DisplayName} 疑似挂起（3 分钟无任何活动），队列已暂停等你处理。";
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
+            text = $"【龙管家】{st.DisplayName} 疑似挂起（3 分钟无任何活动），队列已暂停等你处理。原因：{st.Reason}";
         }
         else if (anyStalled && AppState.Settings.StallAutoKill)
         {
             var st = ran.First(r => r.State == ToolRunState.Stalled);
-            text = $"【龙管家】队列结束：{ok}/{total} 成功。⚠ {st.DisplayName} 疑似挂起，已自动终止并继续。";
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
+            text = $"【龙管家】队列结束：{ok}/{total} 成功。⚠ {st.DisplayName} 疑似挂起，已自动终止并继续。原因：{st.Reason}";
         }
         else if (total == 0)
         {
             text = "【龙管家】队列结束：没有可执行项。";
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
         }
         else if (ok == total)
         {
             text = $"【龙管家】今晚队列完成：{ok}/{total} 项成功，总耗时 {FormatDuration(elapsed)}。晚安。";
-            NotifyService.Show(NotifyLevel.Info, "龙管家", text);
+            level = NotifyLevel.Info;
         }
         else if (ok == 0)
         {
-            text = $"【龙管家】队列结束：0/{total} 成功。⚠ 全部未完成。详情见软件日志。";
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
+            var first = ran.First(r => r.State != ToolRunState.Done);
+            text = total == 1
+                ? $"【龙管家】{first.DisplayName} 未完成。原因：{first.Reason}"
+                : $"【龙管家】队列结束：0/{total} 成功。⚠ 全部未完成。第一项 {first.DisplayName} 的原因：{first.Reason}";
         }
         else
         {
             var f = ran.First(r => r.State != ToolRunState.Done);
-            text = $"【龙管家】队列结束：{ok}/{total} 成功。⚠ {f.DisplayName}失败（{f.Reason}），已跳过，详情见软件日志。";
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", text);
+            text = $"【龙管家】队列结束：{ok}/{total} 成功。⚠ {f.DisplayName}未完成（{f.Reason}），已跳过。";
         }
+
+        // 失败类通知带上现场包路径：人在外面看到这句话，才知道该去哪看
+        if (bundleNote.Length > 0) text += bundleNote;
+        NotifyService.Show(level, "龙管家", text);
 
         LogService.LogEvent($"队列结束：{ok}/{total} 成功，耗时 {FormatDuration(elapsed)}，触发 {trigger}，停止={_stopRequested}");
 

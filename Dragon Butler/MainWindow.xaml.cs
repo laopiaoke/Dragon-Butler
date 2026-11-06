@@ -338,6 +338,7 @@ public partial class MainWindow : Window
                 }
             }
             TbLastRun.Text = LastRunText(s);
+            RefreshCatchUpText(s);
         }
         catch { }
     }
@@ -354,40 +355,74 @@ public partial class MainWindow : Window
     private DateTime? NextScheduleTime()
     {
         var s = AppState.Settings;
-        int mask = s.ScheduleWeekdays & 0x7F;
-        if (mask == 0) return null;
-        var now = DateTime.Now;
-        for (int i = 0; i < 8; i++)
-        {
-            var day = now.Date.AddDays(i);
-            int bit = ((int)day.DayOfWeek + 6) % 7;
-            if ((mask & (1 << bit)) == 0) continue;
-            var t = day.AddHours(s.ScheduleHour).AddMinutes(s.ScheduleMinute);
-            if (t > now) return t;
-        }
-        return null;
+        return SchedulePlanner.NextDueAfter(s.ScheduleWeekdays, s.ScheduleHour, s.ScheduleMinute, DateTime.Now);
     }
 
-    /// <summary>每 30 秒检查一次：到点且当天没跑过 → 触发队列（定时触发）。</summary>
+    /// <summary>补跑窗口的档位（分钟）。0 表示关闭补跑，退回「必须整分钟命中」的老行为。</summary>
+    private static readonly int[] CatchUpSteps = { 0, 60, 120, 240, 480, 1440 };
+
+    /// <summary>点击「补跑」一行：在档位之间轮换，并存盘。</summary>
+    private void BtnCatchUp_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var s = AppState.Settings;
+            int current = Math.Clamp(s.ScheduleCatchUpMinutes, 0, SchedulePlanner.MaxCatchUpMinutes);
+            int idx = Array.IndexOf(CatchUpSteps, current);
+            s.ScheduleCatchUpMinutes = CatchUpSteps[idx < 0 ? 2 : (idx + 1) % CatchUpSteps.Length];
+            AppState.SaveSettings();
+            LogService.LogEvent("定时：补跑窗口改为 " + SchedulePlanner.WindowText(s.ScheduleCatchUpMinutes));
+            UpdateScheduleStatus();
+        }
+        catch { }
+    }
+
+    /// <summary>刷新「补跑」那一行的文案（随设置变化，读不到就退回默认窗口）。</summary>
+    private void RefreshCatchUpText(AppSettings s)
+    {
+        try
+        {
+            BtnCatchUp.Visibility = s.ScheduleEnabled ? Visibility.Visible : Visibility.Collapsed;
+            TbCatchUp.Text = "补跑：" + SchedulePlanner.WindowText(s.ScheduleCatchUpMinutes);
+        }
+        catch { }
+    }
+
+    /// <summary>每 30 秒检查一次：到点（或在补跑窗口内且该计划点没跑过）→ 触发队列（定时触发）。</summary>
     private void CheckSchedule()
     {
         try
         {
             var s = AppState.Settings;
-            if (!s.ScheduleEnabled || QueueService.IsRunning) return;
-            if (s.VacationMode) return;
-            int mask = s.ScheduleWeekdays & 0x7F;
-            if (mask == 0) return;
-            var now = DateTime.Now;
-            int bit = ((int)now.DayOfWeek + 6) % 7;
-            if ((mask & (1 << bit)) == 0) return;
-            if (now.Hour != s.ScheduleHour || now.Minute != s.ScheduleMinute) return;
-            if (_lastScheduleRun.Date == now.Date) return;
-            _lastScheduleRun = now;
-            LogService.LogEvent("定时：到点，触发队列");
+            var decision = SchedulePlanner.Decide(
+                s.ScheduleEnabled,
+                s.VacationMode,
+                QueueService.IsRunning,
+                s.ScheduleHour,
+                s.ScheduleMinute,
+                s.ScheduleWeekdays,
+                s.ScheduleCatchUpMinutes,
+                ParseLastScheduleRun(s),
+                DateTime.Now);
+
+            if (!decision.ShouldRun) return;
+
+            // 先记录，再启动——启动失败也认这个计划点，避免每 30 秒重试一次刷屏
+            s.LastScheduleRunAt = (decision.DueAt ?? DateTime.Now).ToString("yyyy-MM-dd HH:mm");
+            _lastScheduleRun = DateTime.Now;
+            AppState.SaveSettings();
+
+            LogService.LogEvent("定时：" + decision.Reason + "，触发队列");
             _ = QueueService.StartAsync(QueueTrigger.Timer);
         }
         catch { }
+    }
+
+    /// <summary>读取「上次因定时而跑的计划点」；旧配置只有 LastRunAt 时退化为不记录（宁可补跑一次）。</summary>
+    private static DateTime? ParseLastScheduleRun(AppSettings s)
+    {
+        if (DateTime.TryParse(s.LastScheduleRunAt, out var at)) return at;
+        return null;
     }
 
     // ===== 队列卡 =====
@@ -643,11 +678,46 @@ public partial class MainWindow : Window
 
         BtnQueueIdleSkip.Visibility = QueueService.IsWaitingIdle ? Visibility.Visible : Visibility.Collapsed;
         BtnQueueCancelShutdown.Visibility = QueueService.IsShutdownPending ? Visibility.Visible : Visibility.Collapsed;
+        RefreshContinueButton();
         TbQueueStatus.Text = running
             ? (string.IsNullOrEmpty(QueueService.CurrentToolId)
                 ? "准备中…"
                 : $"正在执行 {ProfileRegistry.Get(QueueService.CurrentToolId).DisplayName}")
             : (AppState.Settings.VacationMode ? "度假中，定时已暂停" : "按顺序执行");
+    }
+
+    /// <summary>
+    /// v1.6 / F2「接着跑」按钮的显隐与文案。
+    /// 只在「今天已经跑成过至少一项，且还有没跑成的」时出现——
+    /// 一次都没跑过的日子显示它，等于给用户一个和「一键开跑」一样的按钮。
+    /// </summary>
+    private void RefreshContinueButton()
+    {
+        try
+        {
+            if (QueueService.IsRunning)
+            {
+                BtnQueueContinue.Visibility = Visibility.Collapsed;
+                return;
+            }
+            var done = QueueService.DoneToolIdsToday();
+            if (done.Count == 0)
+            {
+                BtnQueueContinue.Visibility = Visibility.Collapsed;
+                return;
+            }
+            var left = QueueService.UnfinishedToday();
+            BtnQueueContinue.Visibility = left.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (left.Count > 0)
+                BtnQueueContinue.Content = $"接着跑（今天还剩 {left.Count} 项）";
+        }
+        catch { }
+    }
+
+    private void BtnQueueContinue_Click(object sender, RoutedEventArgs e)
+    {
+        if (QueueService.IsRunning) return;
+        _ = QueueService.StartContinueAsync();
     }
 
     private void BtnQueueStart_Click(object sender, RoutedEventArgs e)

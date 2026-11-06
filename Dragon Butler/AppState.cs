@@ -53,6 +53,18 @@ public class AppSettings
     public int ScheduleMinute { get; set; } = 0;
     /// <summary>星期掩码：bit0=周一 … bit6=周日；0x7F=每天（v0.3 定时多选）</summary>
     public int ScheduleWeekdays { get; set; } = 0x7F;
+
+    /// <summary>
+    /// 补跑窗口（分钟，v1.6 / F1）。计划点之后这么久之内发现还没跑，就补跑一次。
+    /// 0 = 关闭补跑（退回旧的「必须整分钟命中」语义）。默认 120 分钟。
+    /// </summary>
+    public int ScheduleCatchUpMinutes { get; set; } = SchedulePlanner.DefaultCatchUpMinutes;
+
+    /// <summary>
+    /// 上一次「因定时而跑」的那个计划点（yyyy-MM-dd HH:mm，空=无记录）。
+    /// 取代 <see cref="LastRunAt"/> 的「只记日期」语义：手动跑过不算，回去补跑仍会触发。
+    /// </summary>
+    public string LastScheduleRunAt { get; set; } = "";
     /// <summary>上次执行开始时间（yyyy-MM-dd HH:mm，空=无记录）</summary>
     public string LastRunAt { get; set; } = "";
     /// <summary>上次执行用时（秒）</summary>
@@ -65,6 +77,15 @@ public class AppSettings
     public bool ScreenshotCheckEnabled { get; set; } = true;
     public string WebhookOutUrl { get; set; } = "";
     public int BgiWebhookPort { get; set; } = 18235;
+
+    /// <summary>
+    /// v1.6 / F3：失败 / 悬置 / 挂起时是否自动打一份现场包（日志尾巴 + 脱敏配置 + 进程列表 + 截图）。
+    /// 默认开：这东西只在出事时产生价值，而默认关就等于大部分人永远不会打开它。
+    /// </summary>
+    public bool IncidentBundleEnabled { get; set; } = true;
+
+    /// <summary>v1.6 / F3：现场包保留份数，超了删最旧的。</summary>
+    public int IncidentBundleKeep { get; set; } = 10;
     /// <summary>
     /// 按键音效开关。默认关闭（静音）：新装用户不会被突然的点击音打扰，
     /// 想听声音在「系统 → 按键音效」里打开即可，开关与 <see cref="SoundService"/> 的播放闸门保持不变。
@@ -112,8 +133,8 @@ public class AppSettings
     /// <summary>配置结构版本：0/缺省=旧版（v1.2 及以前），13=v1.3。</summary>
     public int Version { get; set; }
 
-    /// <summary>v1.3 当前配置结构版本号。</summary>
-    public const int CurrentVersion = 13;
+    /// <summary>v1.6 当前配置结构版本号（v1.6 新增补跑窗口与队列续跑字段）。</summary>
+    public const int CurrentVersion = 14;
 
     /// <summary>各工具档案（键为 ToolId）。旧配置无此节时为空字典。</summary>
     public Dictionary<string, ToolProfile> Tools { get; set; } = new(StringComparer.OrdinalIgnoreCase);

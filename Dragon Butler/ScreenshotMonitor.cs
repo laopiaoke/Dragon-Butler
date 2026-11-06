@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -130,8 +130,12 @@ public sealed class ScreenshotMonitor
         }
     }
 
-    /// <summary>抓屏：优先游戏窗口区域（本会话），找不到则全屏</summary>
-    private static (byte[]? buf, int w, int h) Capture()
+    /// <summary>
+    /// 抓屏：优先游戏窗口区域（本会话），找不到则全屏。
+    /// v1.6 / F3：从 private 改为 internal —— 现场包要复用同一套抓屏逻辑，
+    /// 不再写第二份 GDI 代码（重复的抓屏代码是那种「改一处忘一处」的经典来源）。
+    /// </summary>
+    internal static (byte[]? buf, int w, int h) Capture()
     {
         IntPtr hwnd = IntPtr.Zero;
         foreach (var p in ProfileRegistry.BetterGi.GameProcessNames

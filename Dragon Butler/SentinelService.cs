@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -255,6 +255,11 @@ public static class SentinelService
         bool auto = AppState.Settings.AutoRestartBgi;
         bool cooling = (DateTime.Now - _lastRestart).TotalSeconds < 60;
 
+        // v1.6 / F4：进程已经没了，退出码取不到；能拿到的是崩溃前最后一条错误日志行。
+        // 有就带上——「工具异常退出」和「工具异常退出，最后一条错误：xxx」是天壤之别。
+        string evidence = RunEvidence.LastErrorLine;
+        string because = evidence.Length > 0 ? "最后一条错误：" + evidence : "";
+
         if (QueueService.IsRunning)
         {
             State = SentinelState.Idle;
@@ -268,22 +273,24 @@ public static class SentinelService
             State = SentinelState.Idle;
             MutateHealth(h => h.RestartCount++);
             Emit(SentinelEventKind.BgiRestarted, "工具崩溃，自动重启");
-            LogService.LogEvent($"守护：判定崩溃（30 秒无进程），自动重启 {profile.DisplayName}");
+            LogService.LogEvent($"守护：判定崩溃（30 秒无进程），自动重启 {profile.DisplayName}" + (because.Length > 0 ? "，" + because : ""));
             NotifyService.Show(NotifyLevel.Critical, "龙管家",
-                $"检测到 {profile.DisplayName} 异常退出，已尝试自动重启。");
+                $"检测到 {profile.DisplayName} 异常退出，已尝试自动重启。" + (because.Length > 0 ? " " + because : ""));
             _ = QueueService.StartSingleAsync(profile, QueueTrigger.Sentinel);
         }
         else if (auto && cooling)
         {
             State = SentinelState.Idle;
             LogService.LogEvent("守护：判定崩溃，但处于 60 秒重启冷却期，只通知不重启");
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", "检测到工具异常退出，处于重启冷却期，暂不自动重启。");
+            NotifyService.Show(NotifyLevel.Warning, "龙管家",
+                "检测到工具异常退出，处于重启冷却期，暂不自动重启。" + (because.Length > 0 ? " " + because : ""));
         }
         else
         {
             State = SentinelState.Idle;
             LogService.LogEvent("守护：判定崩溃，未开启自动重启，只通知");
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", "检测到工具意外退出，未开启自动重启。");
+            NotifyService.Show(NotifyLevel.Warning, "龙管家",
+                "检测到工具意外退出，未开启自动重启。" + (because.Length > 0 ? " " + because : ""));
         }
     }
 

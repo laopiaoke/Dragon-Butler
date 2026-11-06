@@ -278,6 +278,31 @@
                     <TextBox x:Name="TbMax" Style="{StaticResource Field}" Width="110" HorizontalAlignment="Left" Text="120"/>
                     <TextBlock Text="超过这个时间仍未完成，按超时处理；建议留足余量。" Style="{StaticResource Hint}"/>
 
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="52"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="52"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="失败重试" FontSize="11.5" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <TextBox x:Name="TbRetry" Grid.Column="1" Style="{StaticResource Field}" Margin="8,0,0,0" Text="1"/>
+                        <TextBlock Grid.Column="2" Text="次，等" FontSize="11.5" Margin="8,0,0,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <TextBox x:Name="TbRetryDelay" Grid.Column="3" Style="{StaticResource Field}"
+                                 Margin="8,0,0,0" Text="3"/>
+                        <TextBlock Grid.Column="4" Text="秒再试" FontSize="11.5" Margin="8,0,0,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    </Grid>
+                    <CheckBox x:Name="CkRetryBackoff" Content="等待时间逐次翻倍（3 秒 → 6 秒 → 12 秒）"
+                              IsChecked="True" Margin="0,6,0,0" FontSize="11.5"
+                              Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <TextBlock Text="重试次数不含首次；等待填秒数，0 表示立刻重试。仅对失败/超时有效，挂起与完成不重试。"
+                               Style="{StaticResource Hint}"/>
+
                     <TextBlock Text="关联游戏进程（可选）" Style="{StaticResource Label}"/>
                     <TextBox x:Name="TbGames" Style="{StaticResource Field}"/>
                     <TextBlock Text="多个用分号隔开，例如 YuanShen;GenshinImpact；用于开工前检查冲突。" Style="{StaticResource Hint}"/>

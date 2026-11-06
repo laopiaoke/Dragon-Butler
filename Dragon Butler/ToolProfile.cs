@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace DragonButler;
@@ -84,8 +84,20 @@ public sealed class ToolProfile
     /// <summary>主信号到达后，等待副信号/退出的宽限（分钟）。</summary>
     public int PostExitGraceMinutes { get; set; }
 
-    /// <summary>失败重试次数（本阶段仅存字段，执行路径不启用）。</summary>
+    /// <summary>失败重试次数（不含首次；0=不重试）。</summary>
     public int RetryCount { get; set; } = 1;
+
+    /// <summary>
+    /// v1.6 / F5：第一次重试前等多久（秒）。以前固定 3 秒，对「游戏加载慢」这类失败毫无意义。
+    /// 0 表示立刻重试。
+    /// </summary>
+    public int RetryDelaySeconds { get; set; } = 3;
+
+    /// <summary>
+    /// v1.6 / F5：是否让等待时间逐次翻倍（3 → 6 → 12…）。
+    /// 默认开：对「偶发卡顿」和「机器慢」都更友好，且不需要用户算数。
+    /// </summary>
+    public bool RetryBackoff { get; set; } = true;
 
     /// <summary>工具专属数据（BGI 配置组列表、Webhook 端口等）。</summary>
     public Dictionary<string, string> CustomData { get; set; } = new(StringComparer.OrdinalIgnoreCase);

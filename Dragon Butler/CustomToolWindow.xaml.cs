@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -39,6 +39,10 @@ public partial class CustomToolWindow : Window
             TbProcess.Text = _original.ManagedProcessName;
             TbGames.Text = string.Join(";", _original.GameProcessNames ?? Array.Empty<string>());
             TbMax.Text = Math.Max(1, _original.MaxDurationMinutes).ToString();
+            // v1.6 / F5：老档案没有这两个字段，走默认值即可（3 秒、退避开）
+            TbRetry.Text = Math.Max(0, _original.RetryCount).ToString();
+            TbRetryDelay.Text = Math.Max(0, _original.RetryDelaySeconds).ToString();
+            CkRetryBackoff.IsChecked = _original.RetryBackoff;
             switch (_original.PrimarySignal)
             {
                 case CompletionSignalKind.Duration:
@@ -249,6 +253,23 @@ public partial class CustomToolWindow : Window
                 return;
             }
 
+            // v1.6 / F5：重试次数与等待时长都要能填，且不许填出负数/离谱值
+            if (!int.TryParse((TbRetry.Text ?? "").Trim(), out int retryCount)
+                || retryCount < 0 || retryCount > 10)
+            {
+                ShowError("失败重试次数请填 0～10 之间的整数；0 表示不重试。");
+                TbRetry.Focus();
+                return;
+            }
+
+            if (!int.TryParse((TbRetryDelay.Text ?? "").Trim(), out int retryDelay)
+                || retryDelay < 0 || retryDelay > 3600)
+            {
+                ShowError("重试等待秒数请填 0～3600 之间的整数；0 表示立刻重试。");
+                TbRetryDelay.Focus();
+                return;
+            }
+
             var games = (TbGames.Text ?? "")
                 .Split(new[] { ';', '；', ',', '，' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => s.Trim())
@@ -275,7 +296,9 @@ public partial class CustomToolWindow : Window
             profile.LogCompletionPattern = null;
             profile.MaxDurationMinutes = maxMinutes;
             profile.PostExitGraceMinutes = custom ? 5 : 0;
-            profile.RetryCount = 1;
+            profile.RetryCount = retryCount;
+            profile.RetryDelaySeconds = retryDelay;
+            profile.RetryBackoff = CkRetryBackoff.IsChecked == true;
             profile.CustomData["custom"] = "1";
             profile.CustomData["durationMinutes"] = durationMinutes.ToString();
             profile.CustomData.Remove(CustomSignalKeys.LogTexts);
