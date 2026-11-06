@@ -78,6 +78,10 @@ public partial class MainWindow : Window
 
     private readonly Dictionary<string, CustomToolCard> _customCards = new(StringComparer.OrdinalIgnoreCase);
 
+    // v1.8：全局热键宿主（只在开启时建）与迷你浮条（只在开着时存在）
+    private HotkeyService? _hotkeys;
+    private MiniBarWindow? _miniBar;
+
     private sealed class CustomToolCard
     {
         public Border Card = null!;
@@ -111,6 +115,8 @@ public partial class MainWindow : Window
             QueueService.StateChanged -= OnQueueStateChanged;
             QueueService.StatusChanged -= OnQueueStatusText;
             SentinelService.OnEvent -= OnSentinelEvent;
+            // v1.8：热键是系统级注册，窗口关掉必须还回去，否则组合键被永久占用
+            try { _hotkeys?.Dispose(); } catch { }
         };
 
         _countdownTimer.Tick += (_, _) => { UpdateScheduleStatus(); RefreshShield(); };
@@ -125,6 +131,10 @@ public partial class MainWindow : Window
         RenderQueue();
         RefreshToolCards();
         RefreshShield();
+
+        // v1.8：热键与浮条要等控件树建完才能改它们的状态
+        ApplyHotkeys();
+        ApplyMiniBar();
 
         Loaded += (_, _) =>
         {
@@ -241,6 +251,10 @@ public partial class MainWindow : Window
         TgControlApi.IsChecked = s.ControlApiEnabled;
         TgLanPanel.IsChecked = s.LanPanelEnabled;
         RefreshApiRows(s);
+        TgHotkey.IsChecked = s.HotkeyEnabled;
+        TgMiniBar.IsChecked = s.MiniBarEnabled;
+        TgSpeech.IsChecked = s.SpeechEnabled;
+        RefreshHotkeyRow(s);
         TbNightMinutes.Text = Math.Clamp(s.NightScreenMinutes, 5, 120).ToString();
         TbNightMinutes.IsEnabled = s.NightScreenEnabled;
         TgVacation.IsChecked = s.VacationMode;
@@ -438,7 +452,43 @@ public partial class MainWindow : Window
             RenderQueue();
             RefreshToolCards();
             RefreshShield();
+            RefreshProgress();
         }));
+    }
+
+    /// <summary>
+    /// v1.8 / F10：把队列进度画到任务栏图标上。
+    ///
+    /// 为什么值得做：挂着一条龙的人多半在做别的事，全屏游戏时根本看不到主界面。
+    /// 任务栏那条进度是 Windows 自带的能力，不需要任何第三方依赖，
+    /// 用户抬眼扫一下任务栏就知道「跑到第几个了、卡没卡」。
+    ///
+    /// 进度分母取「今天计划要跑的项数」，分子取「今天已跑成的项数」，
+    /// 与「接着跑」按钮共用同一份台账（RunJournal），两处数字永远一致。
+    /// </summary>
+    private void RefreshProgress()
+    {
+        try
+        {
+            bool running = QueueService.IsRunning;
+            int done = QueueService.DoneToolIdsToday().Count;
+            int total = Math.Max(done + QueueService.UnfinishedToday().Count, 0);
+
+            if (TaskbarItemInfo == null) TaskbarItemInfo = new System.Windows.Shell.TaskbarItemInfo();
+
+            if (!running || total <= 0)
+            {
+                TaskbarItemInfo.ProgressState = System.Windows.Shell.TaskbarItemProgressState.None;
+                return;
+            }
+
+            TaskbarItemInfo.ProgressValue = QueueProgress.Fraction(done, total);
+            TaskbarItemInfo.ProgressState = System.Windows.Shell.TaskbarItemProgressState.Normal;
+        }
+        catch
+        {
+            // 任务栏集成失败（极老系统 / 远程桌面会话）不该影响队列本身
+        }
     }
 
     private void OnQueueStatusText(string text)
@@ -683,6 +733,7 @@ public partial class MainWindow : Window
         BtnQueueIdleSkip.Visibility = QueueService.IsWaitingIdle ? Visibility.Visible : Visibility.Collapsed;
         BtnQueueCancelShutdown.Visibility = QueueService.IsShutdownPending ? Visibility.Visible : Visibility.Collapsed;
         RefreshContinueButton();
+        RefreshProgress();
         TbQueueStatus.Text = running
             ? (string.IsNullOrEmpty(QueueService.CurrentToolId)
                 ? "准备中…"
@@ -775,6 +826,22 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             LogService.LogEvent("打开按日计划失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>v1.8 / F13：打开挂机日历（只读，不改任何设置）。</summary>
+    private void BtnCalendar_Click(object sender, RoutedEventArgs e) => OpenCalendar();
+
+    private void OpenCalendar()
+    {
+        try
+        {
+            var dlg = new CalendarWindow { Owner = this };
+            dlg.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开挂机日历失败：" + ex.Message);
         }
     }
 
@@ -2077,6 +2144,192 @@ public partial class MainWindow : Window
         }
     }
 
+    // ===== v1.8：全局热键 / 迷你浮条 / 跑完说一句话 =====
+
+    /// <summary>
+    /// 按当前设置注册或注销热键。开关切换、改键、启动时都走这里，
+    /// 保证「设置里显示的组合」和「系统里真注册的组合」永远一致。
+    /// </summary>
+    private void ApplyHotkeys()
+    {
+        try
+        {
+            var s = AppState.Settings;
+            if (!s.HotkeyEnabled)
+            {
+                _hotkeys?.UnregisterAll();
+                LogService.LogEvent("热键：已注销（开关关闭）");
+                return;
+            }
+
+            _hotkeys ??= CreateHotkeyService();
+
+            // 两个组合写成一样时只注册第一个——否则后注册的会顶掉前者，用户会以为「停止键没反应」
+            var list = new List<(string Action, string Text)>
+            {
+                ("start", s.HotkeyStart),
+                ("stop", s.HotkeyStop),
+            };
+            if (string.Equals(HotkeyService.Normalize(s.HotkeyStart), HotkeyService.Normalize(s.HotkeyStop),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                list.RemoveAt(1);
+                LogService.LogEvent("热键：开跑与停止写的是同一个组合，只保留开跑");
+            }
+
+            bool ok = _hotkeys.Register(list.ToArray());
+            AppState.PublishLog(ok
+                ? "热键已就绪：" + HotkeyService.Normalize(s.HotkeyStart) + " 开跑 / " + HotkeyService.Normalize(s.HotkeyStop) + " 停止"
+                : "热键注册失败：组合可能已被其它程序占用（详见日志）");
+            RefreshHotkeyRow(s);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("热键：应用失败 " + ex.Message);
+        }
+    }
+
+    private HotkeyService CreateHotkeyService()
+    {
+        var svc = new HotkeyService();
+        svc.Pressed += action =>
+        {
+            // WM_HOTKEY 来自隐藏窗口的消息循环，已经在 UI 线程，但仍用 Dispatcher 兜一层
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                SoundService.Play("click.wav");
+                if (action == "start")
+                {
+                    if (QueueService.IsRunning) return;
+                    AppState.PublishLog("热键：开跑");
+                    _ = QueueService.StartAsync(QueueTrigger.Manual);
+                }
+                else if (action == "stop")
+                {
+                    if (!QueueService.IsRunning) return;
+                    AppState.PublishLog("热键：停止");
+                    QueueService.Stop();
+                }
+            }));
+        };
+        return svc;
+    }
+
+    private void RefreshHotkeyRow(AppSettings s)
+    {
+        HotkeyRow.Visibility = s.HotkeyEnabled ? Visibility.Visible : Visibility.Collapsed;
+        TgHotkey.IsChecked = s.HotkeyEnabled;
+        TbHotkeyStart.Text = s.HotkeyStart;
+        TbHotkeyStop.Text = s.HotkeyStop;
+    }
+
+    private void TgHotkey_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgHotkey.IsChecked == true;
+        AppState.Settings.HotkeyEnabled = on;
+        AppState.SaveSettings();
+        RefreshHotkeyRow(AppState.Settings);
+        ApplyHotkeys();
+        LogService.LogEvent("热键：" + (on ? "开启" : "关闭"));
+        if (on)
+            NotifyService.Show(NotifyLevel.Info, "龙管家",
+                "热键已开启。如果某个组合在游戏里没反应，多半被别的程序占了，换一个即可。");
+    }
+
+    private void TbHotkeyStart_LostFocus(object sender, RoutedEventArgs e) => CommitHotkey(TbHotkeyStart, isStart: true);
+    private void TbHotkeyStop_LostFocus(object sender, RoutedEventArgs e) => CommitHotkey(TbHotkeyStop, isStart: false);
+
+    /// <summary>输入框失焦时校验并保存：写法不合法就退回原值，不做无声的吞掉。</summary>
+    private void CommitHotkey(TextBox box, bool isStart)
+    {
+        if (_suppressToggle) return;
+        var s = AppState.Settings;
+        string raw = box.Text ?? "";
+        string normalized = HotkeyService.Normalize(raw);
+
+        if (HotkeyService.Parse(raw) == null)
+        {
+            box.Text = isStart ? s.HotkeyStart : s.HotkeyStop;
+            AppState.PublishLog("热键：写法要像 Ctrl+Alt+R（至少一个修饰键 + 一个主键）");
+            return;
+        }
+
+        box.Text = normalized;
+        if (isStart) s.HotkeyStart = normalized;
+        else s.HotkeyStop = normalized;
+        AppState.SaveSettings();
+        if (s.HotkeyEnabled) ApplyHotkeys();
+    }
+
+    private void TgMiniBar_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgMiniBar.IsChecked == true;
+        AppState.Settings.MiniBarEnabled = on;
+        AppState.SaveSettings();
+        ApplyMiniBar();
+        LogService.LogEvent("浮条：" + (on ? "开启" : "关闭"));
+    }
+
+    /// <summary>开就建一个、关就关掉。浮条本身不持有主窗，避免循环引用。</summary>
+    private void ApplyMiniBar()
+    {
+        try
+        {
+            bool on = AppState.Settings.MiniBarEnabled;
+            if (on)
+            {
+                if (_miniBar == null)
+                {
+                    _miniBar = new MiniBarWindow();
+                    _miniBar.Closed += (_, _) => _miniBar = null;
+                    _miniBar.Show();
+                }
+                else
+                {
+                    _miniBar.Show();
+                    _miniBar.Activate();
+                }
+            }
+            else
+            {
+                _miniBar?.Close();
+                _miniBar = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("浮条：显示失败 " + ex.Message);
+        }
+    }
+
+    private void TgSpeech_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgSpeech.IsChecked == true;
+        AppState.Settings.SpeechEnabled = on;
+        AppState.SaveSettings();
+        LogService.LogEvent("语音：" + (on ? "开启" : "关闭"));
+
+        if (on)
+        {
+            // 立刻试一句：本机没有语音引擎时，用户当场就知道，而不是等到跑完才发现没声音
+            if (SpeechService.Available())
+            {
+                SpeechService.Speak("语音已开启。", 0);
+                AppState.PublishLog("语音已开启：本机有可用的语音引擎");
+            }
+            else
+            {
+                TgSpeech.IsChecked = false;
+                AppState.Settings.SpeechEnabled = false;
+                AppState.SaveSettings();
+                AppState.PublishLog("语音：本机没有可用的语音引擎（精简版 Windows 常见），已保持关闭");
+            }
+        }
+    }
+
     private void CbFailStrategy_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressToggle) return;
@@ -2443,5 +2696,171 @@ public partial class MainWindow : Window
         Hide();
         App.Instance?.ShowBalloon(NotifyLevel.Info, "一条龙管家",
             "一条龙管家 仍在后台运行，双击托盘图标可打开。");
+    }
+
+    // ===== v1.8 / F15：命令面板（Ctrl+K）=====
+
+    /// <summary>
+    /// Ctrl+K 打开命令面板。
+    /// 只在主窗拥有焦点时响应——游戏里按 Ctrl+K 不该把管家叫出来，
+    /// 那件事交给全局热键（F9），两套机制职责分开。
+    /// </summary>
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (e.Key == Key.K && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            e.Handled = true;
+            OpenCommandPalette();
+        }
+    }
+
+    private void OpenCommandPalette()
+    {
+        try
+        {
+            // 「单跑某工具」是按当前配置临时生成的，配置文件里没有这些工具就不出现
+            var toolCommands = CommandRegistry.ToolCommands(
+                ProfileRegistry.All.Select(p => (p.ToolId, p.DisplayName)));
+
+            var dlg = new CommandPalette(toolCommands) { Owner = this };
+            dlg.Executed += id => Dispatcher.BeginInvoke(new Action(() => RunCommand(id)));
+            dlg.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("命令面板：打开失败 " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 命令分发。这里是唯一知道「某条命令到底怎么执行」的地方——
+    /// 面板本身不认识队列、主题、托盘，坏了也不会连累它。
+    /// </summary>
+    private void RunCommand(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        SoundService.Play("click.wav");
+        LogService.LogEvent("命令面板：" + id);
+
+        try
+        {
+            if (id.StartsWith("run.tool:", StringComparison.Ordinal))
+            {
+                string toolId = id.Substring("run.tool:".Length);
+                var profile = ProfileRegistry.Get(toolId);
+                if (profile == null)
+                {
+                    NotifyService.Show(NotifyLevel.Warning, "龙管家", "找不到这个工具：" + toolId);
+                    return;
+                }
+                if (QueueService.IsRunning)
+                {
+                    NotifyService.Show(NotifyLevel.Info, "龙管家", "队列正在跑，等它结束或先停止。");
+                    return;
+                }
+                _ = QueueService.StartSingleAsync(profile, QueueTrigger.Manual);
+                return;
+            }
+
+            switch (id)
+            {
+                case "run.queue": BtnQueueStart_Click(this, new RoutedEventArgs()); break;
+                case "run.continue": _ = QueueService.StartContinueAsync(); break;
+                case "run.stop": if (QueueService.IsRunning) QueueService.Stop(); break;
+                case "run.single": RevealCard(CustomToolsHost); break;
+
+                case "view.schedule": RevealCard(ScheduleCard); break;
+                case "view.queue": RevealCard(QueueHost); break;
+                case "view.tools": RevealCard(CustomToolsHost); break;
+                case "view.advanced": RevealCard(AdvancedBody); break;
+                case "view.log": RevealCard(TbLog); break;
+                case "view.calendar": OpenCalendar(); break;
+
+                case "tool.copyToken": BtnCopyToken_Click(this, new RoutedEventArgs()); break;
+                case "tool.apiToggle":
+                    TgControlApi.IsChecked = !(TgControlApi.IsChecked == true);
+                    TgControlApi_Click(this, new RoutedEventArgs());
+                    break;
+                case "tool.lanToggle":
+                    TgLanPanel.IsChecked = !(TgLanPanel.IsChecked == true);
+                    TgLanPanel_Click(this, new RoutedEventArgs());
+                    break;
+                case "tool.snapshot":
+                    _ = Task.Run(() =>
+                    {
+                        string msg = SnapshotService.CaptureMessage("命令面板");
+                        NotifyService.Show(NotifyLevel.Info, "龙管家", msg);
+                    });
+                    break;
+
+                case "ui.miniBar":
+                    TgMiniBar.IsChecked = !(TgMiniBar.IsChecked == true);
+                    TgMiniBar_Click(this, new RoutedEventArgs());
+                    break;
+                case "ui.theme": ToggleTheme(); break;
+                case "ui.hotkey": RevealCard(HotkeyRow); break;
+
+                case "sys.openFolder": BtnOpenGroupDir_Click(this, new RoutedEventArgs()); break;
+                case "sys.check":
+                    NotifyService.Show(NotifyLevel.Info, "龙管家",
+                        "当前版本 " + ProductVersion() + "。新版本会在启动时自动提示，也可以到 GitHub 看 Release。");
+                    break;
+                case "sys.about": OpenAbout(); break;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("命令面板：执行 " + id + " 失败：" + ex.Message);
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", "这条命令没执行成功，详见日志。");
+        }
+    }
+
+    /// <summary>把某个元素滚进视野，顺手把它所在的折叠卡展开——命令面板的「打开 X」要真的到得了。</summary>
+    private void RevealCard(FrameworkElement target)
+    {
+        try
+        {
+            // 折叠卡里的元素是 Collapsed 的，先展开父级（只往上找一层已知的折叠体）
+            foreach (var body in new FrameworkElement?[] { AdvancedBody, SystemBody, NotifyBody })
+            {
+                if (body == null) continue;
+                if (body == target || body.IsAncestorOf(target))
+                    body.Visibility = Visibility.Visible;
+            }
+            target.BringIntoView();
+            ContentScroll.ScrollToVerticalOffset(ContentScroll.VerticalOffset);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("命令面板：定位失败 " + ex.Message);
+        }
+    }
+
+    /// <summary>主题在两个模式间切换；自定义背景保持不动（那是另一套设置）。</summary>
+    private void ToggleTheme()
+    {
+        string next = Theme.Mode == "Light" ? "Dark" : "Light";
+        AppState.Settings.Theme = next;
+        AppState.SaveSettings();
+        Theme.Set(next);
+        AppState.PublishLog("主题：" + (next == "Light" ? "浅色" : "深色"));
+    }
+
+    private static string ProductVersion() => typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.8.0";
+
+    private void OpenAbout()
+    {
+        var s = AppState.Settings;
+        AppDialog.Show(
+            "把你常用的游戏工具排成队列，按顺序启动、盯着完成、跑完通知你。",
+            detail: "版本 " + ProductVersion() + "\n" +
+                    "工具 " + ProfileRegistry.All.Count + " 个 · 队列 " + (s.Queue?.Count ?? 0) + " 项\n" +
+                    "运行中 " + (QueueService.IsRunning ? "是" : "否") + "\n" +
+                    "数据目录 " + AppContext.BaseDirectory,
+            kind: AppDialog.Kind.Info,
+            title: "关于 一条龙管家",
+            primary: "知道了",
+            owner: this);
     }
 }

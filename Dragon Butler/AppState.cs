@@ -224,6 +224,34 @@ public class AppSettings
 
     /// <summary>最近一次守护告警时间（底部盾牌转黄用），空=从未告警。</summary>
     public DateTime? ShieldAlertAt { get; set; }
+
+    // ===== v1.8：全局热键（F9）与迷你浮条（F11）=====
+    /// <summary>
+    /// 全局热键开关（默认关）。游戏反作弊对全局键盘注册的容忍度不可控，
+    /// 而且热键会霸占组合键——这种「替用户做主」的事不该默认打开。
+    /// </summary>
+    public bool HotkeyEnabled { get; set; } = false;
+
+    /// <summary>开跑热键，写法见 <see cref="HotkeyService.Parse"/>（如 "Ctrl+Alt+R"）。</summary>
+    public string HotkeyStart { get; set; } = "Ctrl+Alt+R";
+
+    /// <summary>停止热键（如 "Ctrl+Alt+S"）。</summary>
+    public string HotkeyStop { get; set; } = "Ctrl+Alt+S";
+
+    /// <summary>迷你浮条开关（默认关）。挂在屏幕角落的 180×44 小窗，只显示进度。</summary>
+    public bool MiniBarEnabled { get; set; } = false;
+
+    /// <summary>浮条位置（-1 = 还没放过，首次显示时贴右上角）。</summary>
+    public double MiniBarLeft { get; set; } = -1;
+
+    /// <summary>浮条位置（-1 = 还没放过）。</summary>
+    public double MiniBarTop { get; set; } = -1;
+
+    /// <summary>
+    /// 跑完说一句话（默认关）。走 Windows 自带 SAPI，零依赖。
+    /// 默认关是因为「突然出声」比「没有声音」更让人反感。
+    /// </summary>
+    public bool SpeechEnabled { get; set; } = false;
 }
 
 /// <summary>

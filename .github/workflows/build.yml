@@ -96,6 +96,10 @@ jobs:
             retry    = "F5 重试退避可配"
             api      = "F6/F7 控制 API 与只读面板"
             weekly   = "F8 周报"
+            hotkey   = "F9 全局热键"
+            progress = "F10 任务栏进度与托盘"
+            command  = "F15 命令面板"
+            calendar = "F13 挂机日历"
           }
           $bad = @()
           foreach ($name in $groups.Keys) {

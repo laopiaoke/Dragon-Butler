@@ -923,6 +923,18 @@ public static class QueueService
         if (bundleNote.Length > 0) text += bundleNote;
         NotifyService.Show(level, "龙管家", text);
 
+        // v1.8 / F14：跑完说一句话。念的是给人听的一句口语，不是通知正文——
+        // 通知里那些【】、路径、退出码念出来没法听。默认关，见 AppSettings.SpeechEnabled。
+        try
+        {
+            if (ok == total && total > 0)
+                SpeechService.Speak($"一条龙跑完了，{total} 项全部成功，用时 {FormatDuration(elapsed)}。");
+            else if (total > 0)
+                SpeechService.Speak($"一条龙跑完了，{total} 项里成功 {ok} 项，有失败。", 30);
+        }
+        catch { }
+
+
         LogService.LogEvent($"队列结束：{ok}/{total} 成功，耗时 {FormatDuration(elapsed)}，触发 {trigger}，停止={_stopRequested}");
 
         // 记录到设置（界面"上次执行"用）

@@ -229,6 +229,23 @@ public sealed class ScreenshotMonitor
         return sum * 100.0 / (a.Length * 255.0);
     }
 
+    /// <summary>
+    /// 把截到的原始像素写成 PNG。
+    /// v1.8 / F12：抽成可指定目标路径的静态方法，「现在就到」按时间戳命名另存，
+    /// 与心跳监视的 screenshots 目录互不干扰（心跳只留 10 张、按 HHmmss 命名，
+    /// 两套命名混在一个目录里会互相挤掉）。
+    /// </summary>
+    internal static void SavePngTo(byte[] buf, int w, int h, string path)
+    {
+        var src = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgr32, null, buf, w * 4);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(src));
+        string? dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        using var fs = new FileStream(path, FileMode.Create);
+        enc.Save(fs);
+    }
+
     /// <summary>保存 PNG（经主线程调度）并滚动删除旧图（保留最近 10 张）</summary>
     private static void SavePng(byte[] buf, int w, int h)
     {
