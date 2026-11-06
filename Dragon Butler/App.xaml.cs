@@ -63,7 +63,9 @@ public partial class App : Application
         // 全库唯一 Webhook 监听 + 组归档接驳（与完成判定解耦）
         try
         {
-            WebhookHub.Start(AppState.Settings.BgiWebhookPort);
+            // v1.7：局域网面板打开时同时监听所有网卡（失败自动退回回环，见 WebhookListener.Start）
+            AppState.EnsureControlToken();
+            WebhookHub.Start(AppState.Settings.BgiWebhookPort, AppState.Settings.LanPanelEnabled);
             GroupArchiveWatcher.Start();
         }
         catch (Exception ex) { LogService.LogEvent("事件总线启动失败：" + ex.Message); }
@@ -73,6 +75,9 @@ public partial class App : Application
 
         // v1.5 晨报：每天首次启动播报一句（默认关）
         MorningReportService.MaybeShow();
+
+        // v1.7 周报：每周首次启动播报一句（默认关）
+        WeeklyReportService.MaybeShow();
 
         BuildTray();
 

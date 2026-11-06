@@ -81,8 +81,8 @@ jobs:
           & $probe logpattern $stub
           if ($LASTEXITCODE -ne 0) { throw "探针失败：依赖日志的完成判定没有触发" }
 
-      # v1.6 的六项功能各有断言。每一组都必须是 0 才算做到，红了一条就是没做完。
-      - name: 集成探针（v1.6 功能断言）
+      # 每个功能都自带断言，一组 0 fails 才算做到，红一条就是没做完。
+      - name: 集成探针（功能断言）
         shell: pwsh
         run: |
           $stub  = (Get-ChildItem "tests\\StubTool\\bin\\Release" -Recurse -Filter StubTool.exe | Select-Object -First 1).FullName
@@ -94,6 +94,8 @@ jobs:
             bundle   = "F3 失败现场包"
             explain  = "F4 通知说清为什么"
             retry    = "F5 重试退避可配"
+            api      = "F6/F7 控制 API 与只读面板"
+            weekly   = "F8 周报"
           }
           $bad = @()
           foreach ($name in $groups.Keys) {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -21,6 +21,14 @@ public sealed class WebhookListener
     private volatile bool _running;
     private readonly ConcurrentQueue<SentinelEvent> _queue = new();
 
+    /// <summary>
+    /// 附加路由（v1.7）：路径不是 /webhook 时交给它，由调用方决定回什么。
+    /// 参数依次是 绝对路径、查询串、请求头 <see cref="ControlApi.TokenHeader"/> 的值。
+    /// 返回 状态码 / Content-Type / 正文；返回 null 表示「我不认识这个路径」，走 404。
+    /// 用委托而不是直接调 WebhookHub，是为了让监听器只管收发、不管业务。
+    /// </summary>
+    public Func<string, string?, string?, (int Status, string ContentType, string Body)?>? Route { get; set; }
+
     /// <summary>是否正在监听</summary>
     public bool IsRunning => _running;
 
@@ -33,22 +41,49 @@ public sealed class WebhookListener
     private int _eventCount;
     private DateTime _lastEventAt;
 
-    /// <summary>启动监听；失败降级为仅日志模式并记日志</summary>
-    public void Start(int port)
+    /// <summary>
+    /// 启动监听；失败降级为仅日志模式并记日志。
+    /// <paramref name="wildcard"/> = true 时监听所有网卡（局域网面板用），否则只监听回环。
+    /// 通配前缀在非管理员下会被系统拒绝，此时自动退回回环并记一条日志——不静默失败。
+    /// </summary>
+    public void Start(int port, bool wildcard = false)
     {
         Stop();
+        bool boundWildcard = false;
         try
         {
             var l = new HttpListener();
             // HttpListener 前缀必须以 '/' 结尾：注册根前缀，在回调里按路径路由，
             // 这样无论 BGI 配置的端点带不带结尾斜杠（/webhook 或 /webhook/）都能收到
-            l.Prefixes.Add($"http://127.0.0.1:{port}/");
-            l.Start();
+            if (wildcard)
+            {
+                try
+                {
+                    l.Prefixes.Add($"http://+:{port}/");
+                    l.Start();
+                    boundWildcard = true;
+                }
+                catch (Exception ex)
+                {
+                    LogService.LogEvent($"局域网监听失败（改用仅本机，如需局域网请以管理员运行 netsh http add urlacl url=http://+:{port}/ user=Everyone）：{ex.Message}");
+                    try { l.Close(); } catch { }
+                    l = new HttpListener();
+                    l.Prefixes.Add($"http://127.0.0.1:{port}/");
+                    l.Start();
+                }
+            }
+            else
+            {
+                l.Prefixes.Add($"http://127.0.0.1:{port}/");
+                l.Start();
+            }
+
             _listener = l;
             _running = true;
             _thread = new Thread(Loop) { IsBackground = true, Name = "DragonButler-Webhook" };
             _thread.Start();
-            LogService.LogEvent($"Webhook 监听已启动：http://127.0.0.1:{port}/webhook");
+            string scope = boundWildcard ? "所有网卡（局域网）" : "仅本机";
+            LogService.LogEvent($"Webhook 监听已启动：http://127.0.0.1:{port}/webhook（{scope}）");
         }
         catch (Exception ex)
         {
@@ -67,7 +102,24 @@ public sealed class WebhookListener
                 string path = (ctx.Request.Url?.AbsolutePath ?? "").TrimEnd('/');
                 if (!path.EndsWith("/webhook", StringComparison.OrdinalIgnoreCase))
                 {
-                    ctx.Response.StatusCode = 404;
+                    // v1.7：非 /webhook 的路径交给附加路由（控制 API / 只读面板）
+                    var handled = Route?.Invoke(
+                        ctx.Request.Url?.AbsolutePath ?? "",
+                        ctx.Request.Url?.Query,
+                        ctx.Request.Headers[ControlApi.TokenHeader]);
+                    if (handled == null)
+                    {
+                        ctx.Response.StatusCode = 404;
+                        ctx.Response.Close();
+                        continue;
+                    }
+
+                    byte[] bytes = Encoding.UTF8.GetBytes(handled.Value.Body ?? "");
+                    ctx.Response.StatusCode = handled.Value.Status;
+                    ctx.Response.ContentType = handled.Value.ContentType;
+                    // 面板会被手机反复拉，控制 API 的响应也不该被任何中间层缓存
+                    ctx.Response.Headers["Cache-Control"] = "no-store";
+                    ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
                     ctx.Response.Close();
                     continue;
                 }

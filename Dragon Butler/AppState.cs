@@ -197,6 +197,31 @@ public class AppSettings
     /// <summary>上次播报晨报的日期（yyyy-MM-dd），防止同一天重复播报。</summary>
     public string MorningReportDate { get; set; } = "";
 
+    // ===== v1.7：周报（F8）=====
+    /// <summary>周报（默认关）：每周首次启动时用一句话汇报过去七天的队列情况。</summary>
+    public bool WeeklyReportEnabled { get; set; } = false;
+
+    /// <summary>上次播报周报的日期（yyyy-MM-dd），防止同一天重复播报。</summary>
+    public string WeeklyReportDate { get; set; } = "";
+
+    // ===== v1.7：本机控制 API（F6）与只读面板（F7）=====
+    /// <summary>
+    /// 本机控制 API 开关（默认关）。远程控制＝把「启动任意程序」的能力交出去，
+    /// 所以必须用户自己动手打开；关着的时候 /api/* 一律 404。
+    /// </summary>
+    public bool ControlApiEnabled { get; set; } = false;
+
+    /// <summary>
+    /// 控制 API 令牌（32 位十六进制）。空=首次需要时生成。
+    /// 只存本地 settings.json，不随现场包外传（键名含 "token"，<see cref="IncidentBundle.IsSensitiveKey"/> 会盖住）。
+    /// </summary>
+    public string ControlApiToken { get; set; } = "";
+
+    /// <summary>
+    /// 只读面板（默认关）。打开后局域网内可访问一屏进度页，纯只读、无控制按钮。
+    /// </summary>
+    public bool LanPanelEnabled { get; set; } = false;
+
     /// <summary>最近一次守护告警时间（底部盾牌转黄用），空=从未告警。</summary>
     public DateTime? ShieldAlertAt { get; set; }
 }
@@ -307,6 +332,22 @@ public static class AppState
             LogService.LogEvent("settings.json 损坏，已回退默认值：" + ex.Message);
             Settings = new AppSettings();
         }
+    }
+
+    /// <summary>
+    /// 确保控制 API 有一个合规令牌（v1.7 / F6）。已有合规令牌就原样保留，
+    /// 没有或不合规就生成一个新的并存盘。返回当前令牌。
+    /// </summary>
+    public static string EnsureControlToken()
+    {
+        string token = ControlApi.EnsureToken(Settings.ControlApiToken);
+        if (!string.Equals(token, Settings.ControlApiToken, StringComparison.Ordinal))
+        {
+            Settings.ControlApiToken = token;
+            SaveSettings();
+            LogService.LogEvent("控制 API：已生成新令牌");
+        }
+        return token;
     }
 
     /// <summary>保存 settings.json（中文不转义、缩进、写前建目录）。</summary>

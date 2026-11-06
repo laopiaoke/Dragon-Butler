@@ -237,6 +237,10 @@ public partial class MainWindow : Window
         TgNightScreen.IsChecked = s.NightScreenEnabled;
         TgStallAutoKill.IsChecked = s.StallAutoKill;
         TgMorningReport.IsChecked = s.MorningReportEnabled;
+        TgWeeklyReport.IsChecked = s.WeeklyReportEnabled;
+        TgControlApi.IsChecked = s.ControlApiEnabled;
+        TgLanPanel.IsChecked = s.LanPanelEnabled;
+        RefreshApiRows(s);
         TbNightMinutes.Text = Math.Clamp(s.NightScreenMinutes, 5, 120).ToString();
         TbNightMinutes.IsEnabled = s.NightScreenEnabled;
         TgVacation.IsChecked = s.VacationMode;
@@ -1995,6 +1999,82 @@ public partial class MainWindow : Window
         AppState.SaveSettings();
         LogService.LogEvent("晨报：" + (on ? "开启" : "关闭"));
         if (on) AppState.PublishLog("晨报已开启：每天首次打开时用一句话汇报昨天的情况");
+    }
+
+    private void TgWeeklyReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgWeeklyReport.IsChecked == true;
+        AppState.Settings.WeeklyReportEnabled = on;
+        AppState.SaveSettings();
+        LogService.LogEvent("周报：" + (on ? "开启" : "关闭"));
+        if (on) AppState.PublishLog("周报已开启：每周首次打开时汇报近七天的队列情况");
+    }
+
+    // ===== v1.7：控制 API 与局域网面板 =====
+
+    private void TgControlApi_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgControlApi.IsChecked == true;
+        AppState.Settings.ControlApiEnabled = on;
+        if (on) AppState.EnsureControlToken();
+        AppState.SaveSettings();
+        RefreshApiRows(AppState.Settings);
+        LogService.LogEvent("控制 API：" + (on ? "开启" : "关闭"));
+        if (on)
+        {
+            AppState.PublishLog("控制 API 已开启：令牌在上面的框里，脚本用 " + ControlApi.TokenHeader + " 头带上即可");
+            NotifyService.Show(NotifyLevel.Info, "龙管家", "控制 API 已开启。它只监听本机回环地址，局域网里的其他设备连不上。");
+        }
+    }
+
+    private void TgLanPanel_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgLanPanel.IsChecked == true;
+        AppState.Settings.LanPanelEnabled = on;
+        AppState.SaveSettings();
+        RefreshApiRows(AppState.Settings);
+        LogService.LogEvent("局域网面板：" + (on ? "开启" : "关闭"));
+
+        // 监听前缀在启动时就定了（回环 / 所有网卡），改开关要重启监听才生效
+        WebhookHub.Start(AppState.Settings.BgiWebhookPort, on);
+        if (on)
+        {
+            string addr = WebhookHub.PanelAddress();
+            AppState.PublishLog("局域网面板已开启：" + addr);
+            NotifyService.Show(NotifyLevel.Info, "龙管家", "局域网面板已开启，手机浏览器打开：\n" + addr);
+            TbLanPanelHint.Text = "手机连同一个 Wi-Fi，浏览器打开：" + addr;
+        }
+        else
+        {
+            TbLanPanelHint.Text = "打开后同一 Wi-Fi 下的手机浏览器可以看进度和最近一条事件，但没有任何按钮——只能看，不能指挥。";
+        }
+    }
+
+    private void BtnCopyToken_Click(object sender, RoutedEventArgs e)
+    {
+        if (ClipboardHelper.TrySetText(TbApiToken.Text))
+        {
+            AppState.PublishLog("令牌已复制到剪贴板");
+        }
+        else
+        {
+            ClipboardHelper.ShowManualCopyFallback(TbApiToken.Text, this, "复制令牌");
+        }
+    }
+
+    /// <summary>控制 API 打开时才露令牌行；局域网面板打开时把地址写到提示里。</summary>
+    private void RefreshApiRows(AppSettings s)
+    {
+        ApiTokenRow.Visibility = s.ControlApiEnabled ? Visibility.Visible : Visibility.Collapsed;
+        if (s.ControlApiEnabled) TbApiToken.Text = AppState.EnsureControlToken();
+        if (s.LanPanelEnabled)
+        {
+            string addr = WebhookHub.PanelAddress();
+            if (addr.Length > 0) TbLanPanelHint.Text = "手机连同一个 Wi-Fi，浏览器打开：" + addr;
+        }
     }
 
     private void CbFailStrategy_SelectionChanged(object sender, SelectionChangedEventArgs e)

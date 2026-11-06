@@ -1315,6 +1315,17 @@
                                                   HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMorningReport_Click"/>
                                 </Grid>
 
+                                <Grid Grid.Row="6" Grid.Column="1" Margin="0,10,0,6">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="周报" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock Text="每周首次打开时汇报近七天：哪天跑得多、成功率、总耗时" FontSize="10"
+                                                   Margin="0,3,10,0" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <ToggleButton x:Name="TgWeeklyReport" Style="{StaticResource SwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgWeeklyReport_Click"/>
+                                </Grid>
+
                                 <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Margin="0,10,0,0">
                                     <TextBlock Text="事件推送（可选）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBlock Margin="0,4,0,0" FontSize="10.5" TextWrapping="Wrap"
@@ -1353,6 +1364,7 @@
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <Grid Grid.Row="0" Grid.Column="0" Margin="0,6,14,6">
@@ -1379,6 +1391,51 @@
                                     <TextBlock Text="按键音效" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="TgSound" Style="{StaticResource SwitchStyle}"
                                                   HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSound_Click"/>
+                                </Grid>
+
+                                <!-- v1.7 F6：本机控制 API（默认关，令牌可复制） -->
+                                <Grid Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,10,0,4">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="本机控制 API" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                            <ToggleButton x:Name="TgControlApi" Style="{StaticResource SwitchStyle}"
+                                                          HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgControlApi_Click"/>
+                                        </Grid>
+                                        <TextBlock Text="让脚本和 AI 助手用自然语言以外的方式指挥它：开跑、停止、查状态。只监听 127.0.0.1，关着时连「有这个接口」都不会暴露。"
+                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                        <Grid x:Name="ApiTokenRow" Margin="0,6,0,0" Visibility="Collapsed">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="令牌" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <Border Grid.Column="1" Background="{DynamicResource InsetBrush}" CornerRadius="6" Padding="8,5">
+                                                <TextBlock x:Name="TbApiToken" FontFamily="Consolas" FontSize="11.5"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </Border>
+                                            <Button x:Name="BtnCopyToken" Grid.Column="2" Content="复制" Style="{StaticResource LinkButton}"
+                                                    Margin="8,0,0,0" VerticalAlignment="Center" Click="BtnCopyToken_Click"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- v1.7 F7：局域网只读面板（默认关，只读不给控制） -->
+                                <Grid Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,6,0,6">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="手机看进度（局域网只读面板）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                            <ToggleButton x:Name="TgLanPanel" Style="{StaticResource SwitchStyle}"
+                                                          HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgLanPanel_Click"/>
+                                        </Grid>
+                                        <TextBlock x:Name="TbLanPanelHint"
+                                                   Text="打开后同一 Wi-Fi 下的手机浏览器可以看进度和最近一条事件，但没有任何按钮——只能看，不能指挥。"
+                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                    </StackPanel>
                                 </Grid>
                             </Grid>
                         </StackPanel>
