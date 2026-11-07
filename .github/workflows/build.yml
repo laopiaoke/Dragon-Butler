@@ -100,11 +100,14 @@ jobs:
             progress = "F10 任务栏进度与托盘"
             command  = "F15 命令面板"
             calendar = "F13 挂机日历"
+            dag      = "P2 依赖编排"
+            groups   = "P2 配置组切片"
+            bgiupdate = "P2 BGI 版本前置检查"
           }
           $bad = @()
           foreach ($name in $groups.Keys) {
             Write-Host "--- $($groups[$name]) ---"
-            if ($name -eq 'resume') { & $probe $name $stub } else { & $probe $name }
+            if ($name -eq 'resume' -or $name -eq 'dag') { & $probe $name $stub } else { & $probe $name }
             if ($LASTEXITCODE -ne 0) { $bad += $groups[$name] }
           }
           if ($bad.Count -gt 0) { throw ("探针失败：" + ($bad -join '、')) }

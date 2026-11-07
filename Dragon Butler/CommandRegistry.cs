@@ -41,6 +41,8 @@ public static class CommandRegistry
         new("view.advanced",  "打开高级设置",           "导航", "高级 设置 settings advanced"),
         new("view.log",       "打开日志",               "导航", "日志 log 记录"),
         new("view.calendar",  "挂机日历",               "导航", "日历 calendar 历史 heatmap"),
+        new("view.depends",   "依赖编排",               "导航", "依赖 dag 顺序 depends"),
+        new("view.groups",    "配置组切片",             "导航", "配置组 切片 groups slice"),
 
         new("tool.copyToken", "复制控制 API 令牌",      "控制", "令牌 token api 复制"),
         new("tool.apiToggle", "开关本机控制 API",       "控制", "api 控制 开关"),

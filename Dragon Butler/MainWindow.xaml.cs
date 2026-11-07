@@ -652,7 +652,8 @@ public partial class MainWindow : Window
             Background = Brushes.Transparent,
             Child = grid,
             Tag = index,
-            ToolTip = result?.Reason,
+            // v1.9：悬停能看到这一项等谁（没写依赖就是空白，不占视觉）
+            ToolTip = BuildQueueTip(entry, result),
         };
         border.MouseLeftButtonDown += QueueRow_MouseDown;
         border.MouseLeftButtonUp += QueueRow_MouseUp;
@@ -661,7 +662,29 @@ public partial class MainWindow : Window
         return border;
     }
 
+    /// <summary>行悬停提示：依赖在前，上次结果在后（都没有就返回 null，不留空气泡）。</summary>
+    private static string? BuildQueueTip(QueueEntry entry, QueueItemResult? result)
+    {
+        var parts = new List<string>();
+        var deps = QueueGraph.DependenciesOf(entry);
+        if (deps.Count > 0)
+        {
+            var names = deps.Select(id =>
+            {
+                var p = ProfileRegistry.Get(id);
+                return string.IsNullOrWhiteSpace(p.DisplayName) ? id : p.DisplayName;
+            });
+            parts.Add("等 " + string.Join("、", names) + " 跑成"
+                + (QueueGraph.ShouldAbortOnDependencyFail(entry) ? "（没成则整队停下）" : ""));
+        }
+        if (result != null && !string.IsNullOrWhiteSpace(result.Reason)) parts.Add(result.Reason);
+        // v1.9：切片设过才提一句，没设就别占地方（默认就是全局勾选）
+        if (!GroupSlicing.UsesGlobal(entry.Groups)) parts.Add(GroupSlicing.Describe(entry.Groups));
+        return parts.Count == 0 ? null : string.Join("\n", parts);
+    }
+
     private void QueueCheck_Changed(object sender, RoutedEventArgs e)
+
     {
         if (_suppressQueueUi) return;
         if (sender is not CheckBox cb || cb.Tag is not string toolId) return;
@@ -806,6 +829,58 @@ public partial class MainWindow : Window
     // ===== v1.5 按日计划 =====
 
     private void BtnWeeklyPlan_Click(object sender, RoutedEventArgs e) => OpenWeeklyPlan();
+
+    // ===== v1.9 依赖编排 =====
+
+    private void BtnDepends_Click(object sender, RoutedEventArgs e) => OpenDepends();
+
+    private void OpenDepends()
+    {
+        try
+        {
+            if ((AppState.Settings.Queue ?? new List<QueueEntry>()).Count == 0)
+            {
+                NotifyService.Show(NotifyLevel.Info, "龙管家", "队列里还没有工具：先在下方工具卡添加或勾选一个。");
+                return;
+            }
+            var dlg = new DependsWindow { Owner = this };
+            if (dlg.ShowDialog() == true && dlg.Saved)
+            {
+                RenderQueue();
+                AppState.PublishLog("✓ 已保存依赖编排");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开依赖编排失败：" + ex.Message);
+        }
+    }
+
+    // ===== v1.9 配置组切片 =====
+
+    private void BtnGroupSlice_Click(object sender, RoutedEventArgs e) => OpenGroupSlice();
+
+    private void OpenGroupSlice()
+    {
+        try
+        {
+            if ((AppState.Settings.Queue ?? new List<QueueEntry>()).Count == 0)
+            {
+                NotifyService.Show(NotifyLevel.Info, "龙管家", "队列里还没有工具：先在下方工具卡添加或勾选一个。");
+                return;
+            }
+            var dlg = new GroupsWindow { Owner = this };
+            if (dlg.ShowDialog() == true && dlg.Saved)
+            {
+                RenderQueue();
+                AppState.PublishLog("✓ 已保存配置组切片");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开配置组切片失败：" + ex.Message);
+        }
+    }
 
     private void OpenWeeklyPlan()
     {
@@ -2776,6 +2851,8 @@ public partial class MainWindow : Window
                 case "view.advanced": RevealCard(AdvancedBody); break;
                 case "view.log": RevealCard(TbLog); break;
                 case "view.calendar": OpenCalendar(); break;
+                case "view.depends": OpenDepends(); break;
+                case "view.groups": OpenGroupSlice(); break;
 
                 case "tool.copyToken": BtnCopyToken_Click(this, new RoutedEventArgs()); break;
                 case "tool.apiToggle":

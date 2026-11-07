@@ -162,6 +162,9 @@ public static class QueueService
                 return false;
             }
 
+            // v1.9 / P2：开跑前看一眼 BGI 版本有没有变过——变了就先说一句，别让用户去猜配置
+            AnnounceBgiVersion();
+
             int finished = await RunListAsync(items, trigger, _cts!.Token).ConfigureAwait(false);
             return true;
         }
@@ -329,12 +332,37 @@ public static class QueueService
         try
         {
             int finished = 0;
+            // v1.9 / P2：这一轮里成没成，依赖门只认本轮结果 + 今天台账（跨轮次也能接着跑）
+            var doneThisRun = new HashSet<string>(RunJournal.DoneToolsToday(), StringComparer.OrdinalIgnoreCase);
+            var failedThisRun = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < items.Count; i++)
             {
                 if (_stopRequested) break;
                 var profile = items[i];
                 CurrentToolId = profile.ToolId;
                 RaiseState();
+
+                // v1.9 / P2：依赖门。排在前面的依赖没跑成 → 这一项不跑，说清等谁。
+                var entry = FindEntry(profile.ToolId);
+                var gate = QueueGraph.Gate(entry, doneThisRun, failedThisRun);
+                if (gate.Verdict != GateVerdict.Ready)
+                {
+                    bool abort = gate.Verdict == GateVerdict.Blocked
+                                 && QueueGraph.ShouldAbortOnDependencyFail(entry);
+                    LogService.LogEvent($"队列：{profile.DisplayName} 依赖未满足（{gate.Reason}）"
+                        + (abort ? "，按设置中止整队" : "，跳过这一项"));
+                    LastResults.Add(new QueueItemResult
+                    {
+                        ToolId = profile.ToolId,
+                        DisplayName = profile.DisplayName,
+                        State = ToolRunState.Idle,
+                        Reason = gate.Reason,
+                        Skipped = true,
+                    });
+                    RaiseState();
+                    if (abort) break;
+                    continue;
+                }
 
                 // 防打扰只约束定时触发；接着跑等同手动，不等空闲
                 if (trigger == QueueTrigger.Timer)
@@ -354,6 +382,8 @@ public static class QueueService
                         Reason = pre.Message,
                         Skipped = true,
                     });
+                    // v1.9 / P2：本轮被前置检查挡掉＝本轮不会再有结果，依赖它的一项不该干等
+                    failedThisRun.Add(profile.ToolId);
                     RaiseState();
                     continue;
                 }
@@ -362,6 +392,12 @@ public static class QueueService
                 LastResults.Add(result);
                 finished++;
                 RaiseState();
+
+                // v1.9 / P2：把本轮结果记进依赖门的账
+                if (result.State == ToolRunState.Done) doneThisRun.Add(profile.ToolId);
+                else if (result.State is ToolRunState.Failed or ToolRunState.Timeout
+                         or ToolRunState.Stalled or ToolRunState.Halted)
+                    failedThisRun.Add(profile.ToolId);
 
                 if (result.State == ToolRunState.Halted)
                 {
@@ -550,11 +586,34 @@ public static class QueueService
         if (trigger == QueueTrigger.Timer && skippedByPlan > 0)
             LogService.LogEvent($"队列：今日计划命中 {list.Count} 项，按计划跳过 {skippedByPlan} 项");
 
+        // v1.9 / P2：有人写了依赖就按拓扑序重排——被依赖的必须先跑，同层保持用户拖出来的顺序。
+        var entries = AppState.Settings.Queue ?? new List<QueueEntry>();
+        if (QueueGraph.HasDependencies(entries))
+        {
+            var orderedIds = QueueGraph.Order(entries)
+                .Select(e => e.ToolId)
+                .ToList();
+            var rank = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < orderedIds.Count; i++) rank.TryAdd(orderedIds[i], i);
+            list = list
+                .OrderBy(p => rank.TryGetValue(p.ToolId, out int r) ? r : int.MaxValue)
+                .ToList();
+            LogService.LogEvent($"队列：按依赖排序 → {string.Join(" → ", list.Select(p => p.DisplayName))}");
+        }
+
         return list;
     }
 
     /// <summary>今天星期对应 <see cref="QueueEntry.WeekdayMask"/> 的位号：周一=0 … 周日=6。</summary>
     public static int WeekdayBit(DateTime day) => ((int)day.DayOfWeek + 6) % 7;
+
+    /// <summary>按工具 ID 找队列项（依赖门要读它的声明）；找不到返回 null。</summary>
+    public static QueueEntry? FindEntry(string toolId)
+    {
+        if (string.IsNullOrWhiteSpace(toolId)) return null;
+        return (AppState.Settings.Queue ?? new List<QueueEntry>())
+            .FirstOrDefault(e => string.Equals(e.ToolId, toolId, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>今天按计划会执行哪些工具（UI 摘要用；停用的不算）。</summary>
     public static List<QueueEntry> PlanForToday(DateTime day)
@@ -616,6 +675,15 @@ public static class QueueService
 
         // v1.6 / F2：把终态记进台账，「接着跑」靠它判断今天哪些项还没成
         RunJournal.Record(last);
+
+        // v1.9 / P2：只有真跑成了才更新版本基线——更新坏掉的那一版不该被当成"正常"
+        if (last.State == ToolRunState.Done
+            && string.Equals(profile.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase)
+            && BgiVersionGuard.Remember(BgiVersionGuard.ReadVersion(AppState.Settings.BgiPath)))
+        {
+            AppState.SaveSettings();
+            LogService.LogEvent("BGI 版本：已记录 " + AppState.Settings.LastBgiVersion);
+        }
 
         return last;
     }
@@ -766,12 +834,50 @@ public static class QueueService
     {
         if (string.Equals(profile.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase))
         {
-            var groups = AppState.Settings.SelectedGroups ?? Array.Empty<string>();
-            if (groups.Length > 0)
-                return "--startGroups " + string.Join(" ", groups.Select(g => "\"" + g + "\""));
+            // v1.9 / P2：本项自己写了组就跑那几个，没写才用全局勾选（空＝交给配置名/默认流程）
+            var own = FindEntry(profile.ToolId)?.Groups;
+            var groups = GroupSlicing.Effective(own, AppState.Settings.SelectedGroups, SafeKnownGroups());
+            if (groups.Count > 0)
+                return GroupSlicing.StartGroupsArgument(groups);
             return ToolRunner.BuildArguments(profile, AppState.Settings.DragonConfigName);
         }
         return ToolRunner.BuildArguments(profile, null);
+    }
+
+    /// <summary>
+    /// 当前 BGI 里真实存在的配置组名；没识别到就返回空集合
+    /// （空集合＝不做过滤，别把用户写的组名当错的丢掉）。
+    /// </summary>
+    private static IReadOnlyList<string> SafeKnownGroups()
+    {
+        try
+        {
+            var scan = BgiDiscovery.Scan();
+            return scan.Ok ? scan.Groups : Array.Empty<string>();
+        }
+        catch { return Array.Empty<string>(); }
+    }
+
+    /// <summary>
+    /// v1.9 / P2：开跑前报告 BGI 版本变化（只报一次，不重复刷屏）。
+    /// 读不到版本时保持沉默——不知道就别乱报，这是这条功能唯一的失败模式。
+    /// </summary>
+    private static void AnnounceBgiVersion()
+    {
+        try
+        {
+            var (verdict, _, message) = BgiVersionGuard.Preflight();
+            if (verdict is not (VersionVerdict.Changed or VersionVerdict.FirstSeen)) return;
+            if (message.Length == 0) return;
+            LogService.LogEvent("BGI 版本：" + message);
+            // 只有「变了」才值得打断用户；第一次记录只写日志
+            if (verdict == VersionVerdict.Changed)
+                NotifyService.Show(NotifyLevel.Info, "龙管家 · 版本变化", message);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("BGI 版本检查失败：" + ex.Message);
+        }
     }
 
     private static void KillCurrent(ToolProfile profile, string why)

@@ -77,6 +77,56 @@ internal static class RenderProbe
     }
 
     /// <summary>
+    /// 给渲染用的样例队列：三个工具、两条依赖、一处切片。
+    /// 只在本进程内改内存，不写盘——渲染探针不该改用户的配置。
+    /// </summary>
+    private static void SeedSampleQueue()
+    {
+        try
+        {
+            if ((AppState.Settings.Queue?.Count ?? 0) > 0) return;
+            AppState.Settings.Queue = new List<QueueEntry>
+            {
+                new() { ToolId = "bettergi", Enabled = true, WeekdayMask = 0x7F, Groups = new List<string> { "日常", "活动" } },
+                new() { ToolId = "march7th", Enabled = true, WeekdayMask = 0x7F, DependsOn = new List<string> { "bettergi" }, OnDependencyFail = QueueGraph.PolicyAbort },
+                new() { ToolId = "ok-ww", Enabled = false, WeekdayMask = 0x7F, DependsOn = new List<string> { "bettergi" }, Groups = new List<string> { "收尾" } },
+            };
+            AppState.Settings.SelectedGroups = new[] { "日常", "活动", "收尾" };
+            SeedSampleBgiDir();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-FAIL " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 造一个假的 BetterGI 目录（带 User\ScriptGroup\*.json），让 BgiDiscovery 走真实扫描路径。
+    /// 比在界面里塞假数据更可信：渲染出来的是程序真正会看到的样子。
+    /// 目录建在临时目录下，不碰用户的 BGI 安装。
+    /// </summary>
+    private static void SeedSampleBgiDir()
+    {
+        try
+        {
+            string root = Path.Combine(Path.GetTempPath(), "dragon-ui", "fake-bgi");
+            string groupsDir = Path.Combine(root, "User", "ScriptGroup");
+            Directory.CreateDirectory(groupsDir);
+            foreach (string name in new[] { "日常", "活动", "收尾" })
+            {
+                string file = Path.Combine(groupsDir, name + ".json");
+                if (!File.Exists(file)) File.WriteAllText(file, "{}");
+            }
+            AppState.Settings.BgiPath = Path.Combine(root, "BetterGI.exe");
+            BgiDiscovery.Scan(force: true);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-BGI-FAIL " + ex.Message);
+        }
+    }
+
+    /// <summary>
     /// 渲染一个独立窗口（浮动条、命令面板、日历），跑完就关。
     /// 这些窗口没有主窗的依赖，可以单独实例化。
     /// </summary>
@@ -94,6 +144,10 @@ internal static class RenderProbe
                     // 不调这一步，DynamicResource 全部落空，渲染出来是白底黑字的空壳。
                     Theme.Set("Dark");
 
+                    // 编辑器窗口读的是 AppState.Settings.Queue；probe 里没人调 AppState.Init()，
+                    // 不铺一份样例数据，渲染出来永远是「队列里还没有工具」的空壳。
+                    SeedSampleQueue();
+
                     var spot = Path.Combine(Path.GetTempPath(), "dragon-ui");
                     Directory.CreateDirectory(spot);
 
@@ -110,6 +164,22 @@ internal static class RenderProbe
                         var w = new CalendarWindow();
                         bool ok = Save(w, Path.Combine(spot, "calendar.png"), 0, 0);
                         Console.WriteLine($"RENDER calendar={ok}");
+                        w.Close();
+                    }
+
+                    if (mode == "depends" || mode == "all")
+                    {
+                        var w = new DependsWindow();
+                        bool ok = Save(w, Path.Combine(spot, "depends.png"), 820, 0);
+                        Console.WriteLine($"RENDER depends={ok}");
+                        w.Close();
+                    }
+
+                    if (mode == "groups" || mode == "all")
+                    {
+                        var w = new GroupsWindow();
+                        bool ok = Save(w, Path.Combine(spot, "groups.png"), 760, 0);
+                        Console.WriteLine($"RENDER groups={ok}");
                         w.Close();
                     }
 

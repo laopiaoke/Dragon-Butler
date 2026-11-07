@@ -25,8 +25,24 @@ public sealed class QueueEntry
     /// 只对定时触发生效；手动「一键开跑」永远跑当前勾选，不受它限制。
     /// </summary>
     public int WeekdayMask { get; set; } = 0x7F;
-}
 
+    /// <summary>
+    /// v1.9 依赖编排：这几项都跑成之后，本项才开跑（工具 ID 列表）。
+    /// 空列表＝不依赖任何东西，行为和以前完全一样。
+    /// </summary>
+    public List<string> DependsOn { get; set; } = new();
+
+    /// <summary>
+    /// 依赖没跑成时怎么办：Skip=跳过本项继续往下（默认）/ Abort=整条队列停下等用户。
+    /// </summary>
+    public string OnDependencyFail { get; set; } = QueueGraph.PolicySkip;
+
+    /// <summary>
+    /// v1.9 配置组切片：本项只跑这几个 BGI 配置组，按书写顺序。
+    /// 空列表＝沿用全局勾选（和以前完全一样）——升级上来的老配置读进来就是空，行为不变。
+    /// </summary>
+    public List<string> Groups { get; set; } = new();
+}
 /// <summary>
 /// 应用设置：与 settings.json 字段一一对应；旧配置缺新字段时反序列化自动保持默认值。
 /// </summary>
@@ -125,6 +141,12 @@ public class AppSettings
 
     /// <summary>勾选的配置组（BGI 专用；非空时按 --startGroups 执行）</summary>
     public string[] SelectedGroups { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// v1.9 / P2：上一次**跑成功**时的 BetterGI 版本（只存主版本段，如 1.2.3）。
+    /// 下次开跑前拿它比对，变了就提醒一句「可能不是你的配置出问题」。空＝还没记录过。
+    /// </summary>
+    public string LastBgiVersion { get; set; } = "";
 
     /// <summary>推送方式：Toast（Windows 通知，默认）/ Wecom（企业微信）/ Balloon（仅托盘气泡）</summary>
     public string NotifyMode { get; set; } = "Toast";
