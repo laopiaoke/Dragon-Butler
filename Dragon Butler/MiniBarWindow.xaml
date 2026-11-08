@@ -10,8 +10,9 @@
     <!-- v1.8 / F11：主界面缩到 180×44 的一小块。
          风格硬约束（见 docs/路线图.md 第九节）：
          只允许 CardBg / Border / TextPrimary / Brand 四个色键，
-         圆角 14 与主界面卡片一致，字号 12.5 / 11 与主界面同一标尺。
-         不做任何新配色，所以深浅主题切换时它跟着一起变。 -->
+         圆角 14 与主界面卡片一致。
+         v1.12：字号 12.5→13、11→11.5、次行透明度 0.6→0.75——
+         180×44 里两行原先把「右键或点这里」糊成一片，实测看着像渲染坏了。 -->
     <Border Background="{DynamicResource CardBgBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="1" CornerRadius="14" Padding="10,0"
@@ -23,11 +24,11 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                <TextBlock x:Name="TbTitle" Text="一条龙管家" FontSize="12.5"
+                <TextBlock x:Name="TbTitle" Text="一条龙管家" FontSize="13"
                            Foreground="{DynamicResource TextPrimaryBrush}"
                            TextTrimming="CharacterEllipsis"/>
-                <TextBlock x:Name="TbDetail" Text="空闲" FontSize="11" Margin="0,1,0,0"
-                           Foreground="{DynamicResource TextPrimaryBrush}" Opacity="0.6"
+                <TextBlock x:Name="TbDetail" Text="空闲" FontSize="11.5" Margin="0,1,0,0"
+                           Foreground="{DynamicResource TextPrimaryBrush}" Opacity="0.75"
                            TextTrimming="CharacterEllipsis"/>
             </StackPanel>
 

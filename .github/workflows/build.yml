@@ -105,6 +105,7 @@ jobs:
             bgiupdate = "P2 BGI 版本前置检查"
             harvest  = "G1 收益账本 + G5 晨报补跑提示"
             mcp      = "G3 MCP 接口"
+            uirules  = "v1.12 观感规则断言"
           }
           $bad = @()
           foreach ($name in $groups.Keys) {

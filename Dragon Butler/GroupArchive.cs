@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -54,7 +54,14 @@ public static class GroupArchive
     private static bool _loaded;
 
     /// <summary>group_archive.json 路径</summary>
-    public static string FilePath => Path.Combine(AppContext.BaseDirectory, "config", "group_archive.json");
+    public static string FilePath => PathOverride ?? Path.Combine(AppContext.BaseDirectory, "config", "group_archive.json");
+
+    /// <summary>
+    /// 覆盖落盘路径。只给验证用（渲染日历要造一年的假记录），
+    /// 不设的时候行为完全不变。跟 HarvestLedger.PathOverride 是同一个套路：
+    /// 测试污染真实数据比功能算错更难查。
+    /// </summary>
+    public static string? PathOverride { get; set; }
 
     private static void EnsureLoaded()
     {
@@ -157,6 +164,26 @@ public static class GroupArchive
                     Save();
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// 直接塞一条指定日期的记录。只给验证用（渲染日历要造一年的假数据），
+    /// 正常流程走 RecordStart/RecordEnd。
+    /// </summary>
+    public static void Seed(DateTime day, string name, string start, string? end, string source = "seed")
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        lock (Gate)
+        {
+            EnsureLoaded();
+            string key = day.ToString("yyyy-MM-dd");
+            if (!_data.TryGetValue(key, out var list))
+            {
+                list = new List<GroupRecord>();
+                _data[key] = list;
+            }
+            list.Add(new GroupRecord { Name = name, Start = start, End = end, Segments = 1, Source = source });
         }
     }
 

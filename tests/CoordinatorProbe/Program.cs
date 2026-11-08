@@ -88,6 +88,7 @@ internal static class Program
             "bgiupdate" => RunBgiVersion(),
             "harvest" => RunHarvest(),
             "mcp" => RunMcp(),
+            "uirules" => RunUiRules(),
             "ui" => RenderProbe.RunUi(args.Length > 1 ? args[1] : "all"),
             _ => Help(),
         };
@@ -2711,6 +2712,91 @@ internal static class Program
         string root = Path.GetDirectoryName(typeof(QueueService).Assembly.Location) ?? ".";
         for (int i = 0; i < 5; i++) root = Path.GetDirectoryName(root) ?? root;
         return File.ReadAllText(Path.Combine(root, relative));
+    }
+
+    /// <summary>
+    /// v1.12：观感规则断言。
+    /// 这一轮只调字号、对比度、间距，最怕的是「调着调着顺手加了个色键、加了一行、加了个区块」——
+    /// 那就不再是「修看得见的地方」，而是又往臃肿走一步。
+    /// 所以把当年口头约定的硬约束固化成断言，改坏了 CI 会喊停。
+    /// </summary>
+    private static int RunUiRules()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        const string MiniBar = "Dragon Butler/MiniBarWindow.xaml";
+        string mini = ReadRepoSources(MiniBar);
+        Check("浮条仍是 180×44", mini.Contains("Width=\"180\" Height=\"44\"", StringComparison.Ordinal));
+        Check("浮条字号提到 13 / 11.5",
+            mini.Contains("FontSize=\"13\"", StringComparison.Ordinal)
+            && mini.Contains("FontSize=\"11.5\"", StringComparison.Ordinal));
+        Check("浮条次行透明度提到 0.75", mini.Contains("Opacity=\"0.75\"", StringComparison.Ordinal));
+        // 只允许四个色键：多出来的就是新配色，一多就不叫「跟着主题走」了
+        var allowed = new[] { "CardBgBrush", "BorderBrush", "TextPrimaryBrush", "BrandBrush" };
+        var used = System.Text.RegularExpressions.Regex
+            .Matches(mini, @"\{DynamicResource (\w+)\}")
+            .Select(m => m.Groups[1].Value)
+            .Distinct()
+            .ToList();
+        var extra = used.Where(u => !allowed.Contains(u, StringComparer.Ordinal)).ToList();
+        Check("浮条只用四个允许的色键", extra.Count == 0, string.Join(",", extra));
+
+        const string Main = "Dragon Butler/MainWindow.xaml";
+        string main = ReadRepoSources(Main);
+        Check("主窗默认宽度仍是 980", main.Contains("Width=\"980\"", StringComparison.Ordinal));
+        // 区块不能变多：折叠卡的行数就是「界面有没有变臃肿」的硬指标
+        int advRows = CountRowsBefore(main, "\"AdvancedBody\"", 3000);
+        int sysRows = CountRowsBefore(main, "\"SystemBody\"", 3000);
+        Check("高级设置仍是 10 行", advRows == 10, advRows.ToString());
+        Check("系统区仍是 7 行", sysRows == 7, sysRows.ToString());
+        Check("队列卡加了 1px 竖分隔",
+            main.Contains("<Border Width=\"1\" Margin=\"8,3,2,3\" Background=\"{DynamicResource BorderBrush}\"/>",
+                StringComparison.Ordinal));
+
+        string palette = ReadRepoSources("Dragon Butler/CommandPalette.xaml");
+        Check("命令面板选中态有 Brand 竖条",
+            palette.Contains("x:Name=\"Bar\"", StringComparison.Ordinal)
+            && palette.Contains("Value=\"{DynamicResource BrandBrush}\"", StringComparison.Ordinal));
+        Check("命令面板提示字号 11.5 / 透明度 0.7",
+            palette.Contains("FontSize=\"11.5\" Opacity=\"0.7\"", StringComparison.Ordinal));
+
+        string calendar = ReadRepoSources("Dragon Butler/CalendarWindow.xaml");
+        Check("日历月份标签在上方（不再占一列）",
+            !calendar.Contains("<TextBlock x:Name=\"TbMonthLabels\" Grid.Column=\"0\"", StringComparison.Ordinal));
+        Check("日历图例用 TextSecondary（对比度够）",
+            calendar.Contains("x:Name=\"DotSuccess\"", StringComparison.Ordinal)
+            && !calendar.Contains("TextTertiaryBrush", StringComparison.Ordinal));
+
+        string depends = ReadRepoSources("Dragon Butler/DependsWindow.xaml.cs");
+        Check("依赖矩阵表头 12.5",
+            depends.Contains("TextBlock.FontSizeProperty, 12.5", StringComparison.Ordinal));
+
+        string probe = ReadRepoSources("tests/CoordinatorProbe/RenderProbe.cs");
+        Check("渲染工具支持滚到顶（ui top）",
+            probe.Contains("ScrollToTop()", StringComparison.Ordinal)
+            && probe.Contains("\"top\"", StringComparison.Ordinal));
+        Check("渲染工具会造日历样例历史",
+            probe.Contains("SeedSampleArchive", StringComparison.Ordinal));
+
+        Console.WriteLine($"RESULT uirules fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>数某个 x:Name 之后、下一个公开元素之前的 RowDefinition 个数（粗略但够用）。</summary>
+    private static int CountRowsBefore(string text, string anchor, int window)
+    {
+        int at = text.IndexOf(anchor, StringComparison.Ordinal);
+        if (at < 0) return -1;
+        int end = Math.Min(text.Length, at + window);
+        string slice = text.Substring(at, end - at);
+        int nextName = slice.IndexOf("x:Name=\"", 8, StringComparison.Ordinal);
+        if (nextName > 0) slice = slice.Substring(0, nextName);
+        return System.Text.RegularExpressions.Regex.Matches(slice, "<RowDefinition").Count;
     }
 
     /// <summary>

@@ -75,39 +75,37 @@
             </Grid>
 
             <TextBlock Grid.Row="1" Margin="18,0,18,12" FontSize="11" TextWrapping="Wrap"
-                       Foreground="{DynamicResource TextTertiaryBrush}"
+                       Foreground="{DynamicResource TextSecondaryBrush}"
                        Text="过去一年的挂机足迹。每个方格是一天：绿色是全部跑成，黄色是有失败，红色是全没成，灰色是没跑。数据来自已有的队列记录，不额外抓任何东西。"/>
 
-            <!-- 月份标签 + 方格墙 -->
-            <Grid Grid.Row="2" Margin="18,0,18,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock x:Name="TbMonthLabels" Grid.Column="0" FontSize="10" Margin="0,0,8,0"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
-                <Grid x:Name="GridHost" Grid.Column="1" HorizontalAlignment="Left"/>
-            </Grid>
+            <!-- 月份标签 + 方格墙
+                 v1.12：原来是「左边一列放月份、右边一列放方格墙」，结果方格墙被推到
+                 屏幕中间，左边空出一大截。改成上下两行：标签在上、方格墙在下，两者左对齐。 -->
+            <StackPanel Grid.Row="2" Margin="18,0,18,0">
+                <TextBlock x:Name="TbMonthLabels" FontSize="10.5" Margin="0,0,0,6"
+                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                <Grid x:Name="GridHost" HorizontalAlignment="Left"/>
+            </StackPanel>
 
             <!-- 图例 -->
-            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="18,14,18,0">
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="18,10,18,0">
                 <Ellipse x:Name="DotSuccess" Width="9" Height="9" VerticalAlignment="Center"/>
                 <TextBlock Text="全部成功" FontSize="11" Margin="6,0,16,0" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                           Foreground="{DynamicResource TextSecondaryBrush}"/>
                 <Ellipse x:Name="DotWarning" Width="9" Height="9" VerticalAlignment="Center"/>
                 <TextBlock Text="有失败" FontSize="11" Margin="6,0,16,0" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                           Foreground="{DynamicResource TextSecondaryBrush}"/>
                 <Ellipse x:Name="DotDanger" Width="9" Height="9" VerticalAlignment="Center"/>
                 <TextBlock Text="全没成" FontSize="11" Margin="6,0,16,0" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                           Foreground="{DynamicResource TextSecondaryBrush}"/>
                 <Ellipse x:Name="DotIdle" Width="9" Height="9" VerticalAlignment="Center"/>
                 <TextBlock Text="没跑" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                           Foreground="{DynamicResource TextSecondaryBrush}"/>
             </StackPanel>
 
             <Grid Grid.Row="4" Margin="18,12,18,16">
                 <TextBlock x:Name="TbSummary" FontSize="11" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                           Foreground="{DynamicResource TextSecondaryBrush}"/>
                 <Button Content="关闭" HorizontalAlignment="Right" Style="{StaticResource Ghost}"
                         Click="BtnClose_Click"/>
             </Grid>

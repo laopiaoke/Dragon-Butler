@@ -103,7 +103,7 @@ public partial class DependsWindow : Window
             MatrixHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(38) });
 
         var headStyle = new Style(typeof(TextBlock));
-        headStyle.Setters.Add(new Setter(TextBlock.FontSizeProperty, 11.5));
+        headStyle.Setters.Add(new Setter(TextBlock.FontSizeProperty, 12.5));
         headStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, BrushOf("TextSecondaryBrush")));
         headStyle.Setters.Add(new Setter(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center));
         headStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
@@ -132,7 +132,7 @@ public partial class DependsWindow : Window
             var label = new TextBlock
             {
                 Text = _profiles[r].DisplayName,
-                FontSize = 11.5,
+                FontSize = 12.5,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 Margin = new Thickness(0, 0, 6, 0),
