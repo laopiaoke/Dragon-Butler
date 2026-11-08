@@ -20,6 +20,10 @@
   <a href="https://github.com/laopiaoke/Dragon-Butler/commits/main"><img alt="last commit" src="https://img.shields.io/github/last-commit/laopiaoke/Dragon-Butler"></a>
 </p>
 
+<p align="center">
+  <a href="README.md"><strong>简体中文</strong></a> · <a href="README.en.md">English</a>
+</p>
+
 > [!IMPORTANT]
 > **免责声明**
 >
@@ -28,6 +32,19 @@
 > 请在使用前自行评估风险并备份重要数据；遇到问题欢迎反馈，但请理解排查与维护能力有限。
 
 ---
+
+## 版本信息
+
+| 项目 | 值 |
+|---|---|
+| 当前版本 | **v1.12** |
+| 程序内版本号 | `1.12.0` |
+| 发布日期 | 2026-11-08 |
+| 支持系统 | Windows 10 / 11（x64） |
+| 运行前提 | 自备 [BetterGI](https://github.com/babalae/better-genshin-impact) 等被调度的工具；本程序**不含**任何游戏自动化能力 |
+| 依赖 | 零第三方库、零运行时安装（便携版自带 .NET 8） |
+| 许可 | MIT |
+| 英文文档 | [README.en.md](README.en.md) |
 
 ## 它是什么
 
@@ -74,9 +91,18 @@
 | **收益账本** | 默认关。从 BGI 日志里累计摩拉 / 狗粮经验 / 拾取材料，队列结束时报一句，按月累计。 |
 | **MCP 接口** | 让支持 MCP 的 AI 助手直接查状态、开跑、停止、单跑某个工具；与控制 API 共用令牌与端口，默认关。 |
 
-## 最近更新（v1.11）
+## 最近更新（v1.12）
+
+- **只修看得见的地方，没有新功能。** 六处实测出来的观感问题逐条修掉：命令面板的选中态改成「左侧竖条 + 浅底」，一眼能认出选中哪条；迷你浮条两行不再糊在一起；依赖矩阵的表头换成更亮的灰、字号加到 12.5；挂机日历的月份标签从左边一列挪到方格墙上方，格子墙不再被挤到屏幕中间；队列卡标题栏给「查看类」和「编排类」按钮之间加了一道竖线。
+- **README 中英双语**：新增 [English README](README.en.md)，顶部可切换；中文侧补了一张版本信息表（当前版本 / 程序内版本号 / 支持系统 / 前提）。
+- **截图更新**：界面章节换成 v1.12 的实景截图，另外补了命令面板与挂机日历两张。
+
+<details>
+<summary>v1.11 MCP 接口</summary>
 
 - **MCP 接口**：把它当成一个 MCP 服务器接给 AI 助手（Claude Desktop / Cursor / Cherry Studio 等）。四个工具：查状态、开跑、停止、单跑某个工具。**没有 npm/Python 依赖**——手写的一小段 JSON-RPC 2.0 走既有的 `HttpListener`，和控制 API 共用同一把令牌、同一个端口，不额外开端口。默认关，关着时一律 404。
+
+</details>
 
 <details>
 <summary>v1.10 这趟到底赚了多少</summary>
@@ -151,9 +177,9 @@
 > 三层布局：队列卡（Hero）→ 工具卡（默认折叠）→ 高级设置（默认折叠）；守护收进底部盾牌。
 
 <p align="center">
-  <img src="docs/main_v15.png" width="900" alt="v1.5 主界面（深色）">
+  <img src="docs/main_v112.png" width="900" alt="v1.12 主界面（深色）">
   <br>
-  <sub>图 1 · v1.5 主界面（深色）：定时卡 · 睡前队列（含按日计划）· 工具卡 · 自定义工具 · 底部盾牌</sub>
+  <sub>图 1 · v1.12 主界面（深色）：定时卡 · 睡前队列（按日计划 / 挂机日历 / 依赖 / 配置组）· 工具卡 · 自定义工具 · 底部盾牌</sub>
 </p>
 
 主界面一屏三块，从上往下就是使用顺序：
@@ -185,9 +211,21 @@
 </p>
 
 <p align="center">
-  <img src="docs/advanced_v15.png" width="900" alt="v1.5 高级设置">
+  <img src="docs/advanced_v112.png" width="900" alt="v1.12 高级设置">
   <br>
-  <sub>图 4 · v1.5 高级设置：挂机护航、夜间息屏、疑似挂起、晨报，以及原有的守护与队列选项</sub>
+  <sub>图 4 · v1.12 高级设置：挂机护航、夜间息屏、疑似挂起、晨报、周报、收益账本，以及守护与队列选项</sub>
+</p>
+
+<p align="center">
+  <img src="docs/palette_v112.png" width="560" alt="v1.12 命令面板">
+  <br>
+  <sub>图 4b · 命令面板（Ctrl+K）：搜命令、搜设置、直接单跑某个工具；↑↓ 选择、Enter 执行、Esc 关闭</sub>
+</p>
+
+<p align="center">
+  <img src="docs/calendar_v112.png" width="740" alt="v1.12 挂机日历">
+  <br>
+  <sub>图 4c · 挂机日历：过去一年一格一天，绿=全部跑成 / 黄=有失败 / 红=全没成 / 灰=没跑</sub>
 </p>
 
 ### 自定义工具与自定义信号（v1.5）
@@ -331,12 +369,12 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:18235/mcp -Headers $h -Body
 
 | | runtime-dependent（需 .NET 8 运行时） | portable（免安装便携版） |
 | --- | --- | --- |
-| 压缩包 | `Dragon-Butler-v1.11-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.11-win-x64-portable.zip` |
+| 压缩包 | `Dragon-Butler-v1.12-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.12-win-x64-portable.zip` |
 | 大小 | 约 0.27 MB | 约 62.8 MB |
 | 要求 | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0) | 无，自带运行时 |
 | 适用 | 机器上已有 .NET 8，想下最小包 | 不确定有没有 .NET 8、要换电脑或放 U 盘 |
 
-> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.11` 是当前版本（程序里显示为 `1.11.0`；末位是 `0` 时包名按惯例省掉补位，比如 `1.5.0` 打成 `v1.5`），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
+> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.12` 是当前版本（程序里显示为 `1.12.0`；末位是 `0` 时包名按惯例省掉补位，比如 `1.5.0` 打成 `v1.5`），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
 > 解压出来的目录名固定为 `Dragon-Butler-win-x64-runtime-dependent\` 或 `Dragon-Butler-win-x64-portable\`，**不带版本**——升级时直接覆盖原目录，`config\` 里的设置不会丢。
 
 > **两个版本都不用"安装"**：没有安装向导、不写注册表、不注册服务，解压后双击 exe 就能用，删掉文件夹就是卸载。
@@ -354,8 +392,8 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:18235/mcp -Headers $h -Body
   <sub>图 9 · v1.5 首启向导：勾选工具 → 自动寻找 → 完成</sub>
 </p>
 
-> Release 页有两个附件：`Dragon-Butler-v1.11-win-x64-portable.zip` 是免安装便携版（解压即用，推荐）；
-> `Dragon-Butler-v1.11-win-x64-runtime-dependent.zip` 是需 .NET 8 运行时的小包。
+> Release 页有两个附件：`Dragon-Butler-v1.12-win-x64-portable.zip` 是免安装便携版（解压即用，推荐）；
+> `Dragon-Butler-v1.12-win-x64-runtime-dependent.zip` 是需 .NET 8 运行时的小包。
 
 跑起来之后建议再补三步：
 
@@ -448,7 +486,7 @@ Dragon Butler.exe
 - **修订位 +1**（v1.3.0 → v1.3.1）：只修 bug、不加新功能时使用；能省则省，不连续发修订版。
 - **次版本 +1**（v1.3.1 → v1.4.0）：有新功能或可感知的体验改动。
 - **主版本 +1**（v1.x → v2.0）：只在核心能力或大改动时进位，比如换了运行方式、加了整套新模块。
-- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；当前在 `v1.11`。
+- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；当前在 `v1.12`。
 
 完整历史见 [BUILD_REPORT.md](BUILD_REPORT.md)。
 
