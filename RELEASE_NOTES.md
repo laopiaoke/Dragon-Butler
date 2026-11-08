@@ -1,3 +1,32 @@
+# v1.11 能被 AI 调用了
+
+> 已发布：<https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.11>
+
+## 变更
+
+- **MCP 接口**：它可以被当成一个 **MCP 服务器**接给 AI 助手。Claude Desktop、Cursor、Cherry Studio 这类支持 MCP 的客户端填一个地址就能用，四个工具：`butler_status`（查状态，只读）、`butler_start`（开跑整条队列）、`butler_stop`（停止）、`butler_run`（单跑某个工具）
+  - **零依赖**：没有 npm、没有 Python 包，服务端是手写的一小段 JSON-RPC 2.0，走 v1.7 就有的那个 `HttpListener`
+  - 和本机控制 API **共用同一把 32 位令牌、同一个端口**（`/mcp`），不额外开端口。默认关，关着时一律 404
+  - 只暴露四个动作，`butler_run` 收的是队列里已有的 `toolId`，**不是 exe 路径**——没有「执行任意程序」这种口子
+  - 畸形请求回标准 JSON-RPC 错误码（`-32700` / `-32600` / `-32601` / `-32602`），不会 500 也不会把服务拖死
+
+## 下载哪个
+
+- 第一次用 / 不想装运行时：`Dragon-Butler-v1.11-win-x64-portable.zip`（自带运行时，约 65 MB）
+- 机器上已有 .NET 8 桌面运行时：`Dragon-Butler-v1.11-win-x64-runtime-dependent.zip`（约 0.3 MB）
+
+## 升级注意
+
+- **不需要改任何设置**。开关就在原来那个「本机控制 API」，打开它，MCP 与 HTTP API 一起可用
+- 客户端那边要填的地址是 `http://127.0.0.1:18235/mcp`（端口取你自己的 BGI Webhook 端口设置），请求头 `X-Butler-Token`
+- 令牌在「高级设置 → 本机控制 API」里显示，点「复制」可以拷走
+
+## 已知限制
+
+- 只实现了 MCP 里最基础的 `initialize` / `tools/list` / `tools/call` / `ping`。**没有 resources、prompts、sampling、roots**——这个项目的定位是「让你指挥管家」，不是「让模型读你的文件」
+- 走 HTTP（Streamable HTTP 的简化版），**不支持 stdio 传输**。所以要选「HTTP 类型」的 MCP 客户端，不能选「命令类型」
+- 只在 127.0.0.1 上默认可用；想从局域网连得开「局域网面板」那种 wildcard 监听，但那和 v1.7 一样需要 `netsh http add urlacl`，而且把控制权交给局域网是另一回事，自己想清楚
+
 # v1.10 这趟到底赚了多少
 
 > 已发布：<https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.10>

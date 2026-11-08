@@ -19,8 +19,8 @@
 
 唯一的区别是「运行时」放在哪。下载时按压缩包名区分：
 
-  Dragon-Butler-v1.10-win-x64-runtime-dependent.zip   ← 需 .NET 8 运行时版
-  Dragon-Butler-v1.10-win-x64-portable.zip            ← 免安装便携版
+  Dragon-Butler-v1.11-win-x64-runtime-dependent.zip   ← 需 .NET 8 运行时版
+  Dragon-Butler-v1.11-win-x64-portable.zip            ← 免安装便携版
 
 （名字规则：Dragon-Butler-v版本-平台-变体）
 
@@ -188,6 +188,22 @@
   以前这件事是静默的，你第二天只看到「上次执行：两天前」，不知道是没开机还是跑挂了。
   如果昨天本来就不在计划里（没勾那个星期几），它不会说话。
 
+· MCP 接口（默认关，跟「本机控制 API」同一个开关）：
+  打开本机控制 API 之后，这个程序同时也是一个 MCP 服务器，可以被支持 MCP 的 AI 助手调用
+  （Claude Desktop、Cursor、Cherry Studio 等）。地址是 http://127.0.0.1:18235/mcp ，
+  请求头带 X-Butler-Token（就是「高级设置 → 本机控制 API」里那串令牌，点「复制」可以拷走）。
+  一共四个工具：butler_status 查状态（只读）、butler_start 开跑整条队列、
+  butler_stop 停止、butler_run 单跑某一个工具（参数 toolId，比如 bettergi）。
+  不需要装任何东西：没有 npm、没有 Python 包，服务端就是一段手写的 JSON-RPC 2.0，
+  走的是 v1.7 就有的那个监听器，不额外开端口。
+  安全上和本机控制 API 完全一样：关着时一律 404（不告诉扫描者「这里有个门」），
+  只暴露四个动作，butler_run 收的是队列里已有的工具 ID，不是 exe 路径——
+  没有「执行任意程序」这种口子。
+  客户端发来畸形请求会回标准的 JSON-RPC 错误码（-32700 解析失败 / -32600 无效请求 /
+  -32601 方法不存在 / -32602 参数不对），不会 500，也不会把服务拖死。
+  只实现了 initialize / tools/list / tools/call / ping 四个方法，没有 resources、
+  prompts、sampling、roots；走 HTTP，不支持 stdio，所以客户端要选「HTTP 类型」。
+
 · 主题与音效：右上角可切「深色 / 浅色 / 跟随系统 / 自定义」。
   自定义主题支持调色板取色或选一张图片当背景，可调遮罩强度，左侧实时预览；
   「恢复默认主题」一键还原。按键音效默认关闭（静音），想听声音到「系统」卡打开。
@@ -245,4 +261,4 @@ A：退出程序后直接删掉整个文件夹即可（若开过开机自启，�
 
 七、版本
 ------------------------------------------------
-v1.10 · Windows 10/11 x64 · 需要 BetterGI 本体（另装）
+v1.11 · Windows 10/11 x64 · 需要 BetterGI 本体（另装）

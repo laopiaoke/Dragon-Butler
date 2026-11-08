@@ -23,11 +23,12 @@ public sealed class WebhookListener
 
     /// <summary>
     /// 附加路由（v1.7）：路径不是 /webhook 时交给它，由调用方决定回什么。
-    /// 参数依次是 绝对路径、查询串、请求头 <see cref="ControlApi.TokenHeader"/> 的值。
+    /// 参数依次是 绝对路径、查询串、请求头 <see cref="ControlApi.TokenHeader"/> 的值、请求体。
     /// 返回 状态码 / Content-Type / 正文；返回 null 表示「我不认识这个路径」，走 404。
     /// 用委托而不是直接调 WebhookHub，是为了让监听器只管收发、不管业务。
+    /// 请求体是 v1.11 加的：MCP 是 POST + JSON-RPC，光有路径没法处理。
     /// </summary>
-    public Func<string, string?, string?, (int Status, string ContentType, string Body)?>? Route { get; set; }
+    public Func<string, string?, string?, string?, (int Status, string ContentType, string Body)?>? Route { get; set; }
 
     /// <summary>是否正在监听</summary>
     public bool IsRunning => _running;
@@ -103,10 +104,19 @@ public sealed class WebhookListener
                 if (!path.EndsWith("/webhook", StringComparison.OrdinalIgnoreCase))
                 {
                     // v1.7：非 /webhook 的路径交给附加路由（控制 API / 只读面板）
+                    // v1.11：把请求体读出来一起传——MCP 走 POST + JSON-RPC
+                    string routeBody = "";
+                    if (ctx.Request.HasEntityBody)
+                    {
+                        using var routeReader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8);
+                        routeBody = routeReader.ReadToEnd();
+                    }
+
                     var handled = Route?.Invoke(
                         ctx.Request.Url?.AbsolutePath ?? "",
                         ctx.Request.Url?.Query,
-                        ctx.Request.Headers[ControlApi.TokenHeader]);
+                        ctx.Request.Headers[ControlApi.TokenHeader],
+                        routeBody);
                     if (handled == null)
                     {
                         ctx.Response.StatusCode = 404;
@@ -116,7 +126,8 @@ public sealed class WebhookListener
 
                     byte[] bytes = Encoding.UTF8.GetBytes(handled.Value.Body ?? "");
                     ctx.Response.StatusCode = handled.Value.Status;
-                    ctx.Response.ContentType = handled.Value.ContentType;
+                    if (!string.IsNullOrEmpty(handled.Value.ContentType))
+                        ctx.Response.ContentType = handled.Value.ContentType;
                     // 面板会被手机反复拉，控制 API 的响应也不该被任何中间层缓存
                     ctx.Response.Headers["Cache-Control"] = "no-store";
                     ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);

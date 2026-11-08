@@ -67,8 +67,10 @@ public static class WebhookHub
     /// <summary>
     /// 非 /webhook 路径的统一入口（v1.7）：只读面板与受令牌保护的控制 API。
     /// 返回 null = 不认识这个路径，让监听器回 404。
+    /// v1.11 起多一个 MCP 分支（<paramref name="body"/> 是 POST 上来的原文）。
     /// </summary>
-    private static (int Status, string ContentType, string Body)? HandleRoute(string path, string? query, string? token)
+    private static (int Status, string ContentType, string Body)? HandleRoute(
+        string path, string? query, string? token, string? body)
     {
         try
         {
@@ -81,6 +83,10 @@ public static class WebhookHub
                 if (!AppState.Settings.LanPanelEnabled) return null;
                 return (200, ControlApi.PanelContentType, BuildPanel());
             }
+
+            // G3：MCP（JSON-RPC over HTTP）。与控制 API 共用开关与令牌。
+            if (p.Equals(McpServer.Path, StringComparison.OrdinalIgnoreCase))
+                return HandleMcp(body, token);
 
             // F6：控制 API。判定完全交给 ControlApi.Plan（纯函数）
             var plan = ControlApi.Plan(p, token, AppState.Settings.ControlApiEnabled, AppState.Settings.ControlApiToken);
@@ -111,6 +117,54 @@ public static class WebhookHub
         {
             LogService.LogEvent("控制 API 处理异常：" + ex.Message);
             return (500, ControlApi.JsonContentType, ControlApi.Fail("服务端异常：" + ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// MCP 分支（v1.11 / G3）：判定交给 <see cref="McpServer.Plan"/>，需要动队列时在这里执行。
+    /// 与 <see cref="HandleRoute"/> 分开，是因为「判定 → 执行 → 组装响应」比控制 API 多一步。
+    /// </summary>
+    private static (int Status, string ContentType, string Body) HandleMcp(string? body, string? token)
+    {
+        var plan = McpServer.Plan(body, AppState.Settings.ControlApiEnabled,
+                                  token, AppState.Settings.ControlApiToken);
+
+        // 开门见山记一笔：MCP 是给外部 AI 用的，出问题时日志里得能对上号
+        if (plan.Status is 401 or 503 or 400)
+            LogService.LogEvent($"MCP：拒绝（{plan.Status}）");
+
+        if (plan.IsNotification && plan.Body.Length == 0) return (plan.Status, "", "");
+        if (!plan.NeedsExecution) return (plan.Status, ControlApi.JsonContentType, plan.Body);
+
+        switch (plan.Action)
+        {
+            case McpAction.Status:
+                var done = QueueService.DoneToolIdsToday();
+                var unfinished = QueueService.UnfinishedToday();
+                int total = AppState.Settings.Queue.Count(q => q.Enabled);
+                string text = McpServer.StatusText(
+                    QueueService.IsRunning,
+                    QueueService.IsRunning ? QueueService.CurrentToolId : "",
+                    done.Count, unfinished.Count, total, LastEventText);
+                return (200, ControlApi.JsonContentType, McpServer.ToolResult(plan.IdJson, text));
+
+            case McpAction.Start:
+            case McpAction.Stop:
+            case McpAction.Run:
+                var action = plan.Action switch
+                {
+                    McpAction.Start => ApiAction.Start,
+                    McpAction.Stop => ApiAction.Stop,
+                    _ => ApiAction.Run,
+                };
+                LogService.LogEvent($"MCP：请求 {plan.Action}" + (plan.ToolId.Length > 0 ? $"（{plan.ToolId}）" : ""));
+                var (ok, message) = Execute(action, plan.ToolId);
+                return (200, ControlApi.JsonContentType,
+                        ok ? McpServer.ToolResult(plan.IdJson, message)
+                           : McpServer.ToolError(plan.IdJson, message));
+
+            default:
+                return (200, ControlApi.JsonContentType, McpServer.ToolError(plan.IdJson, "不支持的动作"));
         }
     }
 

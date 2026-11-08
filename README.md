@@ -72,11 +72,19 @@
 | **配置组切片** | 让某一项只跑指定的几个 BGI 配置组；不设就沿用全局勾选，一条队能跑白天/晚上两套。 |
 | **版本前置检查** | 记住上次跑成功时的 BetterGI 版本，开跑前发现变了就提醒；只读本地版本号、不联网。 |
 | **收益账本** | 默认关。从 BGI 日志里累计摩拉 / 狗粮经验 / 拾取材料，队列结束时报一句，按月累计。 |
+| **MCP 接口** | 让支持 MCP 的 AI 助手直接查状态、开跑、停止、单跑某个工具；与控制 API 共用令牌与端口，默认关。 |
 
-## 最近更新（v1.10）
+## 最近更新（v1.11）
+
+- **MCP 接口**：把它当成一个 MCP 服务器接给 AI 助手（Claude Desktop / Cursor / Cherry Studio 等）。四个工具：查状态、开跑、停止、单跑某个工具。**没有 npm/Python 依赖**——手写的一小段 JSON-RPC 2.0 走既有的 `HttpListener`，和控制 API 共用同一把令牌、同一个端口，不额外开端口。默认关，关着时一律 404。
+
+<details>
+<summary>v1.10 这趟到底赚了多少</summary>
 
 - **收益账本**（默认关，在「高级设置」里打开）：从 BGI 日志里顺手累计摩拉、狗粮经验、拾取材料，队列结束时在通知里补一句「本次约 12.5 万摩拉、甜甜花×12。本月累计 340 万摩拉」。解析**故意写得很保守**——只认「摩拉 +125000」这种带明确分隔符的形状，宁可少算也不猜。
 - **晨报补跑提示**：昨天该跑却没跑成时，晨报会多一句「昨天 08:00 的定时没跑成（补跑窗口 120 分钟内没跑起来）」。以前这件事是静默的，你第二天只看到「上次执行：两天前」。
+
+</details>
 
 <details>
 <summary>v1.9 排队讲道理</summary>
@@ -273,6 +281,48 @@
 
 自定义背景能保证看得清，靠的是三层：背景图 → 半透明遮罩 → 卡片，**文字永远落在卡片上**；卡片的亮度按当前方案锚定（深色方案向 `#16191F` 混 93%，浅色方案向白混 90%），所以换个再艳的背景也不会把字糊掉。
 
+## 接到 AI 助手（MCP）
+
+v1.11 起，它可以作为一个 **MCP 服务器**被 AI 助手直接调用——Claude Desktop、Cursor、Cherry Studio 这类支持 MCP 的客户端，填一个地址就能让它「查状态、开跑、停止、单跑某个工具」。
+
+前提是在「高级设置」里打开**本机控制 API**（MCP 与控制 API 共用同一把 32 位令牌，也共用同一个监听端口——MCP 是它的第四个入口，不额外开端口）。然后给客户端加一段配置：
+
+```json
+{
+  "mcpServers": {
+    "dragon-butler": {
+      "type": "http",
+      "url": "http://127.0.0.1:18235/mcp",
+      "headers": { "X-Butler-Token": "<高级设置里显示的那串令牌>" }
+    }
+  }
+}
+```
+
+一共四个工具：
+
+| 工具 | 作用 | 参数 |
+|---|---|---|
+| `butler_status` | 查状态：跑没跑、当前哪一项、今天跑成几项、还剩几项、最后一条事件。只读 | 无 |
+| `butler_start` | 开跑整条队列 | 无 |
+| `butler_stop` | 停止当前队列 | 无 |
+| `butler_run` | 单跑某一个工具 | `toolId`（如 `bettergi`） |
+
+几点值得说明：
+
+- **不用装任何东西**。没有 `npm install`、没有 Python 包，服务端是手写的一小段 JSON-RPC 2.0，走既有的 `HttpListener`。MCP 客户端那边怎么装是它自己的事。
+- **关着的时候一律 404**。和本机控制 API 一样——没开的接口不该被扫描器发现「这里有个门」。
+- **只暴露四个动作，没有「执行任意程序」**。`butler_run` 收的是队列里已经存在的 `toolId`，不是 exe 路径。
+- 客户端发来畸形请求时回一个标准的 JSON-RPC 错误码（`-32700` 解析失败 / `-32600` 无效请求 / `-32601` 方法不存在 / `-32602` 参数不对），不会 500、也不会把服务拖死。
+
+命令行验一下最快：
+
+```powershell
+$h = @{ "X-Butler-Token" = "<令牌>" }
+$b = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:18235/mcp -Headers $h -Body $b -ContentType "application/json"
+```
+
 ## 快速开始
 
 **前提**：Windows 10/11 x64、至少装好你要用的工具（BetterGI / 三月七助手 / ok-ww）、有管理员权限（结束工具进程需要）。
@@ -281,12 +331,12 @@
 
 | | runtime-dependent（需 .NET 8 运行时） | portable（免安装便携版） |
 | --- | --- | --- |
-| 压缩包 | `Dragon-Butler-v1.10-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.10-win-x64-portable.zip` |
+| 压缩包 | `Dragon-Butler-v1.11-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.11-win-x64-portable.zip` |
 | 大小 | 约 0.27 MB | 约 62.8 MB |
 | 要求 | 已装 [.NET 8 桌面运行时](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0) | 无，自带运行时 |
 | 适用 | 机器上已有 .NET 8，想下最小包 | 不确定有没有 .NET 8、要换电脑或放 U 盘 |
 
-> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.10` 是当前版本（程序里显示为 `1.10.0`；末位是 `0` 时包名按惯例省掉补位，比如 `1.5.0` 打成 `v1.5`），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
+> 文件名规则是 `Dragon-Butler-v<版本>-<平台>-<变体>`：`v1.11` 是当前版本（程序里显示为 `1.11.0`；末位是 `0` 时包名按惯例省掉补位，比如 `1.5.0` 打成 `v1.5`），`win-x64` 是平台，`runtime-dependent` / `portable` 是变体。
 > 解压出来的目录名固定为 `Dragon-Butler-win-x64-runtime-dependent\` 或 `Dragon-Butler-win-x64-portable\`，**不带版本**——升级时直接覆盖原目录，`config\` 里的设置不会丢。
 
 > **两个版本都不用"安装"**：没有安装向导、不写注册表、不注册服务，解压后双击 exe 就能用，删掉文件夹就是卸载。
@@ -304,8 +354,8 @@
   <sub>图 9 · v1.5 首启向导：勾选工具 → 自动寻找 → 完成</sub>
 </p>
 
-> Release 页有两个附件：`Dragon-Butler-v1.10-win-x64-portable.zip` 是免安装便携版（解压即用，推荐）；
-> `Dragon-Butler-v1.10-win-x64-runtime-dependent.zip` 是需 .NET 8 运行时的小包。
+> Release 页有两个附件：`Dragon-Butler-v1.11-win-x64-portable.zip` 是免安装便携版（解压即用，推荐）；
+> `Dragon-Butler-v1.11-win-x64-runtime-dependent.zip` 是需 .NET 8 运行时的小包。
 
 跑起来之后建议再补三步：
 
@@ -398,7 +448,7 @@ Dragon Butler.exe
 - **修订位 +1**（v1.3.0 → v1.3.1）：只修 bug、不加新功能时使用；能省则省，不连续发修订版。
 - **次版本 +1**（v1.3.1 → v1.4.0）：有新功能或可感知的体验改动。
 - **主版本 +1**（v1.x → v2.0）：只在核心能力或大改动时进位，比如换了运行方式、加了整套新模块。
-- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；当前在 `v1.10`。
+- `v0.x` 是开发期，`v1.0` 是第一个可以给别人用的版本；当前在 `v1.11`。
 
 完整历史见 [BUILD_REPORT.md](BUILD_REPORT.md)。
 
