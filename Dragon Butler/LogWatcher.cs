@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -163,6 +163,10 @@ public sealed class LogWatcher
 
     private void ProcessLine(string line)
     {
+        // v1.10 / G1：收益账本顺手看一眼。放在最前面且不影响任何分支——
+        // 收益行和完成/错误判定互不相干，早返回的地方也会漏掉它。
+        HarvestLedger.Observe(line);
+
         // v1.3：profile 指定的完成哨兵先判（放在内置规则之前，避免被 GroupEnded 的 return 吞掉）
         if (_rxCompletion != null && _rxCompletion.IsMatch(line))
         {

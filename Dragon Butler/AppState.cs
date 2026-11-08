@@ -148,6 +148,13 @@ public class AppSettings
     /// </summary>
     public string LastBgiVersion { get; set; } = "";
 
+    /// <summary>
+    /// v1.10 / G1：收益账本开关，默认关。
+    /// 只读日志、不碰游戏、不联网，但解析规则依赖 BGI 日志格式——格式一变就可能算错，
+    /// 所以先让人自己打开，看着对再长期用。
+    /// </summary>
+    public bool HarvestEnabled { get; set; } = false;
+
     /// <summary>推送方式：Toast（Windows 通知，默认）/ Wecom（企业微信）/ Balloon（仅托盘气泡）</summary>
     public string NotifyMode { get; set; } = "Toast";
 

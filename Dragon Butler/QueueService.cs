@@ -1025,8 +1025,29 @@ public static class QueueService
             text = $"【龙管家】队列结束：{ok}/{total} 成功。⚠ {f.DisplayName}未完成（{f.Reason}），已跳过。";
         }
 
+        // v1.10 / G1：收益账本。Take() 会把本轮累计清零——
+        // 不清零的话下一条队列会把这一趟的收益再报一遍。
+        string harvestNote = "";
+        try
+        {
+            var harvest = HarvestLedger.Take();
+            string mine = HarvestLedger.Describe(harvest);
+            if (mine.Length > 0)
+            {
+                harvestNote = " " + mine + "。";
+                var month = HarvestLedger.GetMonth();
+                if (month.Mora > harvest.Mora)
+                    harvestNote += $"本月累计 {HarvestLedger.FormatAmount(month.Mora)}摩拉。";
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("收益账本汇总失败：" + ex.Message);
+        }
+
         // 失败类通知带上现场包路径：人在外面看到这句话，才知道该去哪看
         if (bundleNote.Length > 0) text += bundleNote;
+        text += harvestNote;
         NotifyService.Show(level, "龙管家", text);
 
         // v1.8 / F14：跑完说一句话。念的是给人听的一句口语，不是通知正文——

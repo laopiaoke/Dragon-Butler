@@ -1227,7 +1227,20 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
+
+                                <!-- v1.10 / G1：收益账本（默认关） -->
+                                <Grid Grid.Row="8" Grid.Column="0" Margin="0,10,14,6">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="收益账本" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock Text="从 BGI 日志里累计摩拉/狗粮经验/拾取材料，队列结束时报一句" FontSize="10"
+                                                   Margin="0,3,10,0" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <ToggleButton x:Name="TgHarvest" Style="{StaticResource SwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHarvest_Click"/>
+                                </Grid>
 
                                 <Grid Grid.Row="0" Grid.Column="0" Margin="0,6,14,6">
                                     <TextBlock Text="守护（存活/内存/截图）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>

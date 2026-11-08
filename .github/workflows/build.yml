@@ -103,6 +103,7 @@ jobs:
             dag      = "P2 依赖编排"
             groups   = "P2 配置组切片"
             bgiupdate = "P2 BGI 版本前置检查"
+            harvest  = "G1 收益账本 + G5 晨报补跑提示"
           }
           $bad = @()
           foreach ($name in $groups.Keys) {

@@ -248,6 +248,7 @@ public partial class MainWindow : Window
         TgStallAutoKill.IsChecked = s.StallAutoKill;
         TgMorningReport.IsChecked = s.MorningReportEnabled;
         TgWeeklyReport.IsChecked = s.WeeklyReportEnabled;
+        TgHarvest.IsChecked = s.HarvestEnabled;
         TgControlApi.IsChecked = s.ControlApiEnabled;
         TgLanPanel.IsChecked = s.LanPanelEnabled;
         RefreshApiRows(s);
@@ -2151,6 +2152,27 @@ public partial class MainWindow : Window
         AppState.SaveSettings();
         LogService.LogEvent("周报：" + (on ? "开启" : "关闭"));
         if (on) AppState.PublishLog("周报已开启：每周首次打开时汇报近七天的队列情况");
+    }
+
+    // ===== v1.10：收益账本 =====
+
+    private void TgHarvest_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgHarvest.IsChecked == true;
+        AppState.Settings.HarvestEnabled = on;
+        AppState.SaveSettings();
+        LogService.LogEvent("收益账本：" + (on ? "开启" : "关闭"));
+        if (on)
+        {
+            // 开的时候先把本月已有的账报一遍：让用户立刻判断解析对不对，
+            // 而不是等到下次跑完队列才知道它有没有在工作。
+            var month = HarvestLedger.GetMonth();
+            string mine = HarvestLedger.Describe(month, "本月已记");
+            AppState.PublishLog(mine.Length > 0
+                ? "收益账本已开启：" + mine
+                : "收益账本已开启：还没有记录，下次队列结束时会报一句");
+        }
     }
 
     // ===== v1.7：控制 API 与局域网面板 =====

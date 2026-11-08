@@ -86,6 +86,7 @@ internal static class Program
             "dag" => RunDag(stub),
             "groups" => RunGroups(),
             "bgiupdate" => RunBgiVersion(),
+            "harvest" => RunHarvest(),
             "ui" => RenderProbe.RunUi(args.Length > 1 ? args[1] : "all"),
             _ => Help(),
         };
@@ -2456,5 +2457,258 @@ internal static class Program
 
         Console.WriteLine($"RESULT bgiupdate fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.10 / G1 收益账本 + G5 晨报补跑提示。
+    /// 解析规则是这整套里最容易被 BGI 改格式搞坏的部分，所以断言写得比功能还多：
+    /// 能认的、不能认的、容易误伤的（带单位/区间/千分位）都要钉住。
+    /// </summary>
+    private static int RunHarvest()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // ---- 1) 数字写法 ----
+        Check("FormatAmount/万元以下原样", HarvestLedger.FormatAmount(0) == "0" && HarvestLedger.FormatAmount(9999) == "9999",
+            HarvestLedger.FormatAmount(9999));
+        Check("FormatAmount/一万写成万", HarvestLedger.FormatAmount(10000) == "1 万", HarvestLedger.FormatAmount(10000));
+        Check("FormatAmount/保留一位小数", HarvestLedger.FormatAmount(125000) == "12.5 万", HarvestLedger.FormatAmount(125000));
+        Check("FormatAmount/整万不留小数点", HarvestLedger.FormatAmount(400000) == "40 万", HarvestLedger.FormatAmount(400000));
+        Check("FormatAmount/十万以上取整", HarvestLedger.FormatAmount(1250000) == "125 万", HarvestLedger.FormatAmount(1250000));
+        Check("FormatAmount/一亿以上换亿", HarvestLedger.FormatAmount(100000000) == "1 亿", HarvestLedger.FormatAmount(100000000));
+        Check("FormatAmount/负数夹到 0", HarvestLedger.FormatAmount(-5) == "0");
+
+        // ---- 2) 解析：该认的 ----
+        var s = AppState.Settings;
+        bool oldEnabled = s.HarvestEnabled;
+        string? oldPath = HarvestLedger.PathOverride;
+        // 断言绝不能写用户的真实账本：换到临时文件，跑完删掉
+        string sandbox = Path.Combine(Path.GetTempPath(), "dragon-harvest-probe.json");
+        try
+        {
+            try { if (File.Exists(sandbox)) File.Delete(sandbox); } catch { }
+            HarvestLedger.PathOverride = sandbox;
+            HarvestLedger.Reload();
+            s.HarvestEnabled = true;
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("摩拉 +125000");
+            var h1 = HarvestLedger.Take();
+            Check("解析/摩拉带加号", h1.Mora == 125000, h1.Mora.ToString());
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("获得摩拉：1,234");
+            var h2 = HarvestLedger.Take();
+            Check("解析/摩拉带千分位", h2.Mora == 1234, h2.Mora.ToString());
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("拾取 甜甜花 x 12");
+            var h3 = HarvestLedger.Take();
+            Check("解析/拾取材料",
+                h3.Materials.TryGetValue("甜甜花", out int sweet) && sweet == 12,
+                string.Join(",", h3.Materials.Select(kv => kv.Key + "=" + kv.Value)));
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("摩拉 +1000");
+            HarvestLedger.Observe("摩拉 +2000");
+            var h4 = HarvestLedger.Take();
+            Check("解析/多行累加", h4.Mora == 3000, h4.Mora.ToString());
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("狗粮经验 +80000");
+            var h5 = HarvestLedger.Take();
+            Check("解析/狗粮经验", h5.Exp == 80000, h5.Exp.ToString());
+
+            // ---- 3) 解析：绝不该认的（误伤比漏算更糟） ----
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("一趟全部跑完大约 10-12 小时，摩拉收益 26-28w");
+            var h6 = HarvestLedger.Take();
+            Check("不认/区间与单位混写", h6.IsEmpty, $"mora={h6.Mora} exp={h6.Exp}");
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("12.5万摩拉");
+            var h7 = HarvestLedger.Take();
+            Check("不认/无分隔符只有万", h7.IsEmpty, $"mora={h7.Mora}");
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("配置组 \"日常\" 执行结束");
+            var h8 = HarvestLedger.Take();
+            Check("不认/无关日志行", h8.IsEmpty);
+
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("");
+            HarvestLedger.Observe(null);
+            var h9 = HarvestLedger.Take();
+            Check("不认/空行与 null 不抛", h9.IsEmpty);
+
+            // ---- 4) 开关关闭时什么都不记 ----
+            s.HarvestEnabled = false;
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("摩拉 +999999");
+            var h10 = HarvestLedger.Take();
+            Check("开关关闭时不记账", h10.IsEmpty, $"mora={h10.Mora}");
+
+            // ---- 5) Take 会清零（否则下一趟会重复报） ----
+            s.HarvestEnabled = true;
+            HarvestLedger.ResetPending();
+            HarvestLedger.Observe("摩拉 +100");
+            var first = HarvestLedger.Take();
+            var second = HarvestLedger.Take();
+            Check("Take 取走即清零", first.Mora == 100 && second.IsEmpty, $"first={first.Mora} second={second.Mora}");
+
+            // ---- 6) 文案 ----
+            HarvestLedger.ResetPending();
+            Check("Describe/空账不说话", HarvestLedger.Describe(new Harvest()).Length == 0);
+            Check("Describe/null 不说话", HarvestLedger.Describe(null).Length == 0);
+            var sample = new Harvest { Mora = 125000 };
+            sample.Materials["甜甜花"] = 12;
+            string desc = HarvestLedger.Describe(sample);
+            Check("Describe/含摩拉与材料", desc.Contains("12.5 万") && desc.Contains("甜甜花×12"), desc);
+            Check("Describe/材料最多列三个", HarvestLedger.Describe(new Harvest
+            {
+                Materials = new Dictionary<string, int>(StringComparer.Ordinal)
+                {
+                    ["a"] = 5, ["b"] = 4, ["c"] = 3, ["d"] = 2, ["e"] = 1,
+                },
+            }).Contains("等 5 种材料"));
+            Check("Describe/按数量降序", HarvestLedger.Describe(new Harvest
+            {
+                Materials = new Dictionary<string, int>(StringComparer.Ordinal) { ["少"] = 1, ["多"] = 9 },
+            }).StartsWith("本次约 多×9", StringComparison.Ordinal));
+
+            // ---- 7) 记账与查询 ----
+            var today = DateTime.Today;
+            var before = HarvestLedger.GetDay(today);
+            HarvestLedger.AddToDay(today, new Harvest { Mora = 500 });
+            var after = HarvestLedger.GetDay(today);
+            Check("按天记账累加", after.Mora == before.Mora + 500, $"{before.Mora}→{after.Mora}");
+            Check("取不到的天返回空账而非 null",
+                HarvestLedger.GetDay(today.AddDays(-3999)) is { } emptyDay && emptyDay.IsEmpty);
+            Check("最近 N 天合计不小于今天",
+                HarvestLedger.GetRecent(1).Mora >= after.Mora);
+            Check("空账 Add 不改变目标",
+                RunAddEmptyCheck());
+
+            // ---- 8) 源码级约束：账本不联网、不写别的文件 ----
+            try
+            {
+                string src = ReadRepoSources("Dragon Butler/HarvestLedger.cs");
+                Check("源码/账本不联网",
+                    !src.Contains("HttpClient", StringComparison.Ordinal)
+                    && !src.Contains("WebRequest", StringComparison.Ordinal)
+                    && !src.Contains("DownloadFile", StringComparison.Ordinal));
+                Check("源码/HarvestLedger 自己只写 harvest.json",
+                    src.Contains("harvest.json", StringComparison.Ordinal));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("  SKIP 源码扫描失败：" + ex.Message);
+            }
+
+            // ---- 9) G5 晨报补跑提示 ----
+            Check("补跑提示/定时关着不说话", RunCatchUpCheck(enabled: false) == "");
+            Check("补跑提示/没勾任何星期不说话", RunCatchUpCheck(enabled: true, mask: 0) == "");
+
+            // 昨天在计划里 → 该报一句「昨天 HH:mm 没跑成」
+            int yesterdayBit = SchedulePlanner.WeekdayBit(DateTime.Today.AddDays(-1));
+            string shouldSpeak = RunCatchUpCheck(enabled: true, mask: 1 << yesterdayBit);
+            Check("补跑提示/昨天该跑却没跑要说话",
+                shouldSpeak.Contains("昨天", StringComparison.Ordinal)
+                && shouldSpeak.Contains("没跑成", StringComparison.Ordinal), shouldSpeak);
+
+            // 昨天不在计划里 → 昨天本来就不该跑，没什么可说
+            int otherBit = (yesterdayBit + 1) % 7;
+            string shouldSilent = RunCatchUpCheck(enabled: true, mask: 1 << otherBit);
+            Check("补跑提示/昨天本来不该跑就不说话", shouldSilent == "", shouldSilent);
+
+            // 补跑关着时措辞要换（不能还说「窗口内没跑起来」）
+            var sched = AppState.Settings;
+            int oldCatchUp = sched.ScheduleCatchUpMinutes;
+            try
+            {
+                sched.ScheduleCatchUpMinutes = 0;
+                string noWindow = RunCatchUpCheck(enabled: true, mask: 1 << yesterdayBit);
+                Check("补跑提示/补跑关着时措辞不同",
+                    noWindow.Contains("补跑是关着的", StringComparison.Ordinal), noWindow);
+            }
+            finally
+            {
+                sched.ScheduleCatchUpMinutes = oldCatchUp;
+            }
+
+            Check("补跑提示/度假模式不说话", RunVacationCheck(1 << yesterdayBit));
+        }
+        finally
+        {
+            s.HarvestEnabled = oldEnabled;
+            HarvestLedger.ResetPending();
+            HarvestLedger.PathOverride = oldPath;
+            HarvestLedger.Reload();
+            try { if (File.Exists(sandbox)) File.Delete(sandbox); } catch { }
+        }
+
+        Console.WriteLine($"RESULT harvest fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    private static bool RunAddEmptyCheck()
+    {
+        var target = new Harvest { Mora = 7 };
+        target.Add(null);
+        target.Add(new Harvest());
+        return target.Mora == 7;
+    }
+
+    /// <summary>用一组设置跑一遍晨报的补跑提示，返回结果（不改真实设置）。</summary>
+    private static string RunCatchUpCheck(bool enabled, int mask = 0x7F)
+    {
+        var s = AppState.Settings;
+        bool oldEnabled = s.ScheduleEnabled;
+        int oldMask = s.ScheduleWeekdays;
+        try
+        {
+            s.ScheduleEnabled = enabled;
+            s.ScheduleWeekdays = mask;
+            return MorningReportService.CatchUpNote();
+        }
+        finally
+        {
+            s.ScheduleEnabled = oldEnabled;
+            s.ScheduleWeekdays = oldMask;
+        }
+    }
+
+    /// <summary>度假模式下晨报开口了吗（应该不会）。</summary>
+    private static bool RunVacationCheck(int mask)
+    {
+        var s = AppState.Settings;
+        bool oldEnabled = s.ScheduleEnabled, oldVacation = s.VacationMode;
+        int oldMask = s.ScheduleWeekdays;
+        try
+        {
+            s.ScheduleEnabled = true;
+            s.ScheduleWeekdays = mask;
+            s.VacationMode = true;
+            return MorningReportService.CatchUpNote() == "";
+        }
+        finally
+        {
+            s.ScheduleEnabled = oldEnabled;
+            s.VacationMode = oldVacation;
+            s.ScheduleWeekdays = oldMask;
+        }
+    }
+
+    /// <summary>读仓库里的一个源文件（从程序集位置上溯 5 级到仓库根）。</summary>
+    private static string ReadRepoSources(string relative)
+    {
+        string root = Path.GetDirectoryName(typeof(QueueService).Assembly.Location) ?? ".";
+        for (int i = 0; i < 5; i++) root = Path.GetDirectoryName(root) ?? root;
+        return File.ReadAllText(Path.Combine(root, relative));
     }
 }

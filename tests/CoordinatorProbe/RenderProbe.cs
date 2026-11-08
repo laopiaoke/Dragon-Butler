@@ -191,10 +191,28 @@ internal static class RenderProbe
                         w.Close();
                     }
 
-                    if (mode == "main" || mode == "all")
+                    if (mode == "main" || mode == "advanced" || mode == "all")
                     {
                         var w = new MainWindow();
-                        bool ok = Save(w, Path.Combine(spot, "main.png"), 980, 792);
+                        // 折叠状态下的「高级设置」在渲染里看不见，而 v1.10 新增的开关就在那儿。
+                        // 专门留一个 advanced 模式把它展开再截图，否则只能靠读代码确认布局。
+                        if (mode == "advanced")
+                        {
+                            foreach (string name in new[] { "AdvancedBody", "SystemBody" })
+                            {
+                                if (w.FindName(name) is FrameworkElement fe) fe.Visibility = Visibility.Visible;
+                            }
+                            // 主窗是 SizeToContent="Height" 且内容装在 ScrollViewer 里，
+                            // 光设高度没用——得把滚动条推到底才看得到下面的开关。
+                            w.UpdateLayout();
+                            if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer sv)
+                            {
+                                sv.ScrollToEnd();
+                                w.UpdateLayout();
+                            }
+                        }
+                        bool ok = Save(w, Path.Combine(spot, mode == "advanced" ? "advanced.png" : "main.png"),
+                            980, mode == "advanced" ? 1100 : 792);
                         Console.WriteLine($"RENDER main={ok}");
                         w.Close();
                     }

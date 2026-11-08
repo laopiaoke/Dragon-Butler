@@ -29,13 +29,14 @@ public static class MorningReportService
             AppState.SaveSettings();
 
             var records = GroupArchive.GetDay(DateTime.Today.AddDays(-1));
-            if (records.Count == 0)
+            string catchUp = CatchUpNote();
+            if (records.Count == 0 && catchUp.Length == 0)
             {
                 LogService.LogEvent("晨报：昨日无运行记录，跳过播报");
                 return;
             }
 
-            string text = BuildSummary(records);
+            string text = records.Count == 0 ? catchUp : BuildSummary(records) + catchUp;
             LogService.LogEvent("[晨报] " + text);
             NotifyService.Show(NotifyLevel.Info, "龙管家 · 晨报", text);
         }
@@ -60,6 +61,60 @@ public static class MorningReportService
         }
 
         return $"昨日队列：{runs} 次运行，{state}，总耗时 {FormatDuration(minutes)}";
+    }
+
+    /// <summary>
+    /// v1.10 / G5：把「昨天该跑却没跑」说出来。
+    ///
+    /// <para>
+    /// 定时补跑（v1.6 F1）只在开机的前提下成立：08:00 的计划点，10:00 才开机就已经超出补跑窗口，
+    /// 于是「今天什么都没跑」。以前这件事是静默的——用户第二天打开软件，什么提示也没有，
+    /// 只看到「上次执行」停在两天前。这里补上那一句话。
+    /// </para>
+    /// <para>
+    /// 判据完全复用 <see cref="SchedulePlanner"/>：把「现在」换成「昨天任意一个必然错过的时刻」去问它，
+    /// 得到的原因就是当时没跑的原因。不新增任何状态字段，也不需要在错过的那一刻记日志
+    /// （那一刻电脑很可能根本没开）。
+    /// </para>
+    /// </summary>
+    public static string CatchUpNote()
+    {
+        try
+        {
+            var s = AppState.Settings;
+            if (!s.ScheduleEnabled) return "";
+            if (s.VacationMode) return "";
+            if ((s.ScheduleWeekdays & 0x7F) == 0) return "";
+
+            // 昨天最后一个可能的计划点 + 补跑窗口之后一分钟 = 必然已经错过的时刻
+            var yesterday = DateTime.Today.AddDays(-1);
+            int window = Math.Clamp(s.ScheduleCatchUpMinutes, 0, SchedulePlanner.MaxCatchUpMinutes);
+            var probe = yesterday.Date.AddHours(s.ScheduleHour).AddMinutes(s.ScheduleMinute)
+                .AddMinutes(window).AddMinutes(1);
+            if (probe >= DateTime.Now) probe = DateTime.Now; // 极端设置下别问到未来去
+
+            var decision = SchedulePlanner.Decide(
+                s.ScheduleEnabled, s.VacationMode, false,
+                s.ScheduleHour, s.ScheduleMinute, s.ScheduleWeekdays,
+                s.ScheduleCatchUpMinutes, null, probe);
+
+            // 只有「昨天那个点确实该跑、但因为过了窗口而没跑」才有话说
+            if (decision.ShouldRun || decision.DueAt == null) return "";
+            if (decision.DueAt.Value.Date != yesterday) return "";
+            if (!decision.Reason.StartsWith("上一个计划点", StringComparison.Ordinal)
+                && !decision.Reason.StartsWith("已过计划时间", StringComparison.Ordinal)) return "";
+
+            string when = $"{s.ScheduleHour:00}:{s.ScheduleMinute:00}";
+            string why = window == 0
+                ? "（补跑是关着的，错过那一分钟就不再补）"
+                : $"（补跑窗口 {window} 分钟内没跑起来）";
+            return $" 昨天 {when} 的定时没跑成{why}。";
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("晨报补跑提示生成失败：" + ex.Message);
+            return "";
+        }
     }
 
     private static TimeSpan? DurationOf(GroupRecord r)
