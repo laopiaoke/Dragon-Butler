@@ -949,6 +949,7 @@
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="*"/>
                                     <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
@@ -974,6 +975,9 @@
                                         <Button x:Name="BtnCalendar" Content="挂机日历" Style="{StaticResource MiniAction}"
                                                 Margin="6,0,0,0" Click="BtnCalendar_Click"
                                                 ToolTip="过去一年哪天跑了、跑成没成（方格墙）"/>
+                                        <Button x:Name="BtnToday" Content="今日" Style="{StaticResource MiniAction}"
+                                                Margin="6,0,0,0" Click="BtnToday_Click"
+                                                ToolTip="今天每组花了多久、比往常快还是慢、哪个工具没跑成"/>
                                         <!-- v1.12：前两个是「看一眼」，后两个是「定规矩」，
                                              中间一道 1px 竖线把两类分开，省得四个按钮排成一串看不出区别 -->
                                         <Border Width="1" Margin="8,3,2,3" Background="{DynamicResource BorderBrush}"/>
@@ -986,11 +990,54 @@
                                     </StackPanel>
                                 </Grid>
 
-                                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="252" Margin="0,9,0,0">
+                                <!-- v1.13：实时条。空闲时整条不占地方（Collapsed），
+                                     跑起来才出现——用户不问"现在在干嘛"的时候，它不存在。 -->
+                                <Border x:Name="LiveStrip" Grid.Row="1" Visibility="Collapsed" Margin="0,10,0,0"
+                                        CornerRadius="8" Background="{DynamicResource BrandSoftBrush}" Padding="10,7,10,7"
+                                        ToolTipService.InitialShowDelay="400">
+                                    <Border.Triggers>
+                                        <EventTrigger RoutedEvent="Loaded">
+                                            <BeginStoryboard>
+                                                <Storyboard RepeatBehavior="Forever">
+                                                    <DoubleAnimation Storyboard.TargetName="LiveDot"
+                                                                     Storyboard.TargetProperty="Opacity"
+                                                                     From="1" To="0.3" Duration="0:0:1.4"
+                                                                     AutoReverse="True"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                    </Border.Triggers>
+                                    <Grid>
+                                        <!-- 四列：点 / 组名 / 还要多久（吃剩余宽度、超了省略）/ 队列进度。
+                                             原来把「组名」和「还要多久」放在一个横向 StackPanel 里，两个都是
+                                             Auto 宽，加起来超过卡片宽度时后半句会被整个顶出去，
+                                             看着像被裁掉了一半——分开成 Auto + * 才裁得对。 -->
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse x:Name="LiveDot" Grid.Column="0" Width="6" Height="6"
+                                                 Fill="{DynamicResource BrandBrush}" VerticalAlignment="Center"
+                                                 Margin="0,0,8,0"/>
+                                        <TextBlock x:Name="TbLiveGroup" Grid.Column="1" FontSize="11.5" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" MaxWidth="220" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource BrandTextBrush}"/>
+                                        <TextBlock x:Name="TbLiveSince" Grid.Column="2" FontSize="11" Margin="8,0,0,0"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBlock x:Name="TbLiveEta" Grid.Column="3" FontSize="11" Margin="8,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                </Border>
+
+                                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" MaxHeight="252" Margin="0,9,0,0">
                                     <StackPanel x:Name="QueueHost"/>
                                 </ScrollViewer>
 
-                                <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                                <StackPanel Grid.Row="3" Margin="0,10,0,0">
                                     <TextBlock x:Name="TbPlanSummary" FontSize="10.5" Margin="0,0,0,7" TextWrapping="Wrap"
                                                Foreground="{DynamicResource TextTertiaryBrush}" Visibility="Collapsed"/>
                                     <TextBlock x:Name="QueueEmptyHint" Text="第一步：在下方工具卡里添加你使用的工具"

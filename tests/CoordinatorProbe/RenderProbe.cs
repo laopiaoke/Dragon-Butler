@@ -131,11 +131,85 @@ internal static class RenderProbe
     }
 
     /// <summary>
+    /// v1.13：把「队列正在跑」这件事假造出来，好让实时条在离屏渲染里真的显示出来。
+    ///
+    /// <para>
+    /// 不真跑队列：真跑要起进程、等信号，渲染探针只该画界面。
+    /// 这里直接用反射把 <see cref="QueueService"/> 的运行态字段和
+    /// <see cref="SentinelService"/> 的 CurrentGroup 铺好——两处都是 private set，
+    /// 没有对外的测试入口，反射是唯一不为了截图去改生产代码的办法。
+    /// </para>
+    /// </summary>
+    private static void SeedRunningState()
+    {
+        try
+        {
+            DateTime now = DateTime.Now;
+            SetStatic( typeof(QueueService), "_running", true);
+            SetBacking(typeof(QueueService), "CurrentToolId", "bettergi");
+            SetBacking(typeof(QueueService), "CurrentToolStartedAt", now.AddMinutes(-23));
+
+            // 当前配置组：HealthSnapshot() 返回的是副本，改它没用——
+            // 要直接拿到哨兵里那只单例，改它自己的字段（和 GroupStarted 分支做的事一样）。
+            var field = typeof(SentinelService).GetField("Health",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (field?.GetValue(null) is SentinelHealth live)
+            {
+                live.CurrentGroup = "日常";
+                live.CurrentGroupSince = now.AddMinutes(-18);
+            }
+            else
+            {
+                Console.WriteLine("SEED-RUNNING-MISS SentinelService.Health");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-RUNNING-FAIL " + ex.Message);
+        }
+    }
+
+    private static void SetStatic(Type type, string field, object value)
+    {
+        var f = type.GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        if (f == null) { Console.WriteLine($"SEED-RUNNING-MISS {type.Name}.{field}"); return; }
+        f.SetValue(null, value);
+    }
+
+    private static void SetBacking(Type type, string property, object value)
+    {
+        SetStatic(type, "<" + property + ">k__BackingField", value);
+    }
+
+    /// <summary>
     /// 造一年的挂机记录，让日历那面墙真的有颜色。
     /// 不这么干的话渲染出来的 53 周全是灰格——图例四种颜色一个都对不上，
     /// 看不出「绿=全跑成、黄=有失败、红=全没成」这套设计到底成不成立。
     /// 落盘走 GroupArchive.PathOverride 指到临时文件，不碰用户的 group_archive.json。
     /// </summary>
+    private static void SeedSampleJournal()
+    {
+        try
+        {
+            RunJournal.PathOverride = Path.Combine(Path.GetTempPath(), "dragon-ui", "fake-run-journal.json");
+            if (File.Exists(RunJournal.PathOverride)) File.Delete(RunJournal.PathOverride);
+            RunJournal.Load();
+
+            RunJournal.Record(new QueueItemResult
+            {
+                ToolId = "bettergi", DisplayName = "BetterGI", State = ToolRunState.Done,
+            });
+            RunJournal.Record(new QueueItemResult
+            {
+                ToolId = "march7th", DisplayName = "三月七助手", State = ToolRunState.Failed, Reason = "退出码 1",
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-JOURNAL-FAIL " + ex.Message);
+        }
+    }
+
     private static void SeedSampleArchive()
     {
         try
@@ -192,15 +266,27 @@ internal static class RenderProbe
                     SeedSampleQueue();
                     // 日历读的是 GroupArchive，不造历史的话 53 周全灰，看不出四色设计。
                     if (mode == "calendar" || mode == "all") SeedSampleArchive();
+                    // v1.13「今日运行」同样读 GroupArchive（今天那一段）+ RunJournal。
+                    if (mode == "today") { SeedSampleArchive(); SeedSampleJournal(); }
+                    // v1.13：running 模式要在截图里看到实时条本身，所以得先造出"队列在跑"。
+                    if (mode == "running")
+                    {
+                        SeedSampleArchive();
+                        SeedRunningState();
+                    }
 
                     var spot = Path.Combine(Path.GetTempPath(), "dragon-ui");
                     Directory.CreateDirectory(spot);
 
-                    if (mode == "minibar" || mode == "all")
+                    if (mode == "minibar" || mode == "minibar_run" || mode == "all")
                     {
+                        if (mode != "minibar") { SeedSampleArchive(); SeedRunningState(); }
                         var w = new MiniBarWindow();
-                        bool ok = Save(w, Path.Combine(spot, "minibar.png"), 180, 44);
-                        Console.WriteLine($"RENDER minibar={ok}");
+                        // v1.13：浮条宽 180，跑起来时主行是「组名 · 已跑」，次行是「还要多久」——
+                        // 这两句都得塞进 180 里，只有渲染出来才知道会不会被截。
+                        string file = mode == "minibar_run" ? "minibar_run.png" : "minibar.png";
+                        bool ok = Save(w, Path.Combine(spot, file), 180, 44);
+                        Console.WriteLine($"RENDER {Path.GetFileNameWithoutExtension(file)}={ok}");
                         w.Close();
                     }
 
@@ -209,6 +295,14 @@ internal static class RenderProbe
                         var w = new CalendarWindow();
                         bool ok = Save(w, Path.Combine(spot, "calendar.png"), 0, 0);
                         Console.WriteLine($"RENDER calendar={ok}");
+                        w.Close();
+                    }
+
+                    if (mode == "today" || mode == "all")
+                    {
+                        var w = new TodayWindow();
+                        bool ok = Save(w, Path.Combine(spot, "today.png"), 720, 0);
+                        Console.WriteLine($"RENDER today={ok}");
                         w.Close();
                     }
 
@@ -236,7 +330,7 @@ internal static class RenderProbe
                         w.Close();
                     }
 
-                    if (mode == "main" || mode == "advanced" || mode == "top" || mode == "all")
+                    if (mode == "main" || mode == "advanced" || mode == "top" || mode == "running" || mode == "all")
                     {
                         var w = new MainWindow();
                         // 折叠状态下的「高级设置」在渲染里看不见，而 v1.10 新增的开关就在那儿。
@@ -260,10 +354,21 @@ internal static class RenderProbe
                                 w.UpdateLayout();
                             }
                         }
+                        // v1.13：实时条是跑起来才出现的，构造完窗口不会自己刷一次——
+                        // 不在这里手动触发，running 模式截到的永远是空着的队列卡。
+                        if (mode == "running")
+                        {
+                            w.UpdateLayout();
+                            var refresh = typeof(MainWindow).GetMethod("RefreshLiveStrip",
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            refresh?.Invoke(w, null);
+                            w.UpdateLayout();
+                        }
                         // v1.12：高度传 0 让 SizeToContent 自己量。
                         // 以前硬编码 792，结果「系统」「通知」两张卡只截到标题，下面留一大片空白。
                         string file = mode == "advanced" ? "advanced.png"
                                     : mode == "top" ? "advanced_top.png"
+                                    : mode == "running" ? "running.png"
                                     : "main.png";
                         bool ok = Save(w, Path.Combine(spot, file), 980, 0);
                         Console.WriteLine($"RENDER {Path.GetFileNameWithoutExtension(file)}={ok}");

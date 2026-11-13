@@ -47,6 +47,10 @@ public sealed class SentinelHealth
     public DateTime LastFrozenAt;
     public int WebhookEvents;
     public string CurrentGroup = "";
+
+    /// <summary>当前配置组的开始时刻（v1.13）；<see cref="CurrentGroup"/> 为空时无意义。</summary>
+    public DateTime CurrentGroupSince;
+
     public string LastEventText = "";
     public DateTime LastEventAt;
 }
@@ -90,6 +94,7 @@ public static class SentinelService
                 FrozenCount = Health.FrozenCount,
                 WebhookEvents = Health.WebhookEvents,
                 CurrentGroup = Health.CurrentGroup,
+                CurrentGroupSince = Health.CurrentGroupSince,
                 LastEventText = Health.LastEventText,
                 LastEventAt = Health.LastEventAt,
             };
@@ -184,6 +189,8 @@ public static class SentinelService
         State = SentinelState.Idle;
         _missCount = 0;
         ResetStallWatch();
+        // v1.13：工具结束了，上一项残留的组名不能带着走进下一项。
+        MutateHealth(h => { h.CurrentGroup = ""; h.CurrentGroupSince = default; });
     }
 
     private static void OnSourceEvent(SentinelEvent ev) => HandleEvent(ev.Kind, ev.Payload, ev.Source);
@@ -484,6 +491,41 @@ public static class SentinelService
 
             switch (kind)
             {
+                // v1.13：把「现在在跑哪个配置组」真正写进健康快照。
+                // 在此之前 CurrentGroup 只在 HealthSnapshot 里被复制、从没有人写过——
+                // 组事件一路流进 GroupArchive（事后），实时这一侧一直是空的。
+                case SentinelEventKind.GroupStarted:
+                    MutateHealth(h =>
+                    {
+                        if (!string.Equals(h.CurrentGroup, payload, StringComparison.Ordinal))
+                        {
+                            h.CurrentGroup = payload ?? "";
+                            h.CurrentGroupSince = DateTime.Now;
+                        }
+                    });
+                    Emit(kind, payload);
+                    break;
+
+                case SentinelEventKind.GroupEnded:
+                    // 结束时只清「就是这一组」的情况：日志与 Webhook 双源下，
+                    // 旧组的结束事件可能晚到，不能把刚起来的新组抹掉。
+                    MutateHealth(h =>
+                    {
+                        if (string.Equals(h.CurrentGroup, payload, StringComparison.Ordinal))
+                        {
+                            h.CurrentGroup = "";
+                            h.CurrentGroupSince = default;
+                        }
+                    });
+                    Emit(kind, payload);
+                    break;
+
+                case SentinelEventKind.DragonEnded:
+                    // 一条龙整体结束：无论日志里有没有逐组结束行，都不该再挂着某个组。
+                    MutateHealth(h => { h.CurrentGroup = ""; h.CurrentGroupSince = default; });
+                    Emit(kind, payload);
+                    break;
+
                 case SentinelEventKind.GameLost:
                     LogService.LogEvent("游戏进程消失（仅通知）");
                     NotifyService.Show(NotifyLevel.Warning, "龙管家", "检测到游戏进程已退出，工具通常会自行结束。");

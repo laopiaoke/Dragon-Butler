@@ -75,6 +75,12 @@ public static class QueueService
     /// <summary>当前正在执行的工具（空=无）。</summary>
     public static string CurrentToolId { get; private set; } = "";
 
+    /// <summary>
+    /// 当前工具的开始时刻（v1.13）。<see cref="CurrentToolId"/> 为空时为 default。
+    /// 只给实时面板算「已跑多久」用，不参与任何判定。
+    /// </summary>
+    public static DateTime CurrentToolStartedAt { get; private set; }
+
     /// <summary>是否处于"等待电脑空闲"状态。</summary>
     public static bool IsWaitingIdle { get; internal set; }
 
@@ -123,6 +129,7 @@ public static class QueueService
             _running = true;
             _stopRequested = false;
             CurrentToolId = "";
+            CurrentToolStartedAt = default;
             _cts = new CancellationTokenSource();
         }
         LastResults.Clear();
@@ -182,6 +189,7 @@ public static class QueueService
                 _currentCoordinator = null;
                 _currentProcess = null;
                 CurrentToolId = "";
+                CurrentToolStartedAt = default;
                 IsWaitingIdle = false;
                 _cts?.Dispose();
                 _cts = null;
@@ -219,6 +227,7 @@ public static class QueueService
                 _currentCoordinator = null;
                 _currentProcess = null;
                 CurrentToolId = "";
+                CurrentToolStartedAt = default;
                 IsWaitingIdle = false;
                 _cts?.Dispose();
                 _cts = null;
@@ -316,6 +325,7 @@ public static class QueueService
                 _currentCoordinator = null;
                 _currentProcess = null;
                 CurrentToolId = "";
+                CurrentToolStartedAt = default;
                 IsWaitingIdle = false;
                 _cts?.Dispose();
                 _cts = null;
@@ -340,6 +350,7 @@ public static class QueueService
                 if (_stopRequested) break;
                 var profile = items[i];
                 CurrentToolId = profile.ToolId;
+                CurrentToolStartedAt = DateTime.Now;
                 RaiseState();
 
                 // v1.9 / P2：依赖门。排在前面的依赖没跑成 → 这一项不跑，说清等谁。
@@ -465,6 +476,7 @@ public static class QueueService
             if (pre.Skip) return false;
 
             CurrentToolId = profile.ToolId;
+            CurrentToolStartedAt = DateTime.Now;
             RaiseState();
             var result = await RunItemAsync(profile, trigger, _cts!.Token).ConfigureAwait(false);
             LastResults.Add(result);
@@ -484,6 +496,7 @@ public static class QueueService
                 _currentCoordinator = null;
                 _currentProcess = null;
                 CurrentToolId = "";
+                CurrentToolStartedAt = default;
                 IsWaitingIdle = false;
                 _cts?.Dispose();
                 _cts = null;

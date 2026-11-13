@@ -59,7 +59,17 @@ public static class RunJournal
     private static Dictionary<string, List<JournalEntry>> _data = new();
     private static bool _loaded;
 
-    public static string FilePath => Path.Combine(AppContext.BaseDirectory, "config", "run_journal.json");
+    public static string FilePath => PathOverride ?? Path.Combine(AppContext.BaseDirectory, "config", "run_journal.json");
+
+    /// <summary>
+    /// 覆盖落盘路径。只给验证用，不设的时候行为完全不变——
+    /// 跟 <see cref="GroupArchive.PathOverride"/>、HarvestLedger.PathOverride 同一套路：
+    /// 测试污染真实台账比功能算错更难查。
+    /// </summary>
+    public static string? PathOverride { get; set; }
+
+    /// <summary>显式重新加载（换过 PathOverride 之后要调一次）。</summary>
+    public static void Load() { lock (Gate) { _loaded = false; EnsureLoaded(); } }
 
     private static void EnsureLoaded()
     {

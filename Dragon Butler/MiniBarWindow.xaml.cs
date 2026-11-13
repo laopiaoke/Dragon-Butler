@@ -74,12 +74,32 @@ public partial class MiniBarWindow : Window
                 catch { }
             }
 
-            TbTitle.Text = running
-                ? QueueProgress.Describe(done, total, toolName)
-                : "一条龙管家 · 空闲";
-            TbDetail.Text = running
-                ? (total > 0 ? $"还剩 {Math.Max(total - done, 0)} 项" : "准备中…")
-                : "右键托盘或点这里打开";
+            // v1.13：浮条不再只报「3/5 · BetterGI」。
+            // 那个数字在真正挂机的时候几乎不动，看久了等于没信息；
+            // 用户抬眼想知道的是「现在在刷哪个组、刷了多久、还要多久」。
+            if (running)
+            {
+                var h = SentinelService.HealthSnapshot();
+                var snap = LiveStatus.Build(
+                    true,
+                    toolName,
+                    h.CurrentGroup,
+                    QueueService.CurrentToolStartedAt == default ? null : QueueService.CurrentToolStartedAt,
+                    h.CurrentGroupSince == default ? null : h.CurrentGroupSince,
+                    h.CurrentGroup.Length > 0 ? GroupArchive.MedianMinutes(h.CurrentGroup) : null,
+                    DateTime.Now);
+
+                // 主行：组名（没有组就是工具名）。队列进度挪到次行，信息密度反而更高。
+                TbTitle.Text = snap.Headline;
+                TbDetail.Text = BuildDetail(snap, done, total, running);
+                ToolTip = LiveStatus.Tooltip(snap, done, total);
+            }
+            else
+            {
+                TbTitle.Text = "一条龙管家 · 空闲";
+                TbDetail.Text = done > 0 ? $"今天已完成 {done} 项" : "右键托盘或点这里打开";
+                ToolTip = null;
+            }
 
             BtnClose.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
 
@@ -99,6 +119,22 @@ public partial class MiniBarWindow : Window
         {
             // 浮条出错绝不能拖累队列
         }
+    }
+
+    /// <summary>
+    /// 次行：能说「还要多久」就说，说不了就退回到队列进度。
+    /// 浮条只有 180 宽，一行放不下两件事——必须先挑最有用的一件。
+    /// 而且不能直接用 LiveStatus.Detail：那句是给主窗实时条写的完整句
+    /// （「还要 2 分 · 预计 23:03 结束」），在 180 里会被截掉后半截，
+    /// 所以走 Brief 的短版措辞。
+    /// </summary>
+    private static string BuildDetail(LiveStatus.Snapshot snap, int done, int total, bool running)
+    {
+        if (!running) return "";
+        string brief = LiveStatus.Brief(snap, DateTime.Now);
+        if (brief.Length > 0) return brief;
+        if (total > 0) return $"队列 {done}/{total} · 还剩 {Math.Max(total - done, 0)} 项";
+        return "准备中…";
     }
 
     /// <summary>按住拖动；松手后记住位置（下次启动还在原地）。</summary>

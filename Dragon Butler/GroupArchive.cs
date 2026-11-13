@@ -214,4 +214,77 @@ public static class GroupArchive
             return GetTodayGroups().Where(r => r.End == null).Select(r => r.Name).ToList();
         }
     }
+
+    // ===== v1.13：耗时（原本只有晨报内部算过一遍，这里提出来给实时条与今日明细共用） =====
+
+    /// <summary>
+    /// 一条记录的真实耗时。开始或结束缺失 → null（进行中的段、只记了开始的段都算不出来）。
+    /// 跨零点（end &lt; start）按隔天处理，和晨报的算法保持一致。
+    /// </summary>
+    public static TimeSpan? DurationOf(GroupRecord? r)
+    {
+        if (r == null) return null;
+        if (string.IsNullOrWhiteSpace(r.Start) || string.IsNullOrWhiteSpace(r.End)) return null;
+        if (!TimeSpan.TryParse(r.Start, out var start) || !TimeSpan.TryParse(r.End, out var end)) return null;
+        var span = end - start;
+        if (span < TimeSpan.Zero) span += TimeSpan.FromDays(1);
+        return span;
+    }
+
+    /// <summary>
+    /// 某个组最近 <paramref name="days"/> 天（不含今天）跑完全程的耗时样本，单位分钟。
+    ///
+    /// <para>
+    /// 只取「同一天里没重开过段」的记录：Segments &gt; 1 意味着这组中途断过重跑，
+    /// 那条记录的起止跨着两次执行，拿来当「跑一遍要多久」会严重偏大。
+    /// </para>
+    /// <para>
+    /// 也不取今天的：今天正在跑的那一段会污染样本，而今天已跑完的段拿去估今天剩下的段，
+    /// 容易把「今天这台机器特别慢」的情况一路放大。
+    /// </para>
+    /// </summary>
+    public static List<double> RecentDurations(string name, int days = 14)
+    {
+        var result = new List<double>();
+        if (string.IsNullOrWhiteSpace(name) || days <= 0) return result;
+        lock (Gate)
+        {
+            EnsureLoaded();
+            for (int i = 1; i <= days; i++)
+            {
+                string key = DateTime.Today.AddDays(-i).ToString("yyyy-MM-dd");
+                if (!_data.TryGetValue(key, out var list)) continue;
+                foreach (var r in list)
+                {
+                    if (!string.Equals(r.Name, name, StringComparison.Ordinal)) continue;
+                    if (r.Segments > 1) continue;
+                    var span = DurationOf(r);
+                    if (span == null) continue;
+                    if (span.Value.TotalMinutes <= 0) continue;
+                    result.Add(span.Value.TotalMinutes);
+                }
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 这个组「通常要跑多久」（分钟，中位数）。样本少于 <paramref name="minSamples"/> 条 → null。
+    ///
+    /// <para>
+    /// 用中位数而不是平均：配置组耗时很容易被一次切场景/掉线拖成几倍，
+    /// 平均会被那一次拽走，中位数不会。样本不够就返回 null——宁可界面上不显示预计，
+    /// 也不要给一个一看就不对的数（这条和「解析不到就不显示，绝不猜」是同一条规矩）。
+    /// </para>
+    /// </summary>
+    public static double? MedianMinutes(string name, int days = 14, int minSamples = 2)
+    {
+        var samples = RecentDurations(name, days);
+        if (samples.Count < minSamples) return null;
+        samples.Sort();
+        int mid = samples.Count / 2;
+        return samples.Count % 2 == 1
+            ? samples[mid]
+            : (samples[mid - 1] + samples[mid]) / 2.0;
+    }
 }

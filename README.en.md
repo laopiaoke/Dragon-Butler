@@ -39,9 +39,9 @@
 
 | Item | Value |
 |---|---|
-| Current version | **v1.12** |
-| In-app version | `1.12.0` |
-| Released | 2026-11-08 |
+| Current version | **v1.13** |
+| In-app version | `1.13.0` |
+| Released | 2026-11-13 |
 | Supported OS | Windows 10 / 11 (x64) |
 | Prerequisite | You supply the tools it drives, e.g. [BetterGI](https://github.com/babalae/better-genshin-impact). This app contains **no** game automation of its own |
 | Dependencies | Zero third-party libraries, zero runtime install (the portable build bundles .NET 8) |
@@ -91,12 +91,25 @@ It **does not replace those tools, and does not modify any game or tool file.** 
 | **Version pre-check** | Remembers the BetterGI version of the last *successful* run and warns when it changed. Reads the local file version only — no network. |
 | **Harvest ledger** | Off by default. Tallies mora / dog-food EXP / picked materials from the BGI log, reports once at the end of a queue, accumulates monthly. |
 | **MCP interface** | Lets MCP-capable AI assistants query status, start, stop, or run one tool. Shares the token and port with the control API; off by default. |
+| **Where it is now** | A live strip on top of the queue card: current config group, elapsed, time left, and queue position. Estimates come from the last 14 days' median; with too few samples it stays silent. |
+| **Today** | Per-group start/end, how long each took, faster or slower than usual, and which tool failed. Copyable as plain text. |
 
-## Recent updates (v1.12)
+## Recent updates (v1.13)
+
+- **You can finally see where it is.** Once the queue starts, a live strip appears on top of the queue card: `● 日常 · 18 min　2 min left · ends ~23:06　5/7` — which config group is running, how long it has been going, roughly when it wraps up, and how far the whole queue has got. When idle the strip collapses entirely.
+- **Estimates come from your own history.** Each group uses its median over the past 14 days (reopened segments and unfinished runs are excluded). With fewer than two samples it shows no estimate at all — better to say nothing than to show a number that is obviously wrong. Past the median it switches to "running long" rather than displaying a finish time that has already passed.
+- **The mini bar no longer just shows "3/5".** That number barely moves while you are away, so it carried almost no information. Now the first line is "group · elapsed" and the second is "time left"; if the full sentence does not fit in 180×44 it falls back to a short form (over an hour switches to a clock time).
+- **New "Today" window** (queue card header, or `Ctrl+K` → "today"): when each config group ran, how long it took, faster or slower than usual, plus the queue ledger (which tool failed and with what exit code). One click copies it as plain text.
+- **The current config group used to be a dead field.** The sentinel always had a `CurrentGroup` field, but no code ever wrote to it — so the app itself did not know which group was running. This release wires it up: both the webhook and the log source can write it, and a late "ended" event from the previous group no longer wipes out the new one.
+
+<details>
+<summary>v1.12 Visible fixes only</summary>
 
 - **Visible fixes only, no new features.** Six issues found by actually looking at the UI, fixed one by one: the command palette now marks the selected row with a left bar plus a tinted background; the mini bar's two lines no longer blur together; the dependency matrix headers are brighter and set at 12.5px; the calendar's month label moved above the grid instead of taking a column and pushing the grid into the middle; the queue card now separates "view" buttons from "orchestration" buttons with a thin divider.
 - **Bilingual README** — this English file is new; both are linked at the top of each, and the Chinese side gained a version-information table (current version / in-app version / supported OS / prerequisites).
 - **New screenshots** — the UI section now uses real v1.12 captures, plus two new ones for the command palette and the calendar.
+
+</details>
 
 <details>
 <summary>v1.11 MCP interface</summary>
@@ -158,9 +171,9 @@ It **does not replace those tools, and does not modify any game or tool file.** 
 > Three layers: queue card (hero) → tool cards (collapsed) → advanced settings (collapsed); the guardian lives in the shield at the bottom.
 
 <p align="center">
-  <img src="docs/main_v112.png" width="900" alt="v1.12 main window (dark)">
+  <img src="docs/main_v113.png" width="900" alt="v1.13 main window (dark, queue running)">
   <br>
-  <sub>Figure 1 · v1.12 main window (dark): schedule card · bedtime queue (per-day plan / calendar / dependencies / groups) · tool cards · custom tools · shield at the bottom</sub>
+  <sub>Figure 1 · v1.13 main window (dark, queue running): the live strip on top of the queue card shows the current config group, elapsed time, estimated finish and queue position</sub>
 </p>
 
 One screen, three blocks, read top to bottom:
@@ -202,6 +215,18 @@ Tick which days each tool runs: weekly bosses on weekends, dailies on weekdays. 
   <img src="docs/calendar_v112.png" width="740" alt="v1.12 uptime calendar">
   <br>
   <sub>Figure 4c · Uptime calendar: one cell per day for the past year — green all passed / yellow some failed / red all failed / grey not run</sub>
+</p>
+
+<p align="center">
+  <img src="docs/today_v113.png" width="720" alt="v1.13 Today window">
+  <br>
+  <sub>Figure 4d · Today (v1.13): when each group ran, how long it took, faster or slower than usual, plus the queue ledger</sub>
+</p>
+
+<p align="center">
+  <img src="docs/minibar_v113.png" width="180" alt="v1.13 mini bar (running)">
+  <br>
+  <sub>Figure 4e · Mini bar (v1.13, running): first line "group · elapsed", second line "time left", 2px progress line at the bottom</sub>
 </p>
 
 ### Custom tools and custom signals (v1.5)
@@ -343,12 +368,12 @@ Both builds are identical in features; the only difference is where the runtime 
 
 | | runtime-dependent (needs .NET 8) | portable (self-contained) |
 | --- | --- | --- |
-| Archive | `Dragon-Butler-v1.12-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.12-win-x64-portable.zip` |
+| Archive | `Dragon-Butler-v1.13-win-x64-runtime-dependent.zip` | `Dragon-Butler-v1.13-win-x64-portable.zip` |
 | Size | about 0.3 MB | about 65 MB |
 | Requires | [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) installed | nothing — the runtime is bundled |
 | Use when | you already have .NET 8 and want the smallest download | you're unsure, or want it on a USB stick |
 
-> File names follow `Dragon-Butler-v<version>-<platform>-<variant>`: `v1.12` is the current version (shown as `1.12.0` inside the app; a trailing `.0` is dropped from the package name by convention, e.g. `1.5.0` → `v1.5`), `win-x64` is the platform, and `runtime-dependent` / `portable` is the variant.
+> File names follow `Dragon-Butler-v<version>-<platform>-<variant>`: `v1.13` is the current version (shown as `1.13.0` inside the app; a trailing `.0` is dropped from the package name by convention, e.g. `1.5.0` → `v1.5`), `win-x64` is the platform, and `runtime-dependent` / `portable` is the variant.
 > The extracted folder is always `Dragon-Butler-win-x64-runtime-dependent\` or `Dragon-Butler-win-x64-portable\` — **no version in the name**, so upgrading means overwriting the folder and your `config\` settings survive.
 
 > **Neither build "installs" anything**: no setup wizard, no registry writes, no services. Unzip, double-click the exe, done — delete the folder to uninstall.
@@ -366,8 +391,8 @@ Both builds are identical in features; the only difference is where the runtime 
   <sub>Figure 9 · v1.5 first-run wizard: tick tools → auto-find → finish</sub>
 </p>
 
-> The release page has two assets: `Dragon-Butler-v1.12-win-x64-portable.zip` is the self-contained build (recommended),
-> `Dragon-Butler-v1.12-win-x64-runtime-dependent.zip` is the small one that needs .NET 8.
+> The release page has two assets: `Dragon-Butler-v1.13-win-x64-portable.zip` is the self-contained build (recommended),
+> `Dragon-Butler-v1.13-win-x64-runtime-dependent.zip` is the small one that needs .NET 8.
 
 Three more steps once it runs:
 
@@ -456,8 +481,8 @@ The release isn't code-signed, so SmartScreen warns once: click "More info → R
 
 ## Version rules
 
-- `v0.x` is the development phase; `v1.0` was the first version fit to hand to someone else; the current one is `v1.12`.
-- The patch component is for fixes and cleanups; the minor component is for features. Tags look like `v1.12`, and the in-app version is `1.12.0` (the package name drops a trailing `.0`, so tag `v1.12` ↔ in-app `1.12.0` ↔ zip name `v1.12`).
+- `v0.x` is the development phase; `v1.0` was the first version fit to hand to someone else; the current one is `v1.13`.
+- The patch component is for fixes and cleanups; the minor component is for features. Tags look like `v1.13`, and the in-app version is `1.13.0` (the package name drops a trailing `.0`, so tag `v1.13` ↔ in-app `1.13.0` ↔ zip name `v1.13`).
 - Every release section starts with a `> 已发布: <url>` line, so the published notes and the release page never drift apart.
 
 ## Known limits

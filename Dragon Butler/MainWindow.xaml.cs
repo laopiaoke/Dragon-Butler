@@ -121,7 +121,7 @@ public partial class MainWindow : Window
 
         _countdownTimer.Tick += (_, _) => { UpdateScheduleStatus(); RefreshShield(); };
         _groupScanTimer.Tick += (_, _) => RefreshDetectedGroups(force: true);
-        _uiRefreshTimer.Tick += (_, _) => { RefreshToolCards(); UpdateQueueButtons(); };
+        _uiRefreshTimer.Tick += (_, _) => { RefreshToolCards(); UpdateQueueButtons(); RefreshLiveStrip(); };
 
         // 全局按键音：所有可交互元素在"按下"这一瞬出声
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(AnyInteractivePress), true);
@@ -492,9 +492,21 @@ public partial class MainWindow : Window
         }
     }
 
+    // v1.13：跑起来时标题行那句状态是收起来的（实时条已经说了在跑哪个组），
+    // 但「下一项将在 5 分钟后开始…」这类话只有这里会有，不能跟着一起吞掉——
+    // 改存到 _queueStatusText，由 RefreshLiveStrip 挂到实时条第二行去。
+    private string _queueStatusText = "";
+    private DateTime _queueStatusStamp;
+
     private void OnQueueStatusText(string text)
     {
-        Dispatcher.BeginInvoke(new Action(() => { TbQueueStatus.Text = text; }));
+        _queueStatusText = text ?? "";
+        _queueStatusStamp = QueueService.CurrentToolStartedAt;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            TbQueueStatus.Text = _queueStatusText;
+            RefreshLiveStrip();
+        }));
     }
 
     /// <summary>重建队列列表（顺序 = 设置里的顺序）。</summary>
@@ -758,11 +770,12 @@ public partial class MainWindow : Window
         BtnQueueCancelShutdown.Visibility = QueueService.IsShutdownPending ? Visibility.Visible : Visibility.Collapsed;
         RefreshContinueButton();
         RefreshProgress();
-        TbQueueStatus.Text = running
-            ? (string.IsNullOrEmpty(QueueService.CurrentToolId)
-                ? "准备中…"
-                : $"正在执行 {ProfileRegistry.Get(QueueService.CurrentToolId).DisplayName}")
-            : (AppState.Settings.VacationMode ? "度假中，定时已暂停" : "按顺序执行");
+
+        // v1.13：跑起来的时候，这一行不再说「正在执行 X」——
+        // 下面那条实时条已经把「哪个组、跑了多久、还有多久」摆出来了，
+        // 再说一遍既重复，又会把标题挤得贴在一起（标题行现在五个小按钮，位置很紧）。
+        TbQueueStatus.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+        TbQueueStatus.Text = AppState.Settings.VacationMode ? "度假中，定时已暂停" : "按顺序执行";
     }
 
     /// <summary>
@@ -918,6 +931,22 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             LogService.LogEvent("打开挂机日历失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>v1.13：打开「今日运行」——今天这一盘跑了什么、各花多久。</summary>
+    private void BtnToday_Click(object sender, RoutedEventArgs e) => OpenToday();
+
+    private void OpenToday()
+    {
+        try
+        {
+            var dlg = new TodayWindow { Owner = this };
+            dlg.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开今日运行失败：" + ex.Message);
         }
     }
 
@@ -2490,7 +2519,97 @@ public partial class MainWindow : Window
                 AppState.SaveSettings();
             }
             RefreshShield();
+            // v1.13：组开始/结束直接影响队列卡顶部那条实时条。
+            if (kind is SentinelEventKind.GroupStarted or SentinelEventKind.GroupEnded
+                or SentinelEventKind.DragonEnded or SentinelEventKind.BgiExited)
+                RefreshLiveStrip();
         }));
+    }
+
+    // ===== 实时条（v1.13）=====
+
+    /// <summary>
+    /// 队列卡顶部那条「现在在跑哪个组 / 还要多久」。
+    ///
+    /// <para>
+    /// 数据全部来自已有零件：<see cref="QueueService.CurrentToolId"/> 与
+    /// <see cref="QueueService.CurrentToolStartedAt"/>（工具）、
+    /// <see cref="SentinelService.HealthSnapshot"/> 的 CurrentGroup / CurrentGroupSince（组）、
+    /// <see cref="GroupArchive.MedianMinutes"/>（历史中位数）。不新增采集。
+    /// </para>
+    /// <para>
+    /// 不跑的时候整条 Collapsed：这个位置原本放的就是「一眼看清在干嘛」的那句话，
+    /// 空闲时没有话可说，就不该占一行。
+    /// </para>
+    /// </summary>
+    private void RefreshLiveStrip()
+    {
+        try
+        {
+            var h = SentinelService.HealthSnapshot();
+            var snap = LiveStatus.Build(
+                QueueService.IsRunning,
+                ProfileName(QueueService.CurrentToolId),
+                h.CurrentGroup,
+                QueueService.CurrentToolStartedAt == default ? null : QueueService.CurrentToolStartedAt,
+                h.CurrentGroupSince == default ? null : h.CurrentGroupSince,
+                MedianFor(h.CurrentGroup),
+                DateTime.Now);
+
+            if (!snap.Running)
+            {
+                LiveStrip.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            LiveStrip.Visibility = Visibility.Visible;
+
+            // 项与项之间的那段等待：这时上一项已经跑完、下一项还没开始，
+            // 再报「某某组 · 已跑 12 分」就是在说过去的事。改成「间隔中 + 还有多久」。
+            bool waiting = !string.IsNullOrEmpty(_queueStatusText)
+                           && QueueService.CurrentToolStartedAt == _queueStatusStamp;
+
+            TbLiveGroup.Text = waiting ? "间隔中" : snap.Headline;
+            TbLiveSince.Text = waiting ? _queueStatusText : snap.Detail;
+
+            int done = QueueService.DoneToolIdsToday().Count;
+            int total = done + QueueService.UnfinishedToday().Count;
+
+            // 右侧固定挂队列进度：中间那两句会变（组名、剩余时间），
+            // 只有这个数字是不动的位置，扫一眼就知道整晚跑到第几项了。
+            TbLiveEta.Text = total > 0 ? $"{done}/{total}" : "";
+            LiveStrip.ToolTip = LiveStatus.Tooltip(snap, done, total);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("实时条刷新失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>工具 id → 显示名；找不到就返回空串（界面上会退化成「正在执行」）。</summary>
+    private static string ProfileName(string? toolId)
+    {
+        if (string.IsNullOrWhiteSpace(toolId)) return "";
+        try { return ProfileRegistry.Get(toolId)?.DisplayName ?? ""; }
+        catch { return ""; }
+    }
+
+    // 中位数要扫 14 天的 JSON，1 秒一次扛不住；按 (组名, 日期) 缓存，
+    // 跨天自动失效。同一个组跑一整天也只算一次。
+    private static string _medianKey = "";
+    private static double? _medianValue;
+
+    private static double? MedianFor(string? group)
+    {
+        if (string.IsNullOrWhiteSpace(group)) return null;
+        string key = group + "|" + DateTime.Today.ToString("yyyy-MM-dd");
+        if (string.Equals(key, _medianKey, StringComparison.Ordinal)) return _medianValue;
+        double? value = null;
+        try { value = GroupArchive.MedianMinutes(group); }
+        catch (Exception ex) { LogService.LogEvent("耗时中位数计算失败：" + ex.Message); }
+        _medianKey = key;
+        _medianValue = value;
+        return value;
     }
 
     // ===== 通知设置卡 =====
@@ -2873,6 +2992,7 @@ public partial class MainWindow : Window
                 case "view.advanced": RevealCard(AdvancedBody); break;
                 case "view.log": RevealCard(TbLog); break;
                 case "view.calendar": OpenCalendar(); break;
+                case "view.today": OpenToday(); break;
                 case "view.depends": OpenDepends(); break;
                 case "view.groups": OpenGroupSlice(); break;
 
