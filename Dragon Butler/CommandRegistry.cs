@@ -42,6 +42,7 @@ public static class CommandRegistry
         new("view.log",       "打开日志",               "导航", "日志 log 记录"),
         new("view.calendar",  "挂机日历",               "导航", "日历 calendar 历史 heatmap"),
         new("view.today",     "今日运行",               "导航", "今天 今日 耗时 归档 today today run"),
+        new("view.logrules",  "日志规则",               "导航", "日志 规则 关键词 提醒 rules log keyword"),
         new("view.depends",   "依赖编排",               "导航", "依赖 dag 顺序 depends"),
         new("view.groups",    "配置组切片",             "导航", "配置组 切片 groups slice"),
 

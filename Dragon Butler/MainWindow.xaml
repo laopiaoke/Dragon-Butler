@@ -1292,6 +1292,20 @@
                                                   HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHarvest_Click"/>
                                 </Grid>
 
+                                <!-- v1.14：日志规则入口。规则本体在独立窗口——
+                                     这张卡已经有 10 行了，再塞一个列表会把「高级设置」变成第二张主界面。 -->
+                                <Grid Grid.Row="8" Grid.Column="1" Margin="0,10,0,6">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="日志规则" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock Text="日志出现某个词就提醒 / 留现场 / 停下队列；可先扫今天的日志试一次" FontSize="10"
+                                                   Margin="0,3,10,0" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <Button x:Name="BtnLogRules" Content="配置…" Style="{StaticResource MiniAction}"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            Click="BtnLogRules_Click"/>
+                                </Grid>
+
                                 <Grid Grid.Row="0" Grid.Column="0" Margin="0,6,14,6">
                                     <TextBlock Text="守护（存活/内存/截图）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="TgSentinel" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSentinel_Click"/>

@@ -163,6 +163,11 @@ public sealed class LogWatcher
 
     private void ProcessLine(string line)
     {
+        // v1.14：日志规则先判。必须放在最前面——下面几处命中就 return，
+        // 规则要是排在它们后面，配置组的行永远轮不到规则看一眼。
+        // 它自己吞掉所有异常，不会影响别的判定。
+        LogRules.Observe(line);
+
         // v1.10 / G1：收益账本顺手看一眼。放在最前面且不影响任何分支——
         // 收益行和完成/错误判定互不相干，早返回的地方也会漏掉它。
         HarvestLedger.Observe(line);

@@ -244,6 +244,40 @@ internal static class RenderProbe
     }
 
     /// <summary>
+    /// v1.14：日志规则的样例。三档行为各来一条，并故意留一条没写的，
+    /// 这样截图里能同时看到「填好的」「没生效的」——只看填好的看不出边界在哪。
+    /// 只改内存，不写盘。
+    /// </summary>
+    private static void SeedSampleLogRules()
+    {
+        try
+        {
+            AppState.Settings.LogRules = new List<LogRule>
+            {
+                new()
+                {
+                    Id = "demo-1", Keyword = "卡在传送锚点", Behavior = LogRule.Notify, Enabled = true,
+                    Note = "卡住超过三分钟多半是卡位了，提醒我出来看一眼",
+                },
+                new()
+                {
+                    Id = "demo-2", Keyword = "Abnormal", Behavior = LogRule.Halt, Enabled = true,
+                    Note = "BGI 自己的异常退出，后面的工具没必要再跑",
+                },
+                new()
+                {
+                    Id = "demo-3", Keyword = "配错", Behavior = LogRule.Capture, Enabled = false,
+                    Note = "暂时用不上，先留着",
+                },
+            };
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-LOGRULES-FAIL " + ex.Message);
+        }
+    }
+
+    /// <summary>
     /// 渲染一个独立窗口（浮动条、命令面板、日历），跑完就关。
     /// 这些窗口没有主窗的依赖，可以单独实例化。
     /// </summary>
@@ -303,6 +337,15 @@ internal static class RenderProbe
                         var w = new TodayWindow();
                         bool ok = Save(w, Path.Combine(spot, "today.png"), 720, 0);
                         Console.WriteLine($"RENDER today={ok}");
+                        w.Close();
+                    }
+
+                    if (mode == "logrules" || mode == "all")
+                    {
+                        SeedSampleLogRules();
+                        var w = new LogRulesWindow();
+                        bool ok = Save(w, Path.Combine(spot, "logrules.png"), 720, 0);
+                        Console.WriteLine($"RENDER logrules={ok}");
                         w.Close();
                     }
 

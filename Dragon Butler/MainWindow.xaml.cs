@@ -950,6 +950,25 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>v1.14：日志规则——规则本体在独立窗口，主界面只留一个入口。</summary>
+    private void BtnLogRules_Click(object sender, RoutedEventArgs e) => OpenLogRules();
+
+    private void OpenLogRules()
+    {
+        try
+        {
+            var dlg = new LogRulesWindow { Owner = this };
+            dlg.ShowDialog();
+            // 关掉窗口后立刻让新规则生效：LogRules.Observe 每次读 ActiveRules()，
+            // 不需要重启任何东西，但把节流表留一份旧记录会让「刚加的规则」看起来没反应。
+            LogRules.ResetThrottle();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开日志规则失败：" + ex.Message);
+        }
+    }
+
     /// <summary>队列卡上的一句话摘要：今天按计划跑几项。</summary>
     private void RefreshPlanSummary()
     {
@@ -2993,6 +3012,7 @@ public partial class MainWindow : Window
                 case "view.log": RevealCard(TbLog); break;
                 case "view.calendar": OpenCalendar(); break;
                 case "view.today": OpenToday(); break;
+                case "view.logrules": OpenLogRules(); break;
                 case "view.depends": OpenDepends(); break;
                 case "view.groups": OpenGroupSlice(); break;
 

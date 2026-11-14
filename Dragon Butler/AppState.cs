@@ -281,6 +281,13 @@ public class AppSettings
     /// 默认关是因为「突然出声」比「没有声音」更让人反感。
     /// </summary>
     public bool SpeechEnabled { get; set; } = false;
+
+    // ===== v1.14：日志规则 =====
+    /// <summary>
+    /// 日志关键词规则（默认空 = 完全不生效）。
+    /// 一条规则 = 一个关键词 + 一个动作（提醒 / 留现场 / 停下队列），见 <see cref="LogRules"/>。
+    /// </summary>
+    public List<LogRule> LogRules { get; set; } = new();
 }
 
 /// <summary>

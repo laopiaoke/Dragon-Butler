@@ -39,9 +39,9 @@
 
 | Item | Value |
 |---|---|
-| Current version | **v1.13** |
-| In-app version | `1.13.0` |
-| Released | 2026-11-13 |
+| Current version | **v1.14** |
+| In-app version | `1.14.0` |
+| Released | 2026-11-14 |
 | Supported OS | Windows 10 / 11 (x64) |
 | Prerequisite | You supply the tools it drives, e.g. [BetterGI](https://github.com/babalae/better-genshin-impact). This app contains **no** game automation of its own |
 | Dependencies | Zero third-party libraries, zero runtime install (the portable build bundles .NET 8) |
@@ -93,14 +93,26 @@ It **does not replace those tools, and does not modify any game or tool file.** 
 | **MCP interface** | Lets MCP-capable AI assistants query status, start, stop, or run one tool. Shares the token and port with the control API; off by default. |
 | **Where it is now** | A live strip on top of the queue card: current config group, elapsed, time left, and queue position. Estimates come from the last 14 days' median; with too few samples it stays silent. |
 | **Today** | Per-group start/end, how long each took, faster or slower than usual, and which tool failed. Copyable as plain text. |
+| **Log rules** | Empty by default. When a word shows up in the log, notify / capture the scene / stop the queue. Write one, then test it against today's log to see how often it hits and what the line actually looks like. |
 
-## Recent updates (v1.13)
+## Recent updates (v1.14)
 
-- **You can finally see where it is.** Once the queue starts, a live strip appears on top of the queue card: `● 日常 · 18 min　2 min left · ends ~23:06　5/7` — which config group is running, how long it has been going, roughly when it wraps up, and how far the whole queue has got. When idle the strip collapses entirely.
-- **Estimates come from your own history.** Each group uses its median over the past 14 days (reopened segments and unfinished runs are excluded). With fewer than two samples it shows no estimate at all — better to say nothing than to show a number that is obviously wrong. Past the median it switches to "running long" rather than displaying a finish time that has already passed.
-- **The mini bar no longer just shows "3/5".** That number barely moves while you are away, so it carried almost no information. Now the first line is "group · elapsed" and the second is "time left"; if the full sentence does not fit in 180×44 it falls back to a short form (over an hour switches to a clock time).
-- **New "Today" window** (queue card header, or `Ctrl+K` → "today"): when each config group ran, how long it took, faster or slower than usual, plus the queue ledger (which tool failed and with what exit code). One click copies it as plain text.
-- **The current config group used to be a dead field.** The sentinel always had a `CurrentGroup` field, but no code ever wrote to it — so the app itself did not know which group was running. This release wires it up: both the webhook and the log source can write it, and a late "ended" event from the previous group no longer wipes out the new one.
+- **New "log rules"** (Advanced settings → Configure…, or `Ctrl+K` → "log rules"): write a word commonly seen in the log, and when it shows up the app does one thing — **notify** (push a message, queue keeps running), **capture** (save the log tail + screenshot + redacted config), or **stop the queue** (the remaining tools no longer run for nothing). Each rule fires at most once every 10 minutes: a stuck run can repeat the same line ten times a second, and without throttling you would be woken up by it.
+- **Deliberately not a rule editor.** No expressions, no variables, no execution order — just three actions, each mapping to something that already existed. If you want to orchestrate, use ABGI; the stance here is "know something went wrong without staring at the screen".
+- **There is a "test it" button.** Write a keyword, press it, and the app scans today's BGI log and tells you how many times it hit and what the actual line looks like. The hard part of writing a keyword was never syntax — it was not knowing what the log actually contains.
+- **Keywords are case-insensitive and cleaned up**: leading/trailing spaces, newlines and repeated spaces are handled, and anything over 40 characters is truncated. Empty or unchecked rules are kept but do nothing.
+- **New `logrules` probe mode**: 41 assertions covering keyword normalisation, matching, throttle boundaries, the three behaviour names with a fallback, and scanning a real log file.
+
+<details>
+<summary>v1.13 Where it is now</summary>
+
+- **A live strip on top of the queue card**: `● 日常 · 18 min　2 min left · ends ~23:06　5/7` — which config group is running, how long it has been going, roughly when it wraps up, and how far the queue has got. Collapses entirely when idle.
+- **Estimates come from your own history**: each group uses its median over the past 14 days (reopened segments excluded); with fewer than two samples no estimate is shown, and past the median it says "running long".
+- **The mini bar no longer just shows "3/5"**: first line "group · elapsed", second line "time left".
+- **New "Today" window**: per-group start/end, duration, faster or slower than usual, plus the queue ledger. Copyable as plain text.
+- **Fixed a dead field**: the sentinel's `CurrentGroup` was never written; both the webhook and log sources now write it.
+
+</details>
 
 <details>
 <summary>v1.12 Visible fixes only</summary>
