@@ -121,7 +121,7 @@ public partial class MainWindow : Window
 
         _countdownTimer.Tick += (_, _) => { UpdateScheduleStatus(); RefreshShield(); };
         _groupScanTimer.Tick += (_, _) => RefreshDetectedGroups(force: true);
-        _uiRefreshTimer.Tick += (_, _) => { RefreshToolCards(); UpdateQueueButtons(); RefreshLiveStrip(); };
+        _uiRefreshTimer.Tick += (_, _) => { RefreshToolCards(); UpdateQueueButtons(); RefreshLiveStrip(); RefreshHomeHero(); };
 
         // 全局按键音：所有可交互元素在"按下"这一瞬出声
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(AnyInteractivePress), true);
@@ -131,6 +131,8 @@ public partial class MainWindow : Window
         RenderQueue();
         RefreshToolCards();
         RefreshShield();
+        RefreshHomeHero();
+        RefreshPresetRow();
 
         // v1.8：热键与浮条要等控件树建完才能改它们的状态
         ApplyHotkeys();
@@ -260,6 +262,7 @@ public partial class MainWindow : Window
         TbNightMinutes.IsEnabled = s.NightScreenEnabled;
         TgVacation.IsChecked = s.VacationMode;
         SelectComboByTag(CbAfterRun, s.AfterRunAction);
+        RefreshAfterRunAppRow();
         SelectComboByTag(CbFailStrategy, s.FailStrategy);
         SelectComboByTag(CbInterval, s.QueueIntervalMinutes.ToString());
         SyncThemeSeg();
@@ -358,8 +361,80 @@ public partial class MainWindow : Window
             }
             TbLastRun.Text = LastRunText(s);
             RefreshCatchUpText(s);
+            RefreshScheduleQuick(s);
         }
         catch { }
+    }
+
+    /// <summary>
+    /// v1.15 / L3：定时没开时，这张卡只给一句话 + 一个按钮。
+    ///
+    /// <para>
+    /// 摊开的「重复日 + 大号时间 + 补跑档位」有八个可改项，但它们不是同一个决策：
+    /// 新用户只有「要不要自动跑」这一个问题，答案是「要」的时候，8 点和每天就是最好的默认值。
+    /// 所以先给结论，想改再点「我自己挑时间」——那条路和以前一样，一个选项都没少。
+    /// </para>
+    /// </summary>
+    private void RefreshScheduleQuick(AppSettings s)
+    {
+        bool quick = !s.ScheduleEnabled;
+        ScheduleQuick.Visibility = quick ? Visibility.Visible : Visibility.Collapsed;
+        ScheduleDetail.Visibility = quick ? Visibility.Collapsed : Visibility.Visible;
+        if (!quick) return;
+
+        // 已经改过时间的人（不是默认的 8:00）看到的是自己定的时间，不能一律写「8 点」。
+        string at = $"{Math.Clamp(s.ScheduleHour, 0, 23):00}:{Math.Clamp(s.ScheduleMinute, 0, 59):00}";
+        bool everyDay = s.ScheduleWeekdays == 0x7F;
+        TbQuickTitle.Text = everyDay ? $"每天 {at}，自己开跑" : $"下次 {at}，自己开跑";
+    }
+
+    /// <summary>「就这样，打开定时」：把默认值落实并打开，不再问第二个问题。</summary>
+    private void BtnQuickAccept_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var s = AppState.Settings;
+
+            // 只在「真的还是默认值」时才写默认，避免把用户以前挑过的星期冲掉。
+            if (s.ScheduleWeekdays == 0 || s.ScheduleWeekdays == 0x7F) s.ScheduleWeekdays = 0x7F;
+            if (s.ScheduleHour < 0 || s.ScheduleHour > 23) s.ScheduleHour = 8;
+            if (s.ScheduleMinute < 0 || s.ScheduleMinute > 59) s.ScheduleMinute = 0;
+
+            s.ScheduleEnabled = true;
+            AppState.SaveSettings();
+
+            _suppressToggle = true;
+            try { TgSchedule.IsChecked = true; }
+            finally { _suppressToggle = false; }
+
+            UpdateScheduleStatus();
+            SyncWeekdayChips();
+            RefreshHomeHero();
+
+            string at = $"{s.ScheduleHour:00}:{s.ScheduleMinute:00}";
+            AppState.PublishLog($"✓ 定时已打开：每天 {at} 自动开跑");
+            LogService.LogEvent($"定时：一键打开（每天 {at}，掩码 {s.ScheduleWeekdays}）");
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("一键开启定时失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>「我自己挑时间」：不打开定时，只把摊开的那一页露出来，让人自己看。</summary>
+    private void BtnQuickPick_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // 先落到详细页，再直接进时间选择器——点「我自己挑」的人多半就想改时间。
+            ScheduleQuick.Visibility = Visibility.Collapsed;
+            ScheduleDetail.Visibility = Visibility.Visible;
+            ExpandPicker();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开时间选择失败：" + ex.Message);
+        }
     }
 
     private static string LastRunText(AppSettings s)
@@ -454,6 +529,7 @@ public partial class MainWindow : Window
             RefreshToolCards();
             RefreshShield();
             RefreshProgress();
+            RefreshHomeHero();
         }));
     }
 
@@ -771,11 +847,17 @@ public partial class MainWindow : Window
         RefreshContinueButton();
         RefreshProgress();
 
-        // v1.13：跑起来的时候，这一行不再说「正在执行 X」——
-        // 下面那条实时条已经把「哪个组、跑了多久、还有多久」摆出来了，
-        // 再说一遍既重复，又会把标题挤得贴在一起（标题行现在五个小按钮，位置很紧）。
-        TbQueueStatus.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
-        TbQueueStatus.Text = AppState.Settings.VacationMode ? "度假中，定时已暂停" : "按顺序执行";
+        // v1.13 + v1.15：这一行只在「有话要说」时才出现。
+        // 跑起来时下面那条实时条已经把组名、时长、预计结束都摆出来了；
+        // 空闲时说「按顺序执行」也没人需要听——队列行上的字形已经说明了顺序。
+        // 保留的就两种：度假中（队列被停）、项间等待（下面会写下一项几点开始）。
+        bool waiting = !string.IsNullOrEmpty(_queueStatusText);
+        TbQueueStatus.Visibility = running || waiting || AppState.Settings.VacationMode
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        TbQueueStatus.Text = AppState.Settings.VacationMode
+            ? "度假中，定时已暂停"
+            : (running ? "" : _queueStatusText);
     }
 
     /// <summary>
@@ -1009,7 +1091,181 @@ public partial class MainWindow : Window
         AppState.Settings.AfterRunAction = TagOf(CbAfterRun);
         AppState.SaveSettings();
         LogService.LogEvent("跑完动作：" + AppState.Settings.AfterRunAction);
+        RefreshAfterRunAppRow();
     }
+
+    /// <summary>
+    /// v1.15 / L5：只有选了「打开程序」才露出路径那一行。
+    /// 平时不显示——一个平时不用的输入框，占了版面还让人以为必须填。
+    /// </summary>
+    private void RefreshAfterRunAppRow()
+    {
+        try
+        {
+            bool need = string.Equals(AppState.Settings.AfterRunAction, "OpenApp", StringComparison.OrdinalIgnoreCase);
+            AfterRunAppRow.Visibility = need ? Visibility.Visible : Visibility.Collapsed;
+            if (!need) return;
+
+            string p = AppState.Settings.AfterRunAppPath ?? "";
+            bool ok = p.Trim().Length > 0 && File.Exists(p);
+            TbAfterRunApp.Text = p.Trim().Length == 0
+                ? "还没选程序"
+                : (ok ? Path.GetFileName(p) : $"找不到：{Path.GetFileName(p)}");
+            TbAfterRunApp.Foreground = ok
+                ? (BrushOf("TextSecondaryBrush") ?? DotGray)
+                : (BrushOf("WarningBrush") ?? DotYellow);
+            TbAfterRunApp.ToolTip = p.Trim().Length == 0 ? null : p;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("刷新跑完程序行失败：" + ex.Message);
+        }
+    }
+
+    private void BtnAfterRunApp_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "选择跑完之后要打开的程序",
+                Filter = "可执行文件|*.exe|快捷方式|*.lnk|所有文件|*.*",
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            AppState.Settings.AfterRunAppPath = dlg.FileName;
+            AppState.SaveSettings();
+            RefreshAfterRunAppRow();
+            AppState.PublishLog($"✓ 跑完后将打开 {Path.GetFileName(dlg.FileName)}");
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("选择跑完程序失败：" + ex.Message);
+        }
+    }
+
+    // ===== 配置组合（v1.15）=====
+
+    /// <summary>
+    /// 队列卡那一行：装了几套组合才显示。没建过的人看到的还是原来那块，
+    /// 不用为「以后可能会用到」先占一行。
+    /// </summary>
+    private void RefreshPresetRow()
+    {
+        try
+        {
+            if (_suppressToggle) return;
+            var presets = AppState.Settings.Presets ?? new List<ConfigPreset>();
+            PresetRow.Visibility = presets.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (presets.Count == 0) return;
+
+            var sorted = ConfigPresets.Sort(presets);
+            _suppressToggle = true;
+            try
+            {
+                CbPreset.Items.Clear();
+                foreach (var p in sorted)
+                {
+                    var item = new ComboBoxItem
+                    {
+                        Content = p.Name,
+                        Tag = p.Id,
+                        ToolTip = ConfigPresets.Describe(p),
+                    };
+                    CbPreset.Items.Add(item);
+                }
+
+                var active = ConfigPresets.FindById(presets, AppState.Settings.ActivePresetId);
+                if (active != null)
+                {
+                    var hit = CbPreset.Items.OfType<ComboBoxItem>()
+                        .FirstOrDefault(i => string.Equals(i.Tag as string, active.Id, StringComparison.OrdinalIgnoreCase));
+                    if (hit != null) CbPreset.SelectedItem = hit;
+                }
+                else
+                {
+                    CbPreset.SelectedIndex = -1;
+                }
+            }
+            finally { _suppressToggle = false; }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("刷新配置组合行失败：" + ex.Message);
+        }
+    }
+
+    private void CbPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        try
+        {
+            if (CbPreset.SelectedItem is not ComboBoxItem item) return;
+            if (item.Tag is not string id) return;
+            if (string.Equals(AppState.Settings.ActivePresetId, id, StringComparison.OrdinalIgnoreCase)) return;
+
+            var preset = ConfigPresets.FindById(AppState.Settings.Presets, id);
+            if (preset == null) return;
+
+            AppState.Settings.ActivePresetId = preset.Id;
+            preset.LastUsedAt = ConfigPresets.StampUsed(DateTime.Now);
+            AppState.SaveSettings();
+            AppState.PublishLog($"✓ 这次用「{preset.Name}」：{ConfigPresets.Describe(preset)}");
+            RefreshHomeHero();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("切换配置组合失败：" + ex.Message);
+        }
+    }
+
+    private void BtnPresetSave_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var s = AppState.Settings;
+            var next = ConfigPresets.Capture(
+                s.Presets, s.DragonConfigName, s.SelectedGroups, "",
+                () => Guid.NewGuid().ToString("N"));
+
+            string? why = ConfigPresets.RefuseReason(next, s.Presets);
+            if (why != null)
+            {
+                AppDialog.Show(why, null, AppDialog.Kind.Warning, "存为组合", owner: this);
+                return;
+            }
+
+            // 主界面这一下是「快捷存」，名字自动编号；要自己命名就去窗口里存。
+            s.Presets ??= new List<ConfigPreset>();
+            s.Presets.Add(next);
+            s.ActivePresetId = next.Id;
+            next.LastUsedAt = ConfigPresets.StampUsed(DateTime.Now);
+            AppState.SaveSettings();
+            RefreshPresetRow();
+            AppState.PublishLog($"✓ 已存为「{next.Name}」：{ConfigPresets.Describe(next)}");
+            LogService.LogEvent($"保存配置组合（快捷）：{next.Name}");
+            RefreshHomeHero();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("快捷保存配置组合失败：" + ex.Message);
+        }
+    }
+
+    private void OpenPresets()
+    {
+        try
+        {
+            var w = new PresetsWindow { Owner = this };
+            w.ShowDialog();
+            if (w.Changed) RefreshPresetRow();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开配置组合失败：" + ex.Message);
+        }
+    }
+
+    private void BtnPresetManage_Click(object sender, RoutedEventArgs e) => OpenPresets();
 
     // ===== 工具卡 =====
 
@@ -1050,6 +1306,69 @@ public partial class MainWindow : Window
         if (expand) RefreshToolCard(toolId);
     }
 
+    /// <summary>
+    /// v1.15 / L2：工具设置那一行。
+    ///
+    /// <para>
+    /// 收起来不是把功能藏掉——主卡的「选择 BetterGI.exe」已经覆盖了最常见的那一次操作，
+    /// 而「配好了几个」这件事仍然要能一眼看到，所以标题行右边挂一句摘要。
+    /// </para>
+    /// </summary>
+    private void FoldTools_Click(object sender, RoutedEventArgs e)
+    {
+        bool expand = ToolCardsHost.Visibility != Visibility.Visible;
+        ToolCardsHost.Visibility = expand ? Visibility.Visible : Visibility.Collapsed;
+        ChevTools.RenderTransform = new RotateTransform(expand ? 180 : 0);
+        if (expand) RefreshToolCards();
+    }
+
+    /// <summary>「已配 1 个 / 3 个都没配」——收起状态下唯一能看出配置状况的地方。</summary>
+    private void RefreshToolsSummary()
+    {
+        try
+        {
+            int ready = 0;
+            var missing = new List<string>();
+            foreach (string id in new[] { "bettergi", "march7th", "ok-ww" })
+            {
+                var p = ProfileRegistry.Get(id);
+                if (ToolRunner.HasExecutable(p)) ready++;
+                else missing.Add(p.DisplayName);
+            }
+            foreach (string id in _customCards.Keys.ToList())
+            {
+                try
+                {
+                    var p = ProfileRegistry.Get(id);
+                    if (ToolRunner.HasExecutable(p)) ready++;
+                    else missing.Add(p.DisplayName);
+                }
+                catch { }
+            }
+
+            if (missing.Count == 0)
+            {
+                TbToolsSummary.Text = $"已配 {ready} 个";
+                TbToolsSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+            }
+            else
+            {
+                // 只报「还有几个没配」而不点名：点名会把一整排名字塞进 10.5 号字里，
+                // 而且哪个没配点开就看得到。
+                TbToolsSummary.Text = ready == 0
+                    ? "还没配，点开填一下"
+                    : $"已配 {ready} 个 · 还有 {missing.Count} 个没配";
+                TbToolsSummary.Foreground = ready == 0
+                    ? (BrushOf("WarningBrush") ?? DotYellow)
+                    : (BrushOf("TextTertiaryBrush") ?? DotGray);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("工具摘要刷新失败：" + ex.Message);
+        }
+    }
+
     private void RefreshToolCards()
     {
         foreach (string id in new[] { "bettergi", "march7th", "ok-ww" })
@@ -1060,6 +1379,7 @@ public partial class MainWindow : Window
         {
             try { RefreshCustomToolCard(id); } catch { }
         }
+        RefreshToolsSummary();
     }
 
     private void RefreshToolCard(string toolId)
@@ -1634,22 +1954,61 @@ public partial class MainWindow : Window
             return;
         }
 
+        // v1.15 / L4：常跑的那几个排到最前面。只在显示时重排，
+        // _groupPicks 本身不动——它承载的是 BGI 里的识别顺序与勾选序号。
+        var favorites = AppState.Settings.FavoriteGroups ?? Array.Empty<string>();
+        var ordered = GroupFavorites.Sort(_groupPicks.Select(g => g.Name).ToList(), favorites);
+        var byName = _groupPicks.ToDictionary(g => g.Name, StringComparer.OrdinalIgnoreCase);
+
         var wrap = new WrapPanel();
-        foreach (var item in _groupPicks)
+        foreach (string name in ordered)
         {
+            if (!byName.TryGetValue(name, out var item)) continue;
+            bool fav = GroupFavorites.IsFavorite(favorites, item.Name);
             var cb = new CheckBox
             {
-                Content = item.Order > 0 ? $"{item.Order}. {item.Name}" : item.Name,
+                Content = (fav ? "★ " : "") + (item.Order > 0 ? $"{item.Order}. {item.Name}" : item.Name),
                 IsChecked = item.IsChecked,
                 Style = TryFindResource("GroupCheck") as Style,
                 Margin = new Thickness(0, 4, 8, 0),
                 Tag = item.Name,
+                ToolTip = fav ? "右键取消常用" : "右键设为常用（排到最前面）",
             };
             cb.Checked += GroupPickCheck_Click;
             cb.Unchecked += GroupPickCheck_Click;
+            cb.MouseRightButtonUp += GroupPickFavorite_Click;
             wrap.Children.Add(cb);
         }
         BgiGroupsHost.Children.Add(wrap);
+    }
+
+    /// <summary>
+    /// v1.15 / L4：右键把配置组设为常用 / 取消常用。
+    ///
+    /// <para>
+    /// 用右键而不是加一颗星按钮：勾选框本身已经是「点一下改状态」，
+    /// 再挂一个按钮会让 8 个组的区域变成 16 个可点目标。右键不占版面，
+    /// 悬停提示里写着，需要的人一次就学会。
+    /// </para>
+    /// </summary>
+    private void GroupPickFavorite_Click(object sender, MouseButtonEventArgs e)
+    {
+        try
+        {
+            if (sender is not CheckBox cb || cb.Tag is not string name) return;
+            e.Handled = true;
+
+            AppState.Settings.FavoriteGroups = GroupFavorites.Toggle(AppState.Settings.FavoriteGroups, name);
+            AppState.SaveSettings();
+            RenderGroupPicker();
+
+            bool now = GroupFavorites.IsFavorite(AppState.Settings.FavoriteGroups, name);
+            AppState.PublishLog(now ? $"★ 已把「{name}」设为常用" : $"已把「{name}」移出常用");
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("切换常用配置组失败：" + ex.Message);
+        }
     }
 
     private void SyncGroupSelection()
@@ -1753,6 +2112,16 @@ public partial class MainWindow : Window
     {
         try
         {
+            // v1.15 / L4：常用表也要跟着收敛，否则删掉的组会一直挂在设置里，
+            // 下次有人新建同名组时莫名其妙变成常用。
+            var favBefore = AppState.Settings.FavoriteGroups ?? Array.Empty<string>();
+            var favAfter = GroupFavorites.Prune(favBefore, groups);
+            if (favAfter.Length != favBefore.Length)
+            {
+                AppState.Settings.FavoriteGroups = favAfter;
+                AppState.SaveSettings();
+            }
+
             var selected = AppState.Settings.SelectedGroups ?? Array.Empty<string>();
             if (selected.Length == 0) return;
             var valid = groups.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -2542,6 +2911,9 @@ public partial class MainWindow : Window
             if (kind is SentinelEventKind.GroupStarted or SentinelEventKind.GroupEnded
                 or SentinelEventKind.DragonEnded or SentinelEventKind.BgiExited)
                 RefreshLiveStrip();
+            // v1.15：主卡要跟着「开跑 / 停下 / 出岔子」换脸，次秒级延迟就够，
+            // 但事件来了先刷一次，免得 1 秒定时器正好错过这一刻。
+            RefreshHomeHero();
         }));
     }
 
@@ -2629,6 +3001,199 @@ public partial class MainWindow : Window
         _medianKey = key;
         _medianValue = value;
         return value;
+    }
+
+    // ===== 首屏主卡（v1.15）=====
+
+    /// <summary>
+    /// 首屏那张会变的主卡。
+    ///
+    /// <para>
+    /// 它要回答的问题只有一个：<b>现在该点哪</b>。所以每种状态只给一个主按钮，
+    /// 其余操作降级成次按钮；「什么都没配」时次按钮也只是「我先看看」。
+    /// </para>
+    /// <para>
+    /// 判定逻辑全在 <see cref="HomeState.Build"/> 里（纯函数、可断言），
+    /// 这里只负责把结果贴到界面上、不掺判断——否则以后加一个状态要改两处，总有一处会漏。
+    /// </para>
+    /// </summary>
+    private void RefreshHomeHero()
+    {
+        try
+        {
+            var s = AppState.Settings;
+            var h = SentinelService.HealthSnapshot();
+
+            int done = QueueService.DoneToolIdsToday().Count;
+            int total = done + QueueService.UnfinishedToday().Count;
+
+            // 「配好了」＝ 至少有一个内置工具能找到 exe。
+            // 工具卡折叠进队列之后，这里是唯一还知道「有没有东西可跑」的地方。
+            bool anyReady = false;
+            foreach (string id in new[] { "bettergi", "march7th", "ok-ww" })
+            {
+                try
+                {
+                    if (ToolRunner.HasExecutable(ProfileRegistry.Get(id))) { anyReady = true; break; }
+                }
+                catch { }
+            }
+
+            // 「刚才出过事」只认 30 分钟内的告警：昨天半夜卡过一次，
+            // 今天中午打开软件不该还在说「刚才有点不对劲」。
+            bool trouble = s.ShieldAlertAt.HasValue
+                           && DateTime.Now - s.ShieldAlertAt.Value <= TimeSpan.FromMinutes(30);
+
+            var view = HomeState.Build(
+                anyReady,
+                QueueService.IsRunning,
+                ProfileName(QueueService.CurrentToolId),
+                h.CurrentGroup,
+                QueueService.CurrentToolStartedAt == default
+                    ? TimeSpan.Zero
+                    : DateTime.Now - QueueService.CurrentToolStartedAt,
+                h.CurrentGroupSince == default ? null : DateTime.Now - h.CurrentGroupSince,
+                MedianFor(h.CurrentGroup),
+                done,
+                total,
+                s.ScheduleEnabled ? NextScheduleTime() : null,
+                s.LastRunOk,
+                ParseLastRunAt(s),
+                trouble,
+                DateTime.Now);
+
+            TbHeroTitle.Text = view.Title;
+            TbHeroDetail.Text = view.Detail;
+            BtnHeroPrimary.Content = view.PrimaryText;
+            BtnHeroPrimary.Tag = view.PrimaryCommand;
+            BtnHeroSecondary.Content = view.SecondaryText;
+            BtnHeroSecondary.Tag = view.SecondaryCommand;
+
+            // 次按钮多余时收起：主卡已经说了「停下」，旁边再挂一个「看今天」只会分走注意力。
+            BtnHeroSecondary.Visibility = string.IsNullOrEmpty(view.SecondaryText)
+                ? Visibility.Collapsed : Visibility.Visible;
+
+            RenderHomeSteps(view.ShowSteps);
+
+            // 出错时整张卡换描边色：这一条比任何文字都快。
+            HomeHero.BorderBrush = trouble
+                ? (BrushOf("WarningBrush") ?? DotYellow)
+                : (BrushOf("BorderBrush") ?? DotGray);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("首屏主卡刷新失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>引导三步。只在「什么都没配」时出现——配好之后这块是空的，不留坑。</summary>
+    private void RenderHomeSteps(bool show)
+    {
+        HomeHeroSteps.Children.Clear();
+        HomeHeroSteps.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show) return;
+
+        HomeHeroSteps.Children.Add(HomeStep("1", "选 BetterGI 的 exe", "点右边按钮，或者把 exe 直接拖进窗口", true));
+        HomeHeroSteps.Children.Add(HomeStep("2", "确认每天几点跑", "默认早上 8 点，之后随时能改", false));
+        HomeHeroSteps.Children.Add(HomeStep("3", "点开跑，然后去睡觉", "跑完会给你一句话", false));
+    }
+
+    private UIElement HomeStep(string no, string title, string hint, bool active)
+    {
+        var row = new Grid { Margin = new Thickness(0, 7, 0, 0) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var badge = new Border
+        {
+            Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left,
+            Background = active ? (BrushOf("BrandBrush") ?? DotGreen) : (BrushOf("InsetBrush") ?? DotGray),
+            BorderBrush = BrushOf("BorderBrush"),
+            BorderThickness = active ? new Thickness(0) : new Thickness(1),
+        };
+        badge.Child = new TextBlock
+        {
+            Text = no, FontSize = 10.5,
+            Foreground = active ? (BrushOf("BrandOnBrush") ?? DotGreen) : (BrushOf("TextTertiaryBrush") ?? DotGray),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(badge, 0);
+        row.Children.Add(badge);
+
+        // 两列（序号 / 正文）而不是三列：标题和说明之间如果插一个 * 列，
+        // 渲染出来会空出两百多像素，看着像两张表。让它们挨着。
+        var text = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock
+        {
+            Text = title, FontSize = 12.5,
+            Foreground = active ? (BrushOf("TextPrimaryBrush") ?? DotGray) : (BrushOf("TextSecondaryBrush") ?? DotGray),
+        });
+        text.Children.Add(new TextBlock
+        {
+            Text = hint, FontSize = 11.5, Margin = new Thickness(8, 0, 0, 0),
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        Grid.SetColumn(text, 1);
+        row.Children.Add(text);
+        return row;
+    }
+
+    private void BtnHeroPrimary_Click(object sender, RoutedEventArgs e) => RunHeroCommand(BtnHeroPrimary);
+
+    private void BtnHeroSecondary_Click(object sender, RoutedEventArgs e) => RunHeroCommand(BtnHeroSecondary);
+
+    /// <summary>
+    /// 主卡按钮不直接绑 Click 处理器，而是绑命令 id——这样加一个状态只需要在
+    /// <see cref="HomeState"/> 里给出新 id，界面这边一行都不用改。
+    /// </summary>
+    private void RunHeroCommand(Button? btn)
+    {
+        string id = btn?.Tag as string ?? "";
+        if (id.Length == 0) return;
+        try
+        {
+            if (string.Equals(id, "pick.bettergi", StringComparison.Ordinal))
+            {
+                PickBetterGi();
+                return;
+            }
+            RunCommand(id);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent($"首屏主卡执行 {id} 失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>「选择 BetterGI.exe」：跟工具卡里的浏览按钮走同一条路，只是不用先展开折叠体。</summary>
+    private void PickBetterGi()
+    {
+        var profile = ProfileRegistry.Get("bettergi");
+        var dlg = new OpenFileDialog
+        {
+            Title = "选择 BetterGI 的主程序",
+            Filter = "可执行文件|*.exe|所有文件|*.*",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        profile.ExecutablePath = dlg.FileName;
+        AppState.Settings.BgiPath = dlg.FileName;
+        ToolIconService.Invalidate("bettergi");
+        ProfileRegistry.Save(profile);
+        AppState.PublishLog("✓ 已设置 BetterGI 路径");
+        RefreshToolCard("bettergi");
+        RefreshDetectedGroups(force: true);
+        RefreshHomeHero();
+    }
+
+    /// <summary>上次那一轮开始的时刻。LastRunAt 存的是「yyyy-MM-dd HH:mm」，解析不出来就当没有。</summary>
+    private static DateTime? ParseLastRunAt(AppSettings s)
+    {
+        if (DateTime.TryParse(s.LastRunAt, out var at)) return at;
+        return null;
     }
 
     // ===== 通知设置卡 =====
@@ -2749,8 +3314,10 @@ public partial class MainWindow : Window
         TbNotifyWebhook.Text = s.NotifyWebhookUrl;
         TbNotifyWebSocket.Text = s.NotifyWebSocketUrl;
         TgNotifyOnlyImportant.IsChecked = s.NotifyOnlyImportant;
+        TbQueueTemplate.Text = s.NotifyQueueTemplate;
         SyncNotifyChips();
         ApplyNotifyMode();
+        RefreshQueueTemplateHint();
     }
 
     private void NotifyField_LostFocus(object sender, RoutedEventArgs e)
@@ -2775,6 +3342,59 @@ public partial class MainWindow : Window
         if (_suppressToggle) return;
         AppState.Settings.NotifyOnlyImportant = TgNotifyOnlyImportant.IsChecked == true;
         AppState.SaveSettings();
+    }
+
+    /// <summary>
+    /// v1.15 / L6：跑完通知的正文模板。
+    /// 空着就用内置正文——占位提示里写清楚这件事，否则用户会以为必须填点什么。
+    /// </summary>
+    private void TbQueueTemplate_LostFocus(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string text = NotifyTemplate.OneLine(TbQueueTemplate.Text);
+            AppState.Settings.NotifyQueueTemplate = text;
+            AppState.SaveSettings();
+            RefreshQueueTemplateHint();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("保存通知模板失败：" + ex.Message);
+        }
+    }
+
+    private void RefreshQueueTemplateHint()
+    {
+        string saved = AppState.Settings.NotifyQueueTemplate;
+        TbQueueTemplateWatermark.Visibility = string.IsNullOrEmpty(TbQueueTemplate.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (string.IsNullOrWhiteSpace(saved))
+        {
+            TbQueueTemplateHint.Text = "例如「" + NotifyTemplate.Sample + "」\n" + NotifyTemplate.Hint;
+            return;
+        }
+
+        var demo = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["结果"] = "成功",
+            ["成功"] = "3",
+            ["总数"] = "3",
+            ["耗时"] = "2 小时 12 分",
+            ["原因"] = "三月七助手 退出码 1",
+            ["现场"] = @"全部日志\incidents\20261115-090000",
+            ["收益"] = "摩拉 12.3 万",
+        };
+        string preview = NotifyTemplate.Render(saved, demo);
+        TbQueueTemplateHint.Text = "发出去会是这样：" + preview;
+    }
+
+    private void TbQueueTemplate_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (TbQueueTemplateWatermark == null) return;
+        TbQueueTemplateWatermark.Visibility = string.IsNullOrEmpty(TbQueueTemplate.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private async void BtnTestWebhook_Click(object sender, RoutedEventArgs e)

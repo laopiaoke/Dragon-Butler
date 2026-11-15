@@ -176,6 +176,77 @@ internal static class RenderProbe
         f.SetValue(null, value);
     }
 
+    /// <summary>
+    /// v1.15：把首屏主卡逼到指定状态。
+    ///
+    /// <para>
+    /// 主卡的五种脸是靠「有没有 exe / 在不在跑 / 刚跑完没 / 半小时内告过警」这四个事实推出来的，
+    /// 所以这里就照着这四个输入摆道具，不去改 <see cref="HomeState"/> 的结果——
+    /// 那样截出来的图只能证明排版，证明不了判定。
+    /// </para>
+    /// </summary>
+    private static void SeedHeroState(string state)
+    {
+        try
+        {
+            DateTime now = DateTime.Now;
+
+            // 每个状态都从「没在跑」起步：QueueService 的状态是静态字段，
+            // 上一轮铺的 _running=true 会留到下一轮，不重置的话 trouble/done 会被 running 压掉。
+            SetStatic(typeof(QueueService), "_running", false);
+            SetBacking(typeof(QueueService), "CurrentToolId", "");
+            SetBacking(typeof(QueueService), "CurrentToolStartedAt", default(DateTime));
+            var health = typeof(SentinelService).GetField("Health",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (health?.GetValue(null) is SentinelHealth live)
+            {
+                live.CurrentGroup = "";
+                live.CurrentGroupSince = default;
+            }
+            AppState.Settings.ShieldAlertAt = null;
+
+            switch (state)
+            {
+                case "first":
+                    // 默认就是「没配 exe」：SeedSampleBgiDir 指向的那个 BetterGI.exe 并不真存在。
+                    break;
+
+                case "ready":
+                {
+                    // 造一个真的会存在于磁盘上的 exe 占位文件，HasExecutable 才认。
+                    string exe = Path.Combine(Path.GetTempPath(), "dragon-ui", "fake-bgi", "BetterGI.exe");
+                    Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+                    if (!File.Exists(exe)) File.WriteAllText(exe, "");
+                    var p = ProfileRegistry.Get("bettergi");
+                    p.ExecutablePath = exe;
+                    ProfileRegistry.Save(p);
+                    AppState.Settings.BgiPath = exe;
+                    break;
+                }
+
+                case "running":
+                    SeedHeroState("ready");
+                    SeedRunningState();
+                    break;
+
+                case "trouble":
+                    SeedHeroState("ready");
+                    AppState.Settings.ShieldAlertAt = now.AddMinutes(-4);
+                    break;
+
+                case "done":
+                    SeedHeroState("ready");
+                    AppState.Settings.LastRunAt = now.AddHours(-2).ToString("yyyy-MM-dd HH:mm");
+                    AppState.Settings.LastRunOk = true;
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-HERO-FAIL " + ex.Message);
+        }
+    }
+
     private static void SetBacking(Type type, string property, object value)
     {
         SetStatic(type, "<" + property + ">k__BackingField", value);
@@ -240,6 +311,41 @@ internal static class RenderProbe
         catch (Exception ex)
         {
             Console.WriteLine("SEED-ARCHIVE-FAIL " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// v1.15：配置组合的样例。三套里故意留一套「组名已失效」，
+    /// 否则截图上永远看不到那个警告色——而它正是「别静默丢东西」的可见证据。
+    /// 只改内存，不写盘。
+    /// </summary>
+    private static void SeedSamplePresets()
+    {
+        try
+        {
+            AppState.Settings.Presets = new List<ConfigPreset>
+            {
+                new()
+                {
+                    Id = "p-daily", Name = "晚上日常", DragonConfigName = "日常",
+                    Groups = new[] { "日常", "活动" }, LastUsedAt = "2026-11-15 09:12:03",
+                },
+                new()
+                {
+                    Id = "p-weekend", Name = "周末清体力", DragonConfigName = "日常",
+                    Groups = new[] { "活动", "收尾" }, LastUsedAt = "2026-11-13 20:40:11",
+                },
+                new()
+                {
+                    Id = "p-old", Name = "老的挖矿脚本", DragonConfigName = "挖矿",
+                    Groups = new[] { "已删除的老组" },
+                },
+            };
+            AppState.Settings.ActivePresetId = "p-daily";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-PRESETS-FAIL " + ex.Message);
         }
     }
 
@@ -373,17 +479,113 @@ internal static class RenderProbe
                         w.Close();
                     }
 
-                    if (mode == "main" || mode == "advanced" || mode == "top" || mode == "running" || mode == "all")
+                    // v1.15：主卡五种脸各截一张。不摆道具就只能看到「先告诉我在哪」，
+                    // 而这张卡的全部价值在它怎么变——只截一种等于没验。
+                    if (mode == "hero" || mode == "all")
+                    {
+                        foreach (string st in new[] { "first", "ready", "running", "trouble", "done" })
+                        {
+                            SeedSampleQueue();
+                            SeedSampleArchive();
+                            SeedHeroState(st);
+                            var w = new MainWindow();
+                            w.UpdateLayout();
+                            var refresh = typeof(MainWindow).GetMethod("RefreshHomeHero",
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            refresh?.Invoke(w, null);
+                            w.UpdateLayout();
+                            // v1.15 / L3：320 高只能看到定时卡顶部，L3 的一键默认在卡片中间，
+                            // 看不到就等于没验。放宽到 460。
+                            bool ok = Save(w, Path.Combine(spot, $"hero_{st}.png"), 980, 460);
+                            Console.WriteLine($"RENDER hero_{st}={ok}");
+                            w.Close();
+                        }
+                    }
+
+                    // v1.15 / L2：工具设置收成一行之后，得看两件事——
+                    // 收起时那一行的摘要说得对不对，展开后原来三张卡还剩没剩。
+                    if (mode == "tools" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedHeroState("ready");
+                        var w = new MainWindow();
+                        w.UpdateLayout();
+                        if (w.FindName("ToolCardsHost") is FrameworkElement host)
+                        {
+                            host.Visibility = Visibility.Visible;
+                            if (w.FindName("ChevTools") is FrameworkElement chev)
+                                chev.RenderTransform = new RotateTransform(180);
+                        }
+                        // BetterGI 那张卡本身也是折叠的；配置组勾选区在它的展开体里。
+                        if (w.FindName("Body_bettergi") is FrameworkElement bgiBody)
+                            bgiBody.Visibility = Visibility.Visible;
+                        // 配置组是构造窗口那一刻扫的，那时还没铺假 BGI 目录——重扫一次再刷。
+                        BgiDiscovery.Scan(force: true);
+                        AppState.Settings.FavoriteGroups = new[] { "收尾" };
+                        var picker = typeof(MainWindow).GetMethod("RefreshGroupPicker",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        picker?.Invoke(w, null);
+                        w.UpdateLayout();
+                        if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer sv2)
+                        {
+                            // v1.15 / L4：滚到 BetterGI 那张卡本身。430 只到折叠头，
+                            // 配置组勾选区在卡片下半部分，看不到就等于没验。
+                            sv2.ScrollToVerticalOffset(560);
+                            w.UpdateLayout();
+                        }
+                        bool ok = Save(w, Path.Combine(spot, "tools_open.png"), 980, 560);
+                        Console.WriteLine($"RENDER tools_open={ok}");
+                        w.Close();
+                    }
+
+                    // v1.15：配置组合窗口 + 队列卡那一行。两处都得看：
+                    // 下拉在队列卡里，窗口管增删——只截窗口看不出它在主界面上长什么样。
+                    if (mode == "presets" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedHeroState("ready");
+                        SeedSamplePresets();
+                        var w = new PresetsWindow();
+                        bool ok = Save(w, Path.Combine(spot, "presets.png"), 640, 0);
+                        Console.WriteLine($"RENDER presets={ok}");
+                        w.Close();
+
+                        var m = new MainWindow();
+                        m.UpdateLayout();
+                        var row = typeof(MainWindow).GetMethod("RefreshPresetRow",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        row?.Invoke(m, null);
+                        m.UpdateLayout();
+                        bool ok2 = Save(m, Path.Combine(spot, "preset_row.png"), 980, 760);
+                        Console.WriteLine($"RENDER preset_row={ok2}");
+                        m.Close();
+                    }
+
+                    if (mode == "home" || mode == "all")
+                    {
+                        // v1.15 首屏原型：同一个窗口四种状态各来一张，
+                        // 摊开才能对比「第一眼有没有明显该点的地方」。
+                        foreach (string st in new[] { "first", "ready", "running", "done" })
+                        {
+                            var w = new HomePrototype(st);
+                            bool ok = Save(w, Path.Combine(spot, $"home_{st}.png"), 980, 0);
+                            Console.WriteLine($"RENDER home_{st}={ok}");
+                            w.Close();
+                        }
+                    }
+
+                    if (mode == "main" || mode == "advanced" || mode == "top" || mode == "running" || mode == "notify" || mode == "all")
                     {
                         var w = new MainWindow();
                         // 折叠状态下的「高级设置」在渲染里看不见，而 v1.10 新增的开关就在那儿。
                         // 专门留一个 advanced 模式把它展开再截图，否则只能靠读代码确认布局。
                         // v1.12：advanced 滚到底，top 滚到顶——同一张长图两头都要能看清，
                         // 只留滚到底那种会让第一行被切掉半截。
-                        bool expanded = mode == "advanced" || mode == "top";
+                        bool expanded = mode == "advanced" || mode == "top" || mode == "notify";
                         if (expanded)
                         {
-                            foreach (string name in new[] { "AdvancedBody", "SystemBody" })
+                            // v1.15 / L6：通知卡也要能展开拍——模板输入框就在那张卡里。
+                            foreach (string name in new[] { "AdvancedBody", "SystemBody", "NotifyBody" })
                             {
                                 if (w.FindName(name) is FrameworkElement fe) fe.Visibility = Visibility.Visible;
                             }
@@ -394,6 +596,19 @@ internal static class RenderProbe
                             {
                                 if (mode == "top") sv.ScrollToTop();
                                 else sv.ScrollToEnd();
+                                w.UpdateLayout();
+                            }
+                        }
+                        // 通知卡在最底下，而模板输入框在它中段——滚到底会正好被状态条压住，
+                        // 所以 notify 模式滚到「刚好看得见通知卡」的位置就停。
+                        if (mode == "notify")
+                        {
+                            w.UpdateLayout();
+                            // 用 BringIntoView 而不是手算偏移：窗口没 Show 过，TransformToAncestor
+                            // 在这棵还没完全成形的视觉树上会报「指定的 Visual 不是此 Visual 的上级」。
+                            if (w.FindName("NotifyCard") is FrameworkElement card)
+                            {
+                                card.BringIntoView();
                                 w.UpdateLayout();
                             }
                         }
@@ -412,6 +627,7 @@ internal static class RenderProbe
                         string file = mode == "advanced" ? "advanced.png"
                                     : mode == "top" ? "advanced_top.png"
                                     : mode == "running" ? "running.png"
+                                    : mode == "notify" ? "notify.png"
                                     : "main.png";
                         bool ok = Save(w, Path.Combine(spot, file), 980, 0);
                         Console.WriteLine($"RENDER {Path.GetFileNameWithoutExtension(file)}={ok}");

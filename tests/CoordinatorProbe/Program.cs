@@ -56,6 +56,9 @@ internal static class Program
             "conflict" => RunConflict(stub),
             "vacation" => RunVacation(),
             "afterrun" => RunAfterRun(),
+            "template" => RunTemplate(),
+            "bgiwrite" => RunBgiWrite(),
+            "presets" => RunPresets(),
             "idle" => RunIdle(),
             "discover" => RunDiscover(stub),
             "custom" => RunCustom(stub),
@@ -86,6 +89,7 @@ internal static class Program
             "calendar" => RunCalendar(),
             "live" => RunLive(),
             "logrules" => RunLogRules(),
+            "favorites" => RunFavorites(),
             "dag" => RunDag(stub),
             "groups" => RunGroups(),
             "bgiupdate" => RunBgiVersion(),
@@ -524,16 +528,435 @@ internal static class Program
         return ran ? 1 : 0;
     }
 
+    /// <summary>
+    /// v1.15：配置组合（多套「一条龙配置名 + 组名」反复用）。
+    /// 借的是 AUTO-MAS 的多配置思路，但只保留「记住几套组合、开跑时挑一套」——
+    /// 不做注入、不做自动切号，所以断言的重点全在「不会把用户的东西弄丢/混错」。
+    /// </summary>
+    private static int RunPresets()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        int seq = 0;
+        string NewId() => "id-" + (++seq);
+
+        // ---- 名字清洗 ----
+        Check("名字/去首尾空白", ConfigPresets.NormalizeName("  日常  ") == "日常");
+        Check("名字/换行转空格", ConfigPresets.NormalizeName("大号\n日常") == "大号 日常");
+        Check("名字/压连续空格", ConfigPresets.NormalizeName("大号   日常") == "大号 日常");
+        Check("名字/空返回空", ConfigPresets.NormalizeName("") == "");
+        Check("名字/null 返回空", ConfigPresets.NormalizeName(null) == "");
+        Check("名字/超长截断",
+            ConfigPresets.NormalizeName(new string('a', ConfigPresets.MaxNameChars + 10)).Length == ConfigPresets.MaxNameChars);
+
+        // ---- 抓一套 ----
+        var p1 = ConfigPresets.Capture(null, " 日常 ", new[] { "日常", "", "活动" }, "大号", NewId);
+        Check("抓取/Id 非空", p1.Id.Length > 0);
+        Check("抓取/名字清洗过", p1.Name == "大号");
+        Check("抓取/配置名去空白", ConfigPresets.Capture(null, " 日常 ", null, "x", NewId).DragonConfigName == "日常");
+        Check("抓取/空组名被丢掉", p1.Groups.Length == 2, string.Join("|", p1.Groups));
+        Check("抓取/没给名字就自动编号", ConfigPresets.Capture(null, "日常", null, "", NewId).Name == "配置 1");
+        Check("抓取/自动编号跳过已占用",
+            ConfigPresets.Capture(new[] { new ConfigPreset { Name = "配置 1" } }, "日常", null, null, NewId).Name == "配置 2");
+        Check("抓取/自动编号跳过大小写变体",
+            ConfigPresets.Capture(new[] { new ConfigPreset { Name = "配置 1" }, new ConfigPreset { Name = "配置 2" }, new ConfigPreset { Name = "配置 3" } },
+                "日常", null, null, NewId).Name == "配置 4");
+
+        // ---- 校验 ----
+        var existing = new List<ConfigPreset> { p1 };
+        Check("校验/合法返回 null",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "x", Name = "小号", DragonConfigName = "日常" }, existing) == null);
+        Check("校验/null 拒绝", ConfigPresets.RefuseReason(null, existing) != null);
+        Check("校验/空名字拒绝",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "x", Name = "  ", DragonConfigName = "日常" }, existing)?.Contains("名字") == true);
+        Check("校验/重名拒绝",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "x", Name = "大号", DragonConfigName = "日常" }, existing)?.Contains("已经有一套") == true);
+        Check("校验/重名不看大小写",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "x", Name = "DAILY", DragonConfigName = "日常" },
+                new[] { new ConfigPreset { Id = "y", Name = "daily" } })?.Contains("已经有一套") == true);
+        Check("校验/改自己不算重名",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = p1.Id, Name = "大号", DragonConfigName = "日常" }, existing) == null);
+        Check("校验/什么都没选拒绝",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "x", Name = "空壳" }, existing)?.Contains("什么都没选") == true);
+        Check("校验/只有组也行",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "x", Name = "只跑组", Groups = new[] { "日常" } }, existing) == null);
+        Check("校验/只有配置名也行",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "x", Name = "只跑配置", DragonConfigName = "日常" }, existing) == null);
+
+        var many = Enumerable.Range(0, ConfigPresets.MaxCount)
+            .Select(i => new ConfigPreset { Id = "m" + i, Name = "批量 " + i, DragonConfigName = "日常" }).ToList();
+        Check("校验/到达上限后拒绝",
+            ConfigPresets.RefuseReason(new ConfigPreset { Id = "new", Name = "再来一套", DragonConfigName = "日常" }, many)
+                ?.Contains("最多存") == true);
+
+        // ---- 查找 ----
+        Check("查找/按 Id 找到", ConfigPresets.FindById(existing, p1.Id)?.Name == "大号");
+        Check("查找/大小写不敏感", ConfigPresets.FindById(existing, p1.Id.ToUpperInvariant()) != null);
+        Check("查找/空 Id 返回 null", ConfigPresets.FindById(existing, "") == null);
+        Check("查找/没有返回 null", ConfigPresets.FindById(existing, "不存在") == null);
+        Check("查找/null 集合安全", ConfigPresets.FindById(null, "x") == null);
+
+        // ---- 排序：用过的在前，没用过的保持原序 ----
+        var sortable = new List<ConfigPreset>
+        {
+            new() { Id = "a", Name = "A" },
+            new() { Id = "b", Name = "B", LastUsedAt = "2026-11-15 09:00:00" },
+            new() { Id = "c", Name = "C", LastUsedAt = "2026-11-15 11:00:00" },
+            new() { Id = "d", Name = "D" },
+        };
+        var sorted = ConfigPresets.Sort(sortable);
+        Check("排序/最近的在前", sorted[0].Id == "c" && sorted[1].Id == "b", string.Join(",", sorted.Select(x => x.Id)));
+        Check("排序/没用过的保持原序且在后", sorted[2].Id == "a" && sorted[3].Id == "d");
+        Check("排序/总数不变", sorted.Count == sortable.Count);
+        Check("排序/空集合安全", ConfigPresets.Sort(null).Count == 0);
+        Check("排序/坏时间当没用过处理",
+            ConfigPresets.Sort(new[] { new ConfigPreset { Id = "z", Name = "Z", LastUsedAt = "不是时间" } }).Count == 1);
+
+        // ---- 失效组名：只报告不修改 ----
+        var stale = new ConfigPreset { Id = "s", Name = "S", Groups = new[] { "日常", "已删除" } };
+        var missing = ConfigPresets.MissingGroups(stale, new[] { "日常", "活动" });
+        Check("失效组/找得到", missing.Count == 1 && missing[0] == "已删除", string.Join("|", missing));
+        Check("失效组/全都在就返回空", ConfigPresets.MissingGroups(stale, new[] { "日常", "已删除" }).Count == 0);
+        Check("失效组/没识别到就不判定", ConfigPresets.MissingGroups(stale, Array.Empty<string>()).Count == 0);
+        Check("失效组/null 组列表安全", ConfigPresets.MissingGroups(null, new[] { "日常" }).Count == 0);
+        Check("失效组/不修改原对象", stale.Groups.Length == 2);
+        Check("失效组/大小写不敏感", ConfigPresets.MissingGroups(
+            new ConfigPreset { Id = "t", Name = "T", Groups = new[] { "Daily" } }, new[] { "daily" }).Count == 0);
+
+        // ---- 展开 ----
+        var (cfg, grps) = ConfigPresets.Expand(p1);
+        Check("展开/配置名", cfg == "日常", cfg);
+        Check("展开/组名", grps.Count == 2);
+        Check("展开/null 预设返回空", ConfigPresets.Expand(null).DragonConfigName == "");
+        Check("展开/null 预设组为空", ConfigPresets.Expand(null).Groups.Count == 0);
+
+        // ---- 描述 ----
+        Check("描述/配置名加组数", ConfigPresets.Describe(p1) == "日常 · 2 组", ConfigPresets.Describe(p1));
+        Check("描述/没有组说默认组",
+            ConfigPresets.Describe(new ConfigPreset { Name = "x", DragonConfigName = "日常" }) == "日常 · 默认组");
+        Check("描述/只有组没配置名",
+            ConfigPresets.Describe(new ConfigPreset { Name = "x", Groups = new[] { "日常" } }) == "1 组");
+        Check("描述/null 返回空", ConfigPresets.Describe(null) == "");
+
+        // ---- 使用时间戳 ----
+        var stamp = ConfigPresets.StampUsed(new DateTime(2026, 11, 15, 9, 30, 5));
+        Check("时间戳/格式", stamp == "2026-11-15 09:30:05", stamp);
+        Check("时间戳/能被解析回来", DateTime.TryParse(stamp, out _));
+
+        // ---- Clone 不共享数组 ----
+        var clone = p1.Clone();
+        clone.Groups[0] = "改过";
+        Check("克隆/组数组不共享", p1.Groups[0] == "日常", p1.Groups[0]);
+        Check("克隆/Id 一致", clone.Id == p1.Id);
+
+        Console.WriteLine($"RESULT presets fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.15 / M1：写 BetterGI 一条龙配置。
+    /// 这是全软件唯一一处会改别人文件的代码，所以每一条拒绝理由都要单独试一遍：
+    /// 光测「能写成功」是不够的——真正会出事的是「本不该写的时候写了」。
+    /// </summary>
+    private static int RunBgiWrite()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "dragon-bgiwrite");
+        try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
+        string oneDragon = Path.Combine(root, BgiConfigWriter.SubDir);
+        Directory.CreateDirectory(oneDragon);
+        string cfg = Path.Combine(oneDragon, "日常.json");
+        File.WriteAllText(cfg, "{\n  \"name\": \"日常\",\n  \"tasks\": [],\n  \"settings\": { \"completionAction\": \"None\", \"partyName\": \"旅行者\" }\n}");
+
+        // ---- 名字安全：挡的是「借名字把写入引到别处」 ----
+        Check("名字/正常中文可以", BgiConfigWriter.IsSafeName("日常"));
+        Check("名字/英文数字可以", BgiConfigWriter.IsSafeName("day-run_2"));
+        Check("名字/空不行", !BgiConfigWriter.IsSafeName(""));
+        Check("名字/空白不行", !BgiConfigWriter.IsSafeName("   "));
+        Check("名字/null 不行", !BgiConfigWriter.IsSafeName(null));
+        Check("名字/上级目录不行", !BgiConfigWriter.IsSafeName(".."));
+        Check("名字/单点不行", !BgiConfigWriter.IsSafeName("."));
+        Check("名字/带反斜杠不行", !BgiConfigWriter.IsSafeName(@"..\evil"));
+        Check("名字/带正斜杠不行", !BgiConfigWriter.IsSafeName("a/b"));
+        Check("名字/带冒号不行", !BgiConfigWriter.IsSafeName("C:日常"));
+        Check("名字/首尾有空格不行", !BgiConfigWriter.IsSafeName(" 日常"));
+        Check("名字/末尾有点不行", !BgiConfigWriter.IsSafeName("日常."));
+        Check("名字/控制字符不行", !BgiConfigWriter.IsSafeName("日\n常"));
+        Check("名字/超长不行", !BgiConfigWriter.IsSafeName(new string('a', BgiConfigWriter.MaxNameChars + 1)));
+        Check("名字/刚好到上限可以", BgiConfigWriter.IsSafeName(new string('a', BgiConfigWriter.MaxNameChars)));
+
+        // ---- 路径拼接 + 二次核对 ----
+        string built = BgiConfigWriter.ConfigPath(root, "日常");
+        Check("路径/拼接正确", built == cfg, built);
+        Check("路径/名字不合法返回空", BgiConfigWriter.ConfigPath(root, "../x") == "");
+        Check("路径/根为空返回空", BgiConfigWriter.ConfigPath("", "日常") == "");
+        Check("路径/认得出在一条龙目录里", BgiConfigWriter.IsUnderOneDragon(built, root));
+        Check("路径/别处的文件不认", !BgiConfigWriter.IsUnderOneDragon(Path.Combine(root, "其他.json"), root));
+        Check("路径/子目录里也不认",
+            !BgiConfigWriter.IsUnderOneDragon(Path.Combine(oneDragon, "sub", "x.json"), root));
+        Check("路径/非 json 不认", !BgiConfigWriter.IsUnderOneDragon(Path.ChangeExtension(cfg, ".txt"), root));
+
+        // ---- 拒绝写入的六种情况 ----
+        var now = DateTime.Now;
+        Check("拒绝/没填根目录",
+            BgiConfigWriter.RefuseReason(cfg, "", false, true, null, null)?.Contains("路径") == true);
+        Check("拒绝/名字拼接失败",
+            BgiConfigWriter.RefuseReason("", root, false, true, null, null) != null);
+        Check("拒绝/不在一条龙目录",
+            BgiConfigWriter.RefuseReason(Path.Combine(root, "x.json"), root, false, true, null, null)
+                ?.Contains("没敢写") == true);
+        Check("拒绝/BGI 正在跑",
+            BgiConfigWriter.RefuseReason(cfg, root, true, true, null, null)?.Contains("先关掉再改") == true);
+        Check("拒绝/文件不见了",
+            BgiConfigWriter.RefuseReason(cfg, root, false, false, null, null)?.Contains("已经不在了") == true);
+        Check("拒绝/mtime 被动过",
+            BgiConfigWriter.RefuseReason(cfg, root, false, true, now, now.AddMinutes(3))
+                ?.Contains("被别的程序改过") == true);
+        Check("拒绝/mtime 退回（也算被动过）",
+            BgiConfigWriter.RefuseReason(cfg, root, false, true, now, now.AddMinutes(-3)) != null);
+        Check("放行/一切正常", BgiConfigWriter.RefuseReason(cfg, root, false, true, now, now) == null);
+        Check("放行/mtime 在 2 秒容差内",
+            BgiConfigWriter.RefuseReason(cfg, root, false, true, now, now.AddSeconds(1)) == null);
+        Check("放行/没给 mtime 就不比", BgiConfigWriter.RefuseReason(cfg, root, false, true, null, null) == null);
+
+        // ---- 只改认得的那个键，别的一个都不碰 ----
+        string json = File.ReadAllText(cfg);
+        string? edited = BgiConfigWriter.SetString(json, BgiConfigWriter.KeyCompletionAction, "Shutdown");
+        Check("改值/返回了新内容", edited != null);
+        Check("改值/目标是新值", BgiConfigWriter.GetString(edited, BgiConfigWriter.KeyCompletionAction) == "Shutdown");
+        Check("改值/同层别的字段没动", BgiConfigWriter.GetString(edited, "settings.partyName") == "旅行者");
+        Check("改值/顶层字段没动", (edited ?? "").Contains("\"name\": \"日常\"", StringComparison.Ordinal));
+        Check("改值/任务列表还在", (edited ?? "").Contains("\"tasks\": []", StringComparison.Ordinal));
+
+        Check("改值/坏 JSON 返回 null", BgiConfigWriter.SetString("{ 不是 json", BgiConfigWriter.KeyCompletionAction, "x") == null);
+        Check("改值/顶层不是对象返回 null", BgiConfigWriter.SetString("[1,2]", BgiConfigWriter.KeyCompletionAction, "x") == null);
+        Check("改值/中间少一层返回 null", BgiConfigWriter.SetString("{\"name\":\"a\"}", BgiConfigWriter.KeyCompletionAction, "x") == null);
+        Check("改值/空 JSON 返回 null", BgiConfigWriter.SetString("", BgiConfigWriter.KeyCompletionAction, "x") == null);
+        Check("读值/读得到", BgiConfigWriter.GetString(json, BgiConfigWriter.KeyCompletionAction) == "None");
+        Check("读值/键不存在返回 null", BgiConfigWriter.GetString(json, "settings.不存在") == null);
+        Check("读值/类型不是字符串返回 null", BgiConfigWriter.GetString("{\"settings\":{\"x\":1}}", "settings.x") == null);
+
+        // ---- 真正的写入：成功路径 ----
+        string baseDir = Path.Combine(root, "app");
+        Directory.CreateDirectory(baseDir);
+        var (ok1, msg1) = BgiConfigWriter.Save(baseDir, cfg, edited!, new DateTime(2026, 11, 15, 9, 30, 0));
+        Check("保存/成功", ok1, msg1);
+        Check("保存/内容真的变了",
+            BgiConfigWriter.GetString(File.ReadAllText(cfg), BgiConfigWriter.KeyCompletionAction) == "Shutdown");
+        string bakDir = BgiConfigWriter.BackupDir(baseDir, new DateTime(2026, 11, 15, 9, 30, 0));
+        Check("保存/备份目录建了", Directory.Exists(bakDir), bakDir);
+        Check("保存/备份里有原件",
+            Directory.Exists(bakDir) && Directory.GetFiles(bakDir, "*.json").Length == 1);
+        if (Directory.Exists(bakDir))
+        {
+            string bak = Directory.GetFiles(bakDir, "*.json")[0];
+            Check("保存/备份是改之前的内容",
+                BgiConfigWriter.GetString(File.ReadAllText(bak), BgiConfigWriter.KeyCompletionAction) == "None");
+        }
+        Check("保存/没有留下临时文件", !File.Exists(cfg + ".dbtmp"));
+        Check("保存/提示里有备份路径", msg1.Contains(bakDir, StringComparison.OrdinalIgnoreCase));
+
+        // ---- 失败路径：文件不在 ----
+        var (ok2, _) = BgiConfigWriter.Save(baseDir, Path.Combine(oneDragon, "不存在.json"), "{}", now);
+        Check("保存/文件不在就失败", !ok2);
+
+        // ---- 失败路径：备份目录建不出来 ----
+        // 占位文件必须落在 config\ 下面才有用：代码拼的是 {baseDir}\config\bgi-backup，
+        // 把文件放在 {baseDir}\bgi-backup 挡不住任何东西（我第一版就是这么写错的）。
+        string blockedBase = Path.Combine(root, "blocked");
+        Directory.CreateDirectory(Path.Combine(blockedBase, "config"));
+        File.WriteAllText(Path.Combine(blockedBase, "config", "bgi-backup"), "占位");
+        var (ok3, msg3) = BgiConfigWriter.Save(blockedBase, cfg, "{\"settings\":{\"completionAction\":\"None\"}}", now);
+        Check("保存/备份失败就不写", !ok3, msg3);
+        Check("保存/备份失败后原件没被改",
+            BgiConfigWriter.GetString(File.ReadAllText(cfg), BgiConfigWriter.KeyCompletionAction) == "Shutdown");
+
+        // ---- 备份文件名：同一秒里两次备份不会互相覆盖 ----
+        string t1 = BgiConfigWriter.BackupFile(bakDir, "日常", new DateTime(2026, 11, 15, 9, 30, 0, 100));
+        string t2 = BgiConfigWriter.BackupFile(bakDir, "日常", new DateTime(2026, 11, 15, 9, 30, 0, 700));
+        Check("备份名/同一秒内不重名", t1 != t2);
+        Check("备份名/保留原名", t1.Contains("日常", StringComparison.Ordinal));
+        Check("备份名/名字不合法时兜底", BgiConfigWriter.BackupFile(bakDir, "../x", now).Contains("config", StringComparison.Ordinal));
+
+        // ---- 清理 ----
+        try { Directory.Delete(root, true); } catch { }
+
+        Console.WriteLine($"RESULT bgiwrite fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.15 / L6：通知模板。
+    /// 最要紧的不是「能替换」，而是三件不肯让步的事：
+    /// 留空必须回到内置正文（老用户升级后一个字都不变）、
+    /// 拼错的占位符要原样留着（换成空白的话，用户永远不知道自己拼错了）、
+    /// 正文里有左括号没右括号时不能抛。
+    /// </summary>
+    private static int RunTemplate()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        var v = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["结果"] = "成功",
+            ["成功"] = "3",
+            ["总数"] = "3",
+            ["耗时"] = "2 小时 12 分",
+            ["原因"] = "",
+            ["现场"] = "",
+            ["收益"] = "摩拉 12.3 万",
+        };
+
+        // ---- 留空：这是升级安全阀 ----
+        Check("空模板/空串返回空", NotifyTemplate.Render("", v) == "");
+        Check("空模板/空白返回空", NotifyTemplate.Render("   ", v) == "");
+        Check("空模板/null 返回空", NotifyTemplate.Render(null, v) == "");
+        Check("空模板/默认设置就是空", NotifyTemplate.Render(AppState.Settings.NotifyQueueTemplate, v) == "");
+
+        // ---- 替换 ----
+        Check("替换/单个占位符", NotifyTemplate.Render("{成功}", v) == "3");
+        Check("替换/一句完整话",
+            NotifyTemplate.Render("今晚 {成功}/{总数}，用了 {耗时}。", v) == "今晚 3/3，用了 2 小时 12 分。");
+        Check("替换/同一个占位符出现两次",
+            NotifyTemplate.Render("{结果}，{结果}", v) == "成功，成功");
+        Check("替换/空的占位符值替换成空", NotifyTemplate.Render("原因：{原因}。", v) == "原因：。");
+        Check("替换/没有占位符就原样返回", NotifyTemplate.Render("跑完了", v) == "跑完了");
+        Check("替换/首尾空白会去掉", NotifyTemplate.Render("  {成功}  ", v) == "3");
+
+        // ---- 认不出的占位符：原样留着 ----
+        Check("未知/拼错的留着", NotifyTemplate.Render("{成攻} 了", v) == "{成攻} 了");
+        Check("未知/英文键留着", NotifyTemplate.Render("{ok}/{total}", v) == "{ok}/{total}");
+        Check("未知/混在句子里只换认得的",
+            NotifyTemplate.Render("{成功} 项，{成攻} 别处", v) == "3 项，{成攻} 别处");
+
+        // ---- 坏输入不抛 ----
+        bool threw = false;
+        try { NotifyTemplate.Render("{成功", v); } catch { threw = true; }
+        Check("坏输入/左括号没闭合不抛", !threw);
+        Check("坏输入/左括号没闭合原样留着", NotifyTemplate.Render("前 {成功", v) == "前 {成功");
+
+        threw = false;
+        try { NotifyTemplate.Render("{}", v); } catch { threw = true; }
+        Check("坏输入/空花括号不抛", !threw);
+        Check("坏输入/空花括号认不出就留着", NotifyTemplate.Render("{}", v) == "{}");
+
+        threw = false;
+        try { NotifyTemplate.Render("{成功}", null); } catch { threw = true; }
+        Check("坏输入/没有字典不抛", !threw);
+        Check("坏输入/没有字典时保持原样", NotifyTemplate.Render("{成功}", null) == "{成功}");
+
+        // ---- OneLine：换行在部分渠道会被吞，压成一行 ----
+        Check("一行/换行变空格", NotifyTemplate.OneLine("第一行\n第二行") == "第一行 第二行");
+        Check("一行/CRLF 也变空格", NotifyTemplate.OneLine("甲\r\n乙") == "甲 乙");
+        Check("一行/连续空格压成一个", NotifyTemplate.OneLine("甲    乙") == "甲 乙");
+        Check("一行/空输入返回空", NotifyTemplate.OneLine("  \n ") == "");
+
+        // ---- 界面：输入框与提示都在 ----
+        string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        Check("界面/有模板输入框", mainXaml.Contains("x:Name=\"TbQueueTemplate\"", StringComparison.Ordinal));
+        Check("界面/有提示行", mainXaml.Contains("x:Name=\"TbQueueTemplateHint\"", StringComparison.Ordinal));
+        Check("界面/输入框接了保存", mainXaml.Contains("LostFocus=\"TbQueueTemplate_LostFocus\"", StringComparison.Ordinal));
+
+        // ---- 清单与实现必须对得上 ----
+        Check("清单/七个占位符", NotifyTemplate.Placeholders.Length == 7);
+        Check("清单/提示里含带花括号的写法",
+            NotifyTemplate.Hint.Contains("{结果}", StringComparison.Ordinal)
+            && NotifyTemplate.Hint.Contains("{收益}", StringComparison.Ordinal));
+        Check("清单/每个占位符都在字典里有值",
+            Array.TrueForAll(NotifyTemplate.Placeholders, p => v.ContainsKey(p)));
+        Check("清单/示例能被完整填充",
+            !NotifyTemplate.Render(NotifyTemplate.Sample, v).Contains('{'));
+
+        Console.WriteLine($"RESULT template fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
     /// <summary>跑完动作 DRYRUN：关机只写日志。</summary>
     private static int RunAfterRun()
     {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // ---- v1.15 / L5：ShouldRun 的判定（纯函数） ----
+        Check("判定/仅通知不做", !AfterRunActionService.ShouldRun("Notify", false, false, false));
+        Check("判定/null 视作仅通知", !AfterRunActionService.ShouldRun(null, false, false, false));
+        Check("判定/关机正常跑完会做", AfterRunActionService.ShouldRun("Shutdown", false, false, false));
+        Check("判定/关机有失败不做", !AfterRunActionService.ShouldRun("Shutdown", true, false, false));
+        Check("判定/关机有失败但勾了照样做", AfterRunActionService.ShouldRun("Shutdown", true, false, true));
+        Check("判定/睡眠等同于关机待遇",
+            !AfterRunActionService.ShouldRun("Sleep", true, false, false)
+            && AfterRunActionService.ShouldRun("Sleep", false, false, false));
+        Check("判定/被停止一律不做", !AfterRunActionService.ShouldRun("Shutdown", false, true, true));
+
+        // 再跑一轮 / 打开程序不是破坏性动作，失败时也该做
+        Check("判定/再跑一轮有失败也做", AfterRunActionService.ShouldRun("RunAgain", true, false, false));
+        Check("判定/打开程序有失败也做", AfterRunActionService.ShouldRun("OpenApp", true, false, false));
+        Check("判定/再跑一轮被停止不做", !AfterRunActionService.ShouldRun("RunAgain", false, true, false));
+
+        Check("判定/关机是破坏性", AfterRunActionService.IsDestructive("Shutdown"));
+        Check("判定/睡眠是破坏性", AfterRunActionService.IsDestructive("sleep"));
+        Check("判定/再跑一轮不是破坏性", !AfterRunActionService.IsDestructive("RunAgain"));
+        Check("判定/打开程序不是破坏性", !AfterRunActionService.IsDestructive("OpenApp"));
+        Check("判定/仅通知不是破坏性", !AfterRunActionService.IsDestructive("Notify"));
+
+        // ---- 原有 DRYRUN：关机只写日志，不真关 ----
         AppState.Settings.AfterRunAction = "Shutdown";
         AppState.Settings.AfterRunDryRun = true;
         AppState.Settings.AfterRunOnFailure = false;
         AfterRunActionService.Execute(new AfterRunContext { Total = 2, Success = 2, HasFailure = false });
         AfterRunActionService.Execute(new AfterRunContext { Total = 2, Success = 1, HasFailure = true });
-        Console.WriteLine("RESULT afterrun done（应只有 DRYRUN 日志，无真实关机）");
-        return 0;
+
+        // ---- OpenApp：路径不存在时不该抛、只写日志 ----
+        AppState.Settings.AfterRunAction = "OpenApp";
+        AppState.Settings.AfterRunAppPath = Path.Combine(Path.GetTempPath(), "db_afterrun_不存在.exe");
+        bool threw = false;
+        try { AfterRunActionService.Execute(new AfterRunContext { Total = 1, Success = 1 }); }
+        catch { threw = true; }
+        Check("打开程序/路径不存在不抛", !threw);
+
+        // 空路径同理
+        AppState.Settings.AfterRunAppPath = "";
+        threw = false;
+        try { AfterRunActionService.Execute(new AfterRunContext { Total = 1, Success = 1 }); }
+        catch { threw = true; }
+        Check("打开程序/空路径不抛", !threw);
+
+        AppState.Settings.AfterRunAction = "Notify";
+
+        // ---- 界面：五个选项都在（下拉收起时看不到，只能查 XAML） ----
+        string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        Check("界面/有仅通知", mainXaml.Contains("Tag=\"Notify\"", StringComparison.Ordinal));
+        Check("界面/有再跑一轮", mainXaml.Contains("Tag=\"RunAgain\"", StringComparison.Ordinal)
+                                 && mainXaml.Contains("Content=\"再跑一轮\"", StringComparison.Ordinal));
+        Check("界面/有打开程序", mainXaml.Contains("Tag=\"OpenApp\"", StringComparison.Ordinal)
+                                 && mainXaml.Contains("Content=\"打开程序\"", StringComparison.Ordinal));
+        Check("界面/有自动睡眠", mainXaml.Contains("Tag=\"Sleep\"", StringComparison.Ordinal));
+        Check("界面/有自动关机", mainXaml.Contains("Tag=\"Shutdown\"", StringComparison.Ordinal));
+        Check("界面/程序路径行默认收起", mainXaml.Contains("x:Name=\"AfterRunAppRow\"", StringComparison.Ordinal)
+                                        && mainXaml.Contains("Visibility=\"Collapsed\"", StringComparison.Ordinal));
+
+        Console.WriteLine($"RESULT afterrun fails={fails.Count}（应只有 DRYRUN 日志，无真实关机）");
+        return fails.Count == 0 ? 0 : 1;
     }
 
     /// <summary>防打扰：有人在场 → 推迟；改成空闲后放行。</summary>
@@ -2313,6 +2736,81 @@ internal static class Program
         Check("哨兵/快照能读当前组", h.CurrentGroup != null);
 
         Console.WriteLine($"RESULT live fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.15 / L4：配置组「常用」。
+    /// 排序、开关、收敛三件事都在 <see cref="GroupFavorites"/> 里，全是纯函数。
+    /// 重点验两件事：<b>排序必须稳定</b>（没收藏的相对顺序不能被打乱），
+    /// 以及<b>大小写不能当成不同的组</b>（BGI 那边同名不同大小写的情况真出现过）。
+    /// </summary>
+    private static int RunFavorites()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        var groups = new[] { "日常", "活动", "收尾", "周本", "深渊" };
+
+        // ---- 1) Sort：没收藏时原样返回 ----
+        var same = GroupFavorites.Sort(groups, Array.Empty<string>());
+        Check("排序/无收藏原样", same.SequenceEqual(groups), string.Join(",", same));
+        Check("排序/null 收藏原样", GroupFavorites.Sort(groups, null).SequenceEqual(groups));
+        Check("排序/null 输入返回空", GroupFavorites.Sort(null!, new[] { "日常" }).Count == 0);
+
+        // ---- 2) Sort：收藏的排前面，其余保持原顺序（稳定） ----
+        // 收藏之间也按原顺序排，不按右键先后排——因为没有拖拽，
+        // 「先收藏的在前」这种顺序用户改不了也看不懂，原顺序至少是可预测的。
+        var sorted = GroupFavorites.Sort(groups, new[] { "深渊", "活动" });
+        Check("排序/收藏在前", sorted.Take(2).OrderBy(x => x).SequenceEqual(new[] { "深渊", "活动" }.OrderBy(x => x)),
+            string.Join(",", sorted));
+        Check("排序/收藏按原序不按右键序", sorted.Take(2).SequenceEqual(new[] { "活动", "深渊" }),
+            string.Join(",", sorted));
+        Check("排序/未收藏保持原序", sorted.Skip(2).SequenceEqual(new[] { "日常", "收尾", "周本" }), string.Join(",", sorted));
+        Check("排序/总数不变", sorted.Count == groups.Length);
+
+        // ---- 3) Sort：收藏里有不存在的组，不能凭空冒出来 ----
+        var withGhost = GroupFavorites.Sort(groups, new[] { "已删除的组", "日常" });
+        Check("排序/失效收藏不显示", !withGhost.Contains("已删除的组"), string.Join(",", withGhost));
+        Check("排序/有效收藏仍生效", withGhost[0] == "日常", string.Join(",", withGhost));
+
+        // ---- 4) Sort：大小写不敏感 ----
+        var cases = new[] { "Daily", "Abyss", "Weekly" };
+        var caseSorted = GroupFavorites.Sort(cases, new[] { "abyss" });
+        Check("排序/大小写不敏感", caseSorted[0] == "Abyss", caseSorted[0]);
+
+        // ---- 5) Toggle ----
+        var t1 = GroupFavorites.Toggle(Array.Empty<string>(), "日常");
+        Check("开关/新增一条", t1.Length == 1 && t1[0] == "日常", string.Join(",", t1));
+        var t2 = GroupFavorites.Toggle(t1, "日常");
+        Check("开关/再点一次取消", t2.Length == 0, string.Join(",", t2));
+        var t3 = GroupFavorites.Toggle(new[] { "日常" }, " 日常 ");
+        Check("开关/带空白也算同一个", t3.Length == 0, string.Join(",", t3));
+        var t4 = GroupFavorites.Toggle(new[] { "日常" }, "");
+        Check("开关/空名字忽略", t4.Length == 1 && t4[0] == "日常");
+        var t5 = GroupFavorites.Toggle(new[] { "日常" }, null!);
+        Check("开关/null 名字忽略", t5.Length == 1);
+        var t6 = GroupFavorites.Toggle(new[] { "a", "b" }, "A");
+        Check("开关/大小写不同算同一条", t6.Length == 1 && t6[0] == "b", string.Join(",", t6));
+
+        // ---- 6) IsFavorite ----
+        Check("判定/命中", GroupFavorites.IsFavorite(new[] { "日常" }, "日常"));
+        Check("判定/大小写", GroupFavorites.IsFavorite(new[] { "Daily" }, "daily"));
+        Check("判定/未命中", !GroupFavorites.IsFavorite(new[] { "日常" }, "活动"));
+        Check("判定/空表", !GroupFavorites.IsFavorite(Array.Empty<string>(), "日常"));
+        Check("判定/null 表", !GroupFavorites.IsFavorite(null, "日常"));
+
+        // ---- 7) Prune：BGI 里删掉的组要从常用表里清掉 ----
+        var pruned = GroupFavorites.Prune(new[] { "日常", "已删除", "活动" }, new[] { "日常", "活动", "收尾" });
+        Check("收敛/去掉失效项", pruned.SequenceEqual(new[] { "日常", "活动" }), string.Join(",", pruned));
+        Check("收敛/null 收藏返回空", GroupFavorites.Prune(null, groups).Length == 0);
+        Check("收敛/全失效清空", GroupFavorites.Prune(new[] { "完全没有" }, groups).Length == 0);
+
+        Console.WriteLine($"RESULT favorites fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
     }
 

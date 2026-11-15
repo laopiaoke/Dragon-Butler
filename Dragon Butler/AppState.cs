@@ -139,8 +139,29 @@ public class AppSettings
     /// <summary>只推送异常（Warning/Critical）；false=完成/启动也推送</summary>
     public bool NotifyOnlyImportant { get; set; } = false;
 
+    /// <summary>
+    /// v1.15 / L6：队列跑完那条通知的正文模板。空 = 用程序内置正文（升级后行为不变）。
+    /// 只认 {结果}{成功}{总数}{耗时}{原因}{现场}{收益} 七个占位符，见 NotifyTemplate。
+    /// </summary>
+    public string NotifyQueueTemplate { get; set; } = "";
+
     /// <summary>勾选的配置组（BGI 专用；非空时按 --startGroups 执行）</summary>
     public string[] SelectedGroups { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// v1.15 / L4：常跑的配置组。只影响勾选时的排列顺序，不写进 BetterGI 的任何文件。
+    /// 存组名而不是存索引——重识别之后索引会变，名字不会。
+    /// </summary>
+    public string[] FavoriteGroups { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// v1.15：配置组合（一条龙配置名 + 勾选的组，存几套反复用）。空 = 没建过，行为和以前一样。
+    /// 只影响我们传给 BGI 的命令行参数，不写 BGI 的任何文件。
+    /// </summary>
+    public List<ConfigPreset> Presets { get; set; } = new();
+
+    /// <summary>当前选中的配置组合 Id；空 = 用全局设置（DragonConfigName + SelectedGroups）。</summary>
+    public string ActivePresetId { get; set; } = "";
 
     /// <summary>
     /// v1.9 / P2：上一次**跑成功**时的 BetterGI 版本（只存主版本段，如 1.2.3）。
@@ -180,6 +201,12 @@ public class AppSettings
 
     /// <summary>跑完动作：Notify=仅通知（默认）/ Sleep=睡眠 / Shutdown=关机。</summary>
     public string AfterRunAction { get; set; } = "Notify";
+
+    /// <summary>
+    /// v1.15 / L5：跑完后要打开的第二个程序（路径）。只在 AfterRunAction = "OpenApp" 时用。
+    /// 存绝对路径，不存名字——按名字找程序在 Windows 上没有可靠做法，猜错了就是打开了别的东西。
+    /// </summary>
+    public string AfterRunAppPath { get; set; } = "";
 
     /// <summary>队列有失败项时是否仍执行睡眠/关机（默认关）。</summary>
     public bool AfterRunOnFailure { get; set; } = false;

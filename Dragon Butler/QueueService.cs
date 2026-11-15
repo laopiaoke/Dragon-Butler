@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -848,13 +849,62 @@ public static class QueueService
         if (string.Equals(profile.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase))
         {
             // v1.9 / P2：本项自己写了组就跑那几个，没写才用全局勾选（空＝交给配置名/默认流程）
+            // v1.15：中间的兜底从「全局勾选」改成「配置组合勾选，没有组合再用全局勾选」。
+            // 优先级 = 本项切片 > 配置组合 > 全局勾选；越具体越优先，和用户改动的顺序一致。
             var own = FindEntry(profile.ToolId)?.Groups;
-            var groups = GroupSlicing.Effective(own, AppState.Settings.SelectedGroups, SafeKnownGroups());
+            var presetGroups = ActivePresetGroups();
+            IReadOnlyList<string> fallback = presetGroups.Count > 0
+                ? presetGroups
+                : AppState.Settings.SelectedGroups;
+            var groups = GroupSlicing.Effective(own, fallback, SafeKnownGroups());
             if (groups.Count > 0)
                 return GroupSlicing.StartGroupsArgument(groups);
-            return ToolRunner.BuildArguments(profile, AppState.Settings.DragonConfigName);
+            return ToolRunner.BuildArguments(profile, ActiveDragonConfigName());
         }
         return ToolRunner.BuildArguments(profile, null);
+    }
+
+    /// <summary>
+    /// v1.15：这次开跑用哪个一条龙配置名。
+    /// 装了配置组合就跟着组合走，没装或组合已被删就退回全局设置——
+    /// 退回是静默的（只记日志），因为让「组合被删了」变成一次开跑失败毫无意义。
+    /// </summary>
+    private static string ActiveDragonConfigName()
+    {
+        try
+        {
+            string id = AppState.Settings.ActivePresetId ?? "";
+            if (string.IsNullOrWhiteSpace(id)) return AppState.Settings.DragonConfigName;
+
+            var preset = ConfigPresets.FindById(AppState.Settings.Presets, id);
+            if (preset == null)
+            {
+                LogService.LogEvent("配置组合已不存在，本次回退到全局设置：" + id);
+                return AppState.Settings.DragonConfigName;
+            }
+            return ConfigPresets.Expand(preset).DragonConfigName;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("读取配置组合失败，回退到全局设置：" + ex.Message);
+            return AppState.Settings.DragonConfigName;
+        }
+    }
+
+    /// <summary>
+    /// v1.15：这次开跑用哪几个配置组。组合里没勾组时返回空——空的意思是「不指定，交给 BGI 默认流程」，
+    /// 而不是「一个组都不跑」。
+    /// </summary>
+    private static List<string> ActivePresetGroups()
+    {
+        try
+        {
+            var preset = ConfigPresets.FindById(AppState.Settings.Presets, AppState.Settings.ActivePresetId);
+            return preset == null
+                ? new List<string>()
+                : ConfigPresets.Expand(preset).Groups.ToList();
+        }
+        catch { return new List<string>(); }
     }
 
     /// <summary>
@@ -1061,6 +1111,14 @@ public static class QueueService
         // 失败类通知带上现场包路径：人在外面看到这句话，才知道该去哪看
         if (bundleNote.Length > 0) text += bundleNote;
         text += harvestNote;
+
+        // v1.15 / L6：用户自己写了模板就用他的，没写就用上面这段内置正文。
+        // 只替换一句正文，标题、级别、跑完动作都不动——改正文不该牵出别的事。
+        string custom = NotifyTemplate.Render(
+            NotifyTemplate.OneLine(AppState.Settings.NotifyQueueTemplate),
+            BuildTemplateValues(ok, total, elapsed, ran, bundleNote, harvestNote));
+        if (custom.Length > 0) text = custom;
+
         NotifyService.Show(level, "龙管家", text);
 
         // v1.8 / F14：跑完说一句话。念的是给人听的一句口语，不是通知正文——
@@ -1094,6 +1152,30 @@ public static class QueueService
             HasFailure = anyFailed,
             Stopped = _stopRequested,
         });
+    }
+
+    /// <summary>
+    /// v1.15 / L6：给通知模板填值。
+    /// 「原因」取第一项没跑成的原因，「现场」「收益」沿用内置正文那两段（带前导空格，
+    /// 用户把它们放在句子中间读起来也不会粘在一起）。
+    /// </summary>
+    private static Dictionary<string, string> BuildTemplateValues(
+        int ok, int total, TimeSpan elapsed, List<QueueItemResult> ran, string bundleNote, string harvestNote)
+    {
+        string reason = "";
+        var bad = ran.FirstOrDefault(r => r.State != ToolRunState.Done);
+        if (bad != null) reason = bad.DisplayName + " " + bad.Reason;
+
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["结果"] = ok == total && total > 0 ? "成功" : "有失败",
+            ["成功"] = ok.ToString(),
+            ["总数"] = total.ToString(),
+            ["耗时"] = FormatDuration(elapsed),
+            ["原因"] = reason,
+            ["现场"] = bundleNote.Trim(),
+            ["收益"] = harvestNote.Trim(),
+        };
     }
 
     private static string FormatDuration(TimeSpan t)
@@ -1244,20 +1326,72 @@ public static class AfterRunActionService
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
 
+    /// <summary>
+    /// v1.15 / L5：跑完能不能做这件事。
+    ///
+    /// <para>
+    /// 关机、睡眠是破坏性动作，队列有失败就一律不做；但「再跑一轮」和「打开某个程序」
+    /// 不是破坏性动作，失败时也可以做——比如跑挂了之后把日志工具拉起来，正是最需要的时候。
+    /// </para>
+    /// <para>纯函数，便于断言。</para>
+    /// </summary>
+    public static bool ShouldRun(string? action, bool hasFailure, bool stopped, bool runOnFailure)
+    {
+        string a = action ?? "Notify";
+        if (string.Equals(a, "Notify", StringComparison.OrdinalIgnoreCase)) return false;
+        if (stopped) return false;
+        if (IsDestructive(a) && hasFailure && !runOnFailure) return false;
+        return true;
+    }
+
+    /// <summary>会造成「东西被关掉」的动作，失败时要让用户自己决定等不等。纯函数。</summary>
+    public static bool IsDestructive(string? action)
+        => string.Equals(action, "Sleep", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(action, "Shutdown", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>执行跑完动作。</summary>
     public static void Execute(AfterRunContext ctx)
     {
         string action = AppState.Settings.AfterRunAction ?? "Notify";
-        if (string.Equals(action, "Notify", StringComparison.OrdinalIgnoreCase)) return;
-
-        if (ctx.HasFailure && !AppState.Settings.AfterRunOnFailure)
+        if (!ShouldRun(action, ctx.HasFailure, ctx.Stopped, AppState.Settings.AfterRunOnFailure))
         {
-            LogService.LogEvent($"跑完动作：队列有失败项，跳过 {action}（仅通知）");
+            if (!string.Equals(action, "Notify", StringComparison.OrdinalIgnoreCase))
+                LogService.LogEvent(ctx.Stopped
+                    ? $"跑完动作：队列被用户停止，跳过 {action}"
+                    : $"跑完动作：队列有失败项，跳过 {action}（仅通知）");
             return;
         }
-        if (ctx.Stopped)
+
+        if (string.Equals(action, "OpenApp", StringComparison.OrdinalIgnoreCase))
         {
-            LogService.LogEvent($"跑完动作：队列被用户停止，跳过 {action}");
+            OpenApp(AppState.Settings.AfterRunAppPath);
+            return;
+        }
+
+        if (string.Equals(action, "RunAgain", StringComparison.OrdinalIgnoreCase))
+        {
+            // v1.15 / L5：再跑一轮。只在「上一轮一个都没失败」时才做，
+            // 因为失败的组再跑一次大概率还是一样地失败，白白多烧一小时。
+            if (ctx.HasFailure)
+            {
+                LogService.LogEvent("跑完动作：上一轮有失败项，不自动再跑一轮");
+                return;
+            }
+            try
+            {
+                LogService.LogEvent("跑完动作：再跑一轮");
+                NotifyService.Show(NotifyLevel.Info, "龙管家", "队列跑完了，接着再来一轮。");
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+                    try { await QueueService.StartAsync(QueueTrigger.Manual).ConfigureAwait(false); }
+                    catch (Exception ex) { LogService.LogEvent("再跑一轮失败：" + ex.Message); }
+                });
+            }
+            catch (Exception ex)
+            {
+                LogService.LogEvent("再跑一轮失败：" + ex.Message);
+            }
             return;
         }
 
@@ -1304,6 +1438,38 @@ public static class AfterRunActionService
             {
                 LogService.LogEvent("关机失败：" + ex.Message);
             }
+        }
+    }
+
+    /// <summary>
+    /// v1.15 / L5：跑完后顺手把另一个程序拉起来（典型用法：跑完打开游戏的启动器、或打开日志工具）。
+    ///
+    /// <para>
+    /// 只接受已存在的绝对路径——按名字找程序在 Windows 上没有可靠做法，猜错了就是打开了别的东西。
+    /// 路径不存在就只写日志，不去猜、也不弹窗打断。
+    /// </para>
+    /// </summary>
+    private static void OpenApp(string? path)
+    {
+        string p = (path ?? "").Trim();
+        if (p.Length == 0)
+        {
+            LogService.LogEvent("跑完动作：OpenApp 但没填路径，跳过");
+            return;
+        }
+        if (!File.Exists(p))
+        {
+            LogService.LogEvent($"跑完动作：要打开的程序不存在，跳过（{p}）");
+            return;
+        }
+        try
+        {
+            LogService.LogEvent($"跑完动作：打开程序 {p}");
+            Process.Start(new ProcessStartInfo(p) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开程序失败：" + ex.Message);
         }
     }
 }
