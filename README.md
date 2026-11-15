@@ -116,7 +116,7 @@ tools\*.json                工具档案
 dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
 ```
 
-测试是靠一个手写探针跑的，58 个模式、几百条断言：
+测试是靠一个手写探针跑的，65 个模式、几百条断言：
 
 ```
 dotnet build tests\CoordinatorProbe\CoordinatorProbe.csproj -c Release
