@@ -523,6 +523,28 @@ internal static class RenderProbe
                         w.Close();
                     }
 
+                    // v1.16：首次向导是每个新用户看到的第一个界面，从来没渲染验证过。
+                    // 三步都要看——第 2 步是自动寻找的列表，第 3 步是汇总，两处都是运行时生成的。
+                    if (mode == "wizard" || mode == "all")
+                    {
+                        SeedHeroState("ready");
+                        for (int step = 1; step <= 3; step++)
+                        {
+                            var w = new FirstRunWindow();
+                            // 步骤切换走私有方法，反射调它比自己摆一遍 Visibility 更接近真实
+                            var setter = typeof(FirstRunWindow).GetField("_step",
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            setter?.SetValue(w, step);
+                            var update = typeof(FirstRunWindow).GetMethod("UpdateUi",
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            update?.Invoke(w, null);
+                            w.UpdateLayout();
+                            bool ok = Save(w, Path.Combine(spot, $"wizard_{step}.png"), 620, 0);
+                            Console.WriteLine($"RENDER wizard_{step}={ok}");
+                            w.Close();
+                        }
+                    }
+
                     // v1.15 / L2：工具设置收成一行之后，得看两件事——
                     // 收起时那一行的摘要说得对不对，展开后原来三张卡还剩没剩。
                     if (mode == "tools" || mode == "all")

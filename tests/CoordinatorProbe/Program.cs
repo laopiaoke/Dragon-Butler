@@ -3820,6 +3820,21 @@ internal static class Program
         Check("渲染工具会造日历样例历史",
             probe.Contains("SeedSampleArchive", StringComparison.Ordinal));
 
+        // v1.16：首次向导是每个新用户看到的第一个界面，之前它的路径框是白底黑字——
+        // 代码里写了 Style="{StaticResource InputBox}"，但那是主窗的窗口级资源，
+        // 向导窗口取不到就静默退回系统默认浅色。这类问题只有真渲染才看得见。
+        string wizard = ReadRepoSources("Dragon Butler/FirstRunWindow.xaml");
+        Check("向导有自己的 InputBox 样式",
+            wizard.Contains("x:Key=\"InputBox\"", StringComparison.Ordinal));
+        Check("向导输入框不是系统默认浅色",
+            wizard.Contains("TargetType=\"TextBox\"", StringComparison.Ordinal)
+            && wizard.Contains("{DynamicResource InsetBrush}", StringComparison.Ordinal));
+        Check("向导勾选框自己画（不退回系统方框）",
+            wizard.Contains("x:Key=\"WizCheck\"", StringComparison.Ordinal)
+            && wizard.Contains("TargetType=\"CheckBox\"", StringComparison.Ordinal)
+            && wizard.Contains("Data=\"M 3.5 8 L 6.6 11 L 12.4 5\"", StringComparison.Ordinal));
+        Check("向导三步都有渲染用例", probe.Contains("\"wizard\"", StringComparison.Ordinal));
+
         Console.WriteLine($"RESULT uirules fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
     }
