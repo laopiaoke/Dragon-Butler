@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -145,6 +146,9 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(new Action(CenterOnActiveMonitor), DispatcherPriority.Render);
             // 向导放到窗口真正显示之后再弹，避免主界面停留在"未显示"状态
             Dispatcher.BeginInvoke(new Action(TryShowFirstRunWizard), DispatcherPriority.Background);
+            // v1.16：启动后安静地看一眼有没有新版。放这么晚是因为它要联网——
+            // 界面先出来，网络慢不该让窗口空着等。
+            StartBackgroundUpdateCheck();
         };
 
         _scheduleTimer.Tick += (_, _) => CheckSchedule();
@@ -2990,6 +2994,9 @@ public partial class MainWindow : Window
     private static string _medianKey = "";
     private static double? _medianValue;
 
+    /// <summary>拖拽悬停时是否已把首屏主卡点亮（避免每帧重设 BorderBrush）。</summary>
+    private bool _dropLit;
+
     private static double? MedianFor(string? group)
     {
         if (string.IsNullOrWhiteSpace(group)) return null;
@@ -3035,6 +3042,20 @@ public partial class MainWindow : Window
                 try
                 {
                     if (ToolRunner.HasExecutable(ProfileRegistry.Get(id))) { anyReady = true; break; }
+                }
+                catch { }
+            }
+
+            // v1.16：自定义工具也算。以前只认三个内置工具，
+            // 只配了自定义工具的人会一直看到「先告诉我在哪」，而他的工具明明已经能跑。
+            if (!anyReady)
+            {
+                try
+                {
+                    anyReady = (s.Queue ?? new List<QueueEntry>())
+                        .Select(q => q.ToolId)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Any(id => ToolRunner.HasExecutable(ProfileRegistry.Get(id)));
                 }
                 catch { }
             }
@@ -3179,14 +3200,129 @@ public partial class MainWindow : Window
         };
         if (dlg.ShowDialog(this) != true) return;
 
-        profile.ExecutablePath = dlg.FileName;
-        AppState.Settings.BgiPath = dlg.FileName;
-        ToolIconService.Invalidate("bettergi");
-        ProfileRegistry.Save(profile);
-        AppState.PublishLog("✓ 已设置 BetterGI 路径");
-        RefreshToolCard("bettergi");
-        RefreshDetectedGroups(force: true);
+        ApplyToolPath("bettergi", dlg.FileName);
+    }
+
+    /// <summary>
+    /// 把某个工具的路径定下来。选文件、拖进来都走这里——
+    /// 两处各写一遍的话，早晚有一处忘了刷配置组。
+    /// </summary>
+    private void ApplyToolPath(string toolId, string path)
+    {
+        try
+        {
+            var profile = ProfileRegistry.Get(toolId);
+            profile.ExecutablePath = path;
+            if (string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase))
+                AppState.Settings.BgiPath = path;
+            ToolIconService.Invalidate(toolId);
+            ProfileRegistry.Save(profile);
+            AppState.PublishLog($"✓ 已设置 {profile.DisplayName} 路径");
+            RefreshToolCard(toolId);
+            FindHintOf(toolId).Text = "";
+            if (string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase))
+                RefreshDetectedGroups(force: true);
+            RefreshHomeHero();
+            RefreshToolsSummary();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent($"设置 {toolId} 路径失败：{ex.Message}");
+        }
+    }
+
+    // ===== 拖进来一个 exe（v1.16）=====
+
+    /// <summary>
+    /// 拖放的目标是整张主卡。为什么不只在「工具设置」里接：v1.15 的三步引导
+    /// 就写在主卡上（「把 exe 直接拖进窗口」），而那句话当时是空的。
+    /// </summary>
+    private void OnWindowDragOver(object sender, DragEventArgs e)
+    {
+        bool ok = false;
+        try
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                var items = e.Data.GetData(DataFormats.FileDrop) as string[];
+                ok = items is { Length: 1 } && DropAssign.ToolOf(items[0]) != null;
+                // 目录也可能命中，但拖拽悬停时不去列目录（会在慢盘上卡住整个 UI）
+                if (!ok && items is { Length: 1 } && Directory.Exists(items[0])) ok = true;
+            }
+        }
+        catch { ok = false; }
+
+        e.Effects = ok ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+
+        // 能放的时候把首屏那张卡的描边点亮——光标形状之外再给一个「这里能松手」的信号。
+        // 光标本身在 Win11 上并不总变，尤其是拖文件夹的时候。
+        if (ok && !_dropLit)
+        {
+            _dropLit = true;
+            HomeHero.BorderBrush = BrushOf("BrandBrush") ?? DotGreen;
+        }
+        else if (!ok && _dropLit)
+        {
+            _dropLit = false;
+            RefreshHomeHero();
+        }
+    }
+
+    /// <summary>拖出窗口时把高亮收回去。不改文字、不动布局——拖拽过程中界面跳动最劝退。</summary>
+    private void OnWindowDragLeave(object sender, DragEventArgs e)
+    {
+        if (!_dropLit) return;
+        _dropLit = false;
         RefreshHomeHero();
+    }
+
+    private void OnWindowDrop(object sender, DragEventArgs e)
+    {
+        _dropLit = false;
+        try
+        {
+            if (e.Data.GetData(DataFormats.FileDrop) is not string[] items || items.Length == 0) return;
+            if (items.Length > 1)
+            {
+                AppDialog.Show("一次拖一个就好。", "拖多了我分不清哪个该给哪个工具，请逐个拖。",
+                    AppDialog.Kind.Info, "拖放", owner: this);
+                return;
+            }
+
+            string path = items[0];
+            bool isDir = Directory.Exists(path);
+            var hit = DropAssign.Resolve(
+                path,
+                File.Exists,
+                isDir,
+                dir => Directory.Exists(dir) ? Directory.GetFiles(dir, "*.exe") : Array.Empty<string>());
+
+            if (hit == null)
+            {
+                AppDialog.Show(DropAssign.Refusal(path), null, AppDialog.Kind.Warning, "拖放", owner: this);
+                return;
+            }
+
+            var (toolId, target) = hit.Value;
+            string name = DropAssign.DisplayName(toolId);
+            bool already = string.Equals(ProfileRegistry.Get(toolId).ExecutablePath, target, StringComparison.OrdinalIgnoreCase);
+            if (already)
+            {
+                AppState.PublishLog($"{name} 的路径没变，还是 {target}");
+                return;
+            }
+
+            ApplyToolPath(toolId, target);
+
+            // 一次拖放就改配置，得让人看见改成了什么——日志里一行不够显眼。
+            string preview = Path.GetFileName(target);
+            AppState.PublishLog($"拖放识别为 {name}：{preview}");
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("拖放失败：" + ex.Message);
+        }
     }
 
     /// <summary>上次那一轮开始的时刻。LastRunAt 存的是「yyyy-MM-dd HH:mm」，解析不出来就当没有。</summary>
@@ -3662,8 +3798,7 @@ public partial class MainWindow : Window
 
                 case "sys.openFolder": BtnOpenGroupDir_Click(this, new RoutedEventArgs()); break;
                 case "sys.check":
-                    NotifyService.Show(NotifyLevel.Info, "龙管家",
-                        "当前版本 " + ProductVersion() + "。新版本会在启动时自动提示，也可以到 GitHub 看 Release。");
+                    _ = CheckUpdateManualAsync();
                     break;
                 case "sys.about": OpenAbout(); break;
             }
@@ -3707,6 +3842,96 @@ public partial class MainWindow : Window
     }
 
     private static string ProductVersion() => typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.8.0";
+
+    // ===== 检查更新（v1.16）=====
+
+    private static DateTime _lastUpdateCheck = DateTime.MinValue;
+    private static bool _updateCheckRunning;
+
+    /// <summary>
+    /// 启动时静默查一次。查到了、且真有新版，才说话；没新版就完全不出声。
+    ///
+    /// <para>
+    /// 六小时一次的门槛是给「同一天反复开关」的人准备的——每次启动都请求一遍
+    /// GitHub 既没必要也会撞速率限制（匿名每小时 60 次，看着够，但公司网络是共用的）。
+    /// </para>
+    /// </summary>
+    private void StartBackgroundUpdateCheck()
+    {
+        if (_updateCheckRunning) return;
+        if (DateTime.Now - _lastUpdateCheck < UpdateCheck.MinGap) return;
+        _ = CheckUpdateCore(quiet: true);
+    }
+
+    /// <summary>用户点了「检查更新」。这时无论结果都要说一句，否则像是没反应。</summary>
+    private async Task CheckUpdateManualAsync()
+    {
+        var r = await CheckUpdateCore(quiet: false).ConfigureAwait(true);
+        try
+        {
+            AppState.PublishLog((r.HasNewer ? "↑ " : "· ") + r.Message);
+            if (r.HasNewer && !string.IsNullOrWhiteSpace(r.Detail))
+                NotifyService.Show(NotifyLevel.Info, "龙管家有新版本", r.Message + " " + r.Detail);
+        }
+        catch { }
+    }
+
+    private async Task<UpdateCheck.Result> CheckUpdateCore(bool quiet)
+    {
+        if (_updateCheckRunning)
+            return UpdateCheck.Describe(null, ProductVersion(), false, "正在检查");
+
+        _updateCheckRunning = true;
+        try
+        {
+            _lastUpdateCheck = DateTime.Now;
+            var r = await UpdateCheck.CheckAsync(ProductVersion()).ConfigureAwait(true);
+
+            if (r.HasNewer)
+            {
+                // 有新版才落日志：没新版也写一行，日志会被这些噪音撑满。
+                LogService.LogEvent("发现新版本：" + r.LatestTag + "（当前 " + ProductVersion() + "）");
+                ShowUpdateHint(r);
+            }
+            else if (!quiet)
+            {
+                LogService.LogEvent("检查更新：" + r.Message);
+            }
+            return r;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("检查更新出错：" + ex.Message);
+            return UpdateCheck.Describe(null, ProductVersion(), false, "出错了");
+        }
+        finally { _updateCheckRunning = false; }
+    }
+
+    /// <summary>有新版本时在首屏主卡下面挂一条，点了开浏览器。用户不点就一直在，直到他真的更新。</summary>
+    private void ShowUpdateHint(UpdateCheck.Result r)
+    {
+        try
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                TbUpdateHint.Visibility = Visibility.Visible;
+                TbUpdateHint.Text = "↑ " + r.Message + (string.IsNullOrWhiteSpace(r.Detail) ? "" : " " + r.Detail);
+                TbUpdateHint.Tag = r.Url;
+            }), DispatcherPriority.Background);
+        }
+        catch { }
+    }
+
+    private void TbUpdateHint_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        try
+        {
+            string? url = TbUpdateHint.Tag as string;
+            if (string.IsNullOrWhiteSpace(url)) return;
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex) { LogService.LogEvent("打开更新页面失败：" + ex.Message); }
+    }
 
     private void OpenAbout()
     {

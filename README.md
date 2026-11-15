@@ -148,4 +148,4 @@ dotnet "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.dll" 
 
 ## 版本
 
-最新发布 **v1.15**（程序内 `1.15.0`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。
+最新发布 **v1.16**（程序内 `1.16.0`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。

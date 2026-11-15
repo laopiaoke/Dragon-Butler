@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DragonButler;
@@ -500,6 +501,26 @@ internal static class RenderProbe
                             Console.WriteLine($"RENDER hero_{st}={ok}");
                             w.Close();
                         }
+                    }
+
+                    // v1.16：新版提示挂在首屏主卡下面。这条只在真有新版时出现，
+                    // 所以要手动把它点亮一次——不然永远截不到，等于没验版式。
+                    if (mode == "update" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedHeroState("ready");
+                        var w = new MainWindow();
+                        w.UpdateLayout();
+                        if (w.FindName("TbUpdateHint") is TextBlock hint)
+                        {
+                            hint.Text = "↑ 有新版本 v1.16（你现在是 1.15.0）。";
+                            hint.Tag = UpdateCheck.ReleasesUrl;
+                            hint.Visibility = Visibility.Visible;
+                        }
+                        w.UpdateLayout();
+                        bool ok = Save(w, Path.Combine(spot, "update_hint.png"), 980, 340);
+                        Console.WriteLine($"RENDER update_hint={ok}");
+                        w.Close();
                     }
 
                     // v1.15 / L2：工具设置收成一行之后，得看两件事——

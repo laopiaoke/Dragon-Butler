@@ -76,7 +76,10 @@ public partial class FirstRunWindow : Window
 
             var box = new TextBox
             {
-                Text = profile.ExecutablePath,
+                // 回到上一步再进来时，得把刚「自动寻找」的结果带回来。
+                // 只读 profile.ExecutablePath 的话，_found 里明明有值，框里却还是旧路径，
+                // 而点「下一步」存的是 _found——看得见和存得下的不是同一个东西。
+                Text = _found.TryGetValue(profile.ToolId, out var kept) ? kept : profile.ExecutablePath,
                 Height = 30,
                 IsReadOnly = true,
                 Style = TryFindResource("InputBox") as Style,
