@@ -1384,6 +1384,8 @@ public partial class MainWindow : Window
             try { RefreshCustomToolCard(id); } catch { }
         }
         RefreshToolsSummary();
+        // 路径或配置名刚变过时要重读；节流在 RefreshCompletionRow 里，20 秒最多读一次盘
+        try { RefreshCompletionRow(); } catch { }
     }
 
     private void RefreshToolCard(string toolId)
@@ -1906,6 +1908,245 @@ public partial class MainWindow : Window
         if (v == AppState.Settings.DragonConfigName) return;
         AppState.Settings.DragonConfigName = v;
         AppState.SaveSettings();
+        RefreshCompletionRow();
+    }
+
+    // ===== 一条龙的「跑完后动作」（v1.17 / M1-B）=====
+
+    /// <summary>上一次读到的文件内容与 mtime，写入前用来确认中间没人改过。</summary>
+    private string _completionJson = "";
+    private DateTime _completionMtime;
+    private string _completionLoadedFor = "";
+    private bool _completionRendering;
+    private DateTime _completionRefreshedAt;
+
+    /// <summary>
+    /// 刷新「跑完后让 BetterGI 自己做什么」这一行。
+    ///
+    /// 候选值来自**用户自己的配置**，不是我们硬编码的枚举——ABGI 文档没列合法取值，
+    /// 猜一个映射写进界面，猜错了用户会以为「选这个就是关机」而实际不是。
+    /// 所以在下列表里只呈现事实：这个值长什么样、哪些配置用过。
+    ///
+    /// 没有任何配置 → 提示去 BetterGI 里先设一次；配置名留空 → 说明这份设置只管
+    /// 全局默认，不知道 BGI 运行时选的是哪份。
+    /// </summary>
+    private void RefreshCompletionRow(bool force = false)
+    {
+        // 界面每秒刷一次，不能每次都读一遍目录里所有 json。
+        // 只有「路径变了 / 刚写完 / 用户点了重新识别」才需要重读。
+        if (!force && _completionRefreshedAt != default
+            && (DateTime.Now - _completionRefreshedAt) < TimeSpan.FromSeconds(20)
+            && _completionLoadedFor == (DragonCompletion.TargetJson(OneDragonDir(), AppState.Settings.DragonConfigName) ?? ""))
+            return;
+        _completionRefreshedAt = DateTime.Now;
+        try
+        {
+            _completionRendering = true;
+            CbCompletion.Items.Clear();
+
+            string oneDragonDir = OneDragonDir();
+            string configName = AppState.Settings.DragonConfigName;
+            string target = DragonCompletion.TargetJson(oneDragonDir, configName) ?? "";
+
+            if (oneDragonDir.Length == 0)
+            {
+                CbCompletion.IsEnabled = false;
+                TbCompletionHint.Text = "先填 BetterGI 路径";
+                TbCompletionHint.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+                return;
+            }
+            if (target.Length == 0)
+            {
+                CbCompletion.IsEnabled = false;
+                TbCompletionHint.Text = "留空时不改，用 BGI 当前选中的那份";
+                TbCompletionHint.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+                return;
+            }
+
+            var options = DragonCompletion.Scan(oneDragonDir, ReadAllTextOrNull, ListJson);
+            bool fileExists = File.Exists(target);
+            string current = "";
+            if (fileExists)
+            {
+                _completionJson = ReadAllTextOrNull(target) ?? "";
+                try { _completionMtime = File.GetLastWriteTime(target); } catch { _completionMtime = default; }
+                _completionLoadedFor = target;
+                current = DragonCompletion.CurrentValue(_completionJson);
+            }
+            else
+            {
+                _completionJson = "";
+                _completionLoadedFor = target;
+            }
+
+            if (options.Count == 0)
+            {
+                CbCompletion.IsEnabled = false;
+                TbCompletionHint.Text = fileExists ? "还没有配置设过这个值" : "这个配置文件已经不在了";
+                TbCompletionHint.Foreground = BrushOf("WarningBrush") ?? DotYellow;
+                return;
+            }
+
+            foreach (var o in options)
+                CbCompletion.Items.Add(new ComboBoxItem { Content = DragonCompletion.OptionText(o), Tag = o.Value });
+
+            // 当前值不在候选里（比如它是这份配置独有的），也要放进去，否则一打开就显示成别的值
+            if (current.Length > 0 && !options.Any(o => DragonCompletion.IsSameValue(o.Value, current)))
+                CbCompletion.Items.Add(new ComboBoxItem { Content = current + " · 只在这份里用", Tag = current });
+
+            SelectCompletionByValue(current);
+            CbCompletion.IsEnabled = true;
+            TbCompletionHint.Text = current.Length == 0 ? "现在没设，跑完 BGI 自己决定" : "改这里的会写进配置文件";
+            TbCompletionHint.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("刷新跑完后动作失败：" + ex.Message);
+            CbCompletion.IsEnabled = false;
+            TbCompletionHint.Text = "读配置时出了点问题";
+        }
+        finally
+        {
+            _completionRendering = false;
+        }
+    }
+
+    /// <summary>
+    /// 用户从下拉里选了另一个值。这里做三件事：
+    /// ① 选回原值就什么都不做（下拉的 SelectionChanged 在程序填列表时也会触发）；
+    /// ② 写入前把「现在能不能写」全过一遍——BGI 在跑、文件没了、中间被人改过，任一成立就拒；
+    /// ③ 先确认再写，写完把下拉重新刷一遍（从磁盘读回来，不是信任内存）。
+    /// </summary>
+    private void CbCompletion_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_completionRendering) return;
+        try
+        {
+            if (CbCompletion.SelectedItem is not ComboBoxItem item) return;
+            string want = DragonCompletion.CleanValue(item.Tag as string);
+            if (want.Length == 0) return;
+
+            string target = _completionLoadedFor;
+            if (target.Length == 0) { RefreshCompletionRow(); return; }
+
+            string current = DragonCompletion.CurrentValue(_completionJson);
+            if (DragonCompletion.IsSameValue(current, want)) return;
+
+            string configName = AppState.Settings.DragonConfigName;
+            bool running = ToolRunner.IsRunning(ProfileRegistry.Get("bettergi"));
+            DateTime? now = null;
+            try { if (File.Exists(target)) now = File.GetLastWriteTime(target); } catch { }
+
+            string? refuse = BgiConfigWriter.RefuseReason(target, OneDragonDir(), running,
+                File.Exists(target), _completionMtime == default ? null : _completionMtime, now);
+            if (refuse != null)
+            {
+                _completionRendering = true;
+                SelectCompletionByValue(current);
+                _completionRendering = false;
+                AppDialog.Show(refuse, null, AppDialog.Kind.Warning, "跑完后动作", owner: this);
+                return;
+            }
+
+            if (!AppDialog.Show(DragonCompletion.ConfirmText(configName, current, want), Path.GetFileName(target),
+                    AppDialog.Kind.Warning, "跑完后动作", "改", "算了", owner: this))
+            {
+                _completionRendering = true;
+                SelectCompletionByValue(current);
+                _completionRendering = false;
+                return;
+            }
+
+            string? patched = DragonCompletion.Apply(_completionJson, want);
+            if (patched == null)
+            {
+                _completionRendering = true;
+                SelectCompletionByValue(current);
+                _completionRendering = false;
+                AppDialog.Show("这个文件的结构和我们认识的不一样，没敢改。去 BetterGI 自己的界面里改这一项。",
+                    target, AppDialog.Kind.Warning, "跑完后动作", owner: this);
+                return;
+            }
+
+            var (ok, msg) = BgiConfigWriter.Save(AppContext.BaseDirectory, target, patched, DateTime.Now);
+            if (!ok)
+            {
+                _completionRendering = true;
+                SelectCompletionByValue(current);
+                _completionRendering = false;
+                AppDialog.Show(msg, null, AppDialog.Kind.Warning, "跑完后动作", owner: this);
+                AppState.PublishLog("✗ 改跑完后动作失败：" + msg);
+                return;
+            }
+
+            LogService.LogEvent($"改了跑完后动作：{configName} {current} → {want}（{target}）");
+            AppState.PublishLog($"✓ 跑完后动作已改为 {want}");
+            RefreshCompletionRow();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("改跑完后动作失败：" + ex.Message);
+            AppDialog.Show("改的时候出了点问题：" + ex.Message, null, AppDialog.Kind.Warning, "跑完后动作", owner: this);
+        }
+    }
+
+    private void BtnOpenOneDragonDir_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string dir = OneDragonDir();
+            if (dir.Length == 0 || !Directory.Exists(dir))
+            {
+                AppState.PublishLog("✗ 还没有设置 BetterGI 路径");
+                return;
+            }
+            RevealInExplorer(dir);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开一条龙目录失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 按值选中下拉项。**不能用 <see cref="SelectComboByTag"/>**：那个忽略大小写，
+    /// 而这里的值 `Sleep` 和 `sleep` 在 JSON 里是两个不同的东西，选错了会让人以为
+    /// 自己改的是另一个。找不到就保持未选中，不退回第一项——退回第一项等于悄悄换了个值。
+    /// </summary>
+    private void SelectCompletionByValue(string? value)
+    {
+        string v = value ?? "";
+        foreach (var item in CbCompletion.Items)
+        {
+            if (item is ComboBoxItem ci && DragonCompletion.IsSameValue(ci.Tag as string, v))
+            {
+                CbCompletion.SelectedItem = ci;
+                return;
+            }
+        }
+        CbCompletion.SelectedIndex = -1;
+    }
+
+    /// <summary>一条龙配置目录；没设路径或路径非法时返回 ""。</summary>
+    private static string OneDragonDir()
+    {
+        try
+        {
+            string probe = BgiConfigWriter.ConfigPath(BgiDiscovery.BgiRoot, "probe.json");
+            if (probe.Length == 0) return "";
+            return Path.GetDirectoryName(probe) ?? "";
+        }
+        catch { return ""; }
+    }
+
+    private static string? ReadAllTextOrNull(string path)
+    {
+        try { return File.ReadAllText(path); } catch { return null; }
+    }
+
+    private static IEnumerable<string> ListJson(string dir)
+    {
+        try { return Directory.GetFiles(dir, "*.json"); } catch { return Array.Empty<string>(); }
     }
 
     // ===== 配置组（BGI 工具卡内）=====
@@ -2095,6 +2336,7 @@ public partial class MainWindow : Window
     private void BtnRescanGroups_Click(object sender, RoutedEventArgs e)
     {
         RefreshDetectedGroups(force: true);
+        RefreshCompletionRow(force: true);
         AppState.PublishLog("✓ 已重新识别 BetterGI 配置组");
     }
 

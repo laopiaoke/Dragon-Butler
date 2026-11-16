@@ -122,13 +122,29 @@ internal static class RenderProbe
                 string file = Path.Combine(groupsDir, name + ".json");
                 if (!File.Exists(file)) File.WriteAllText(file, "{}");
             }
+            // v1.17：一条龙配置也要造两份，「跑完后动作」的下拉才有候选值可显示。
+            // 两份故意用不同的值，这样截图里能看出「这个值哪些配置用过」这件事。
+            string oneDragonDir = Path.Combine(root, "User", "OneDragon");
+            Directory.CreateDirectory(oneDragonDir);
+            WriteIfMissing(Path.Combine(oneDragonDir, "日常.json"),
+                "{\n  \"name\": \"日常\",\n  \"tasks\": [],\n  \"settings\": { \"completionAction\": \"Shutdown\", \"partyName\": \"旅行者\" }\n}");
+            WriteIfMissing(Path.Combine(oneDragonDir, "深渊.json"),
+                "{\n  \"name\": \"深渊\",\n  \"tasks\": [],\n  \"settings\": { \"completionAction\": \"Shutdown\" }\n}");
+            WriteIfMissing(Path.Combine(oneDragonDir, "挖矿.json"),
+                "{\n  \"name\": \"挖矿\",\n  \"tasks\": [],\n  \"settings\": { \"completionAction\": \"Sleep\" }\n}");
             AppState.Settings.BgiPath = Path.Combine(root, "BetterGI.exe");
+            AppState.Settings.DragonConfigName = "日常";
             BgiDiscovery.Scan(force: true);
         }
         catch (Exception ex)
         {
             Console.WriteLine("SEED-BGI-FAIL " + ex.Message);
         }
+    }
+
+    private static void WriteIfMissing(string path, string content)
+    {
+        try { if (!File.Exists(path)) File.WriteAllText(path, content); } catch { }
     }
 
     /// <summary>
@@ -578,6 +594,37 @@ internal static class RenderProbe
                         }
                         bool ok = Save(w, Path.Combine(spot, "tools_open.png"), 980, 560);
                         Console.WriteLine($"RENDER tools_open={ok}");
+                        w.Close();
+                    }
+
+                    // v1.17 / M1-B：「跑完后让 BetterGI 自己做什么」那一行。
+                    // 这一行只有展开 BetterGI 卡才看得见，而且下拉里必须有真候选值，
+                    // 否则截出来是个空下拉，等于没验。
+                    if (mode == "completion" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedHeroState("ready");
+                        var w = new MainWindow();
+                        w.UpdateLayout();
+                        if (w.FindName("ToolCardsHost") is FrameworkElement host3)
+                            host3.Visibility = Visibility.Visible;
+                        if (w.FindName("Body_bettergi") is FrameworkElement bgiBody3)
+                            bgiBody3.Visibility = Visibility.Visible;
+                        BgiDiscovery.Scan(force: true);
+                        var picker3 = typeof(MainWindow).GetMethod("RefreshGroupPicker",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        picker3?.Invoke(w, null);
+                        var refresh = typeof(MainWindow).GetMethod("RefreshCompletionRow",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        refresh?.Invoke(w, new object[] { true });
+                        w.UpdateLayout();
+                        if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer sv3)
+                        {
+                            sv3.ScrollToVerticalOffset(500);
+                            w.UpdateLayout();
+                        }
+                        bool ok = Save(w, Path.Combine(spot, "completion.png"), 980, 620);
+                        Console.WriteLine($"RENDER completion={ok}");
                         w.Close();
                     }
 

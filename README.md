@@ -116,7 +116,7 @@ tools\*.json                工具档案
 dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
 ```
 
-测试是靠一个手写探针跑的，66 个模式、几百条断言：
+测试是靠一个手写探针跑的，67 个模式、几百条断言：
 
 ```
 dotnet build tests\CoordinatorProbe\CoordinatorProbe.csproj -c Release
@@ -148,4 +148,4 @@ dotnet "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.dll" 
 
 ## 版本
 
-最新发布 **v1.17**（程序内 `1.17.0`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。
+最新发布 **v1.18**（程序内 `1.18.0`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。

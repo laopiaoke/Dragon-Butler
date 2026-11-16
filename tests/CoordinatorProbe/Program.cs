@@ -58,6 +58,7 @@ internal static class Program
             "afterrun" => RunAfterRun(),
             "template" => RunTemplate(),
             "bgiwrite" => RunBgiWrite(),
+            "completion" => RunCompletion(),
         "presets" => RunPresets(),
         "drop" => RunDrop(),
         "update" => RunUpdate(),
@@ -1142,6 +1143,127 @@ internal static class Program
         try { Directory.Delete(root, true); } catch { }
 
         Console.WriteLine($"RESULT bgiwrite fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.17 / M1-B：一条龙「跑完后动作」。
+    /// 最要紧的三件事：候选只能来自用户自己的配置（不硬编码枚举）、
+    /// `Sleep` 与 `sleep` 是两个值不能合并、写入前必须过那四道拒写闸。
+    /// </summary>
+    private static int RunCompletion()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // ---- 候选值清洗 ----
+        Check("清洗/去首尾空白", DragonCompletion.CleanValue("  Shutdown  ") == "Shutdown");
+        Check("清洗/换行转掉", DragonCompletion.CleanValue("Sleep\n") == "Sleep");
+        Check("清洗/中间控制字符去掉", !DragonCompletion.CleanValue("Sle\tep").Contains('\t'));
+        Check("清洗/空返回空", DragonCompletion.CleanValue("") == "");
+        Check("清洗/全空白返回空", DragonCompletion.CleanValue("   ") == "");
+        Check("清洗/null 返回空", DragonCompletion.CleanValue(null) == "");
+        Check("清洗/超长截断", DragonCompletion.CleanValue(new string('a', 200)).Length == DragonCompletion.MaxValueChars);
+
+        // ---- 目标文件：留空就不改 ----
+        string dir = Path.Combine(Path.GetTempPath(), "dragon-completion");
+        Check("目标/正常拼出", DragonCompletion.TargetJson(dir, "日常") == Path.Combine(dir, "日常.json"));
+        Check("目标/名字留空返回 null", DragonCompletion.TargetJson(dir, "") == null);
+        Check("目标/名字不安全返回 null", DragonCompletion.TargetJson(dir, "../x") == null);
+        Check("目标/目录为空返回 null", DragonCompletion.TargetJson("", "日常") == null);
+        Check("目标/名字 null 返回 null", DragonCompletion.TargetJson(dir, null) == null);
+
+        // ---- 扫描：候选全部来自文件，且大小写不合并 ----
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Path.Combine(dir, "日常.json")] =
+                "{\"name\":\"日常\",\"settings\":{\"completionAction\":\"Shutdown\"}}",
+            [Path.Combine(dir, "深渊.json")] =
+                "{\"name\":\"深渊\",\"settings\":{\"completionAction\":\"Shutdown\"}}",
+            [Path.Combine(dir, "挖矿.json")] =
+                "{\"name\":\"挖矿\",\"settings\":{\"completionAction\":\"Sleep\"}}",
+            [Path.Combine(dir, "小写.json")] =
+                "{\"name\":\"小写\",\"settings\":{\"completionAction\":\"sleep\"}}",
+            [Path.Combine(dir, "没设.json")] =
+                "{\"name\":\"没设\",\"settings\":{}}",
+            [Path.Combine(dir, "坏了.json")] = "{ 这不是 json",
+            [Path.Combine(dir, "说明.txt")] = "ignore",
+        };
+        string? ReadFile(string p) => files.TryGetValue(p, out var t) ? t : null;
+        IEnumerable<string> ListAll(string _) => files.Keys;
+
+        var options = DragonCompletion.Scan(dir, ReadFile, ListAll);
+        var values = options.Select(o => o.Value).ToList();
+        Check("扫描/只收出现过的值", values.Count == 3, string.Join(",", values));
+        Check("扫描/含 Shutdown", values.Contains("Shutdown"));
+        Check("扫描/含 Sleep", values.Contains("Sleep"));
+        Check("扫描/大写和小写是两个值", values.Contains("sleep") && values.Count(v => v.Equals("sleep", StringComparison.OrdinalIgnoreCase)) == 2);
+        Check("扫描/坏了的那份不参与", !options.Any(o => o.UsedBy.Contains("坏了")));
+        Check("扫描/没设值的不参与", !options.Any(o => o.UsedBy.Contains("没设")));
+        Check("扫描/不收非 json", !options.Any(o => o.UsedBy.Contains("说明")));
+        var shutdown = options.First(o => o.Value == "Shutdown");
+        Check("扫描/记录哪些配置在用", shutdown.UsedBy.Count == 2, string.Join(",", shutdown.UsedBy));
+        Check("扫描/UsedBy 不重复", options.All(o => o.UsedBy.Distinct(StringComparer.OrdinalIgnoreCase).Count() == o.UsedBy.Count));
+        Check("扫描/按值排序", values.SequenceEqual(options.Select(o => o.Value).OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ThenBy(v => v, StringComparer.Ordinal)));
+        Check("扫描/目录空返回空", DragonCompletion.Scan("", ReadFile, ListAll).Count == 0);
+        Check("扫描/目录不存在不抛", DragonCompletion.Scan(Path.Combine(dir, "没有"), ReadFile, p => throw new IOException()).Count == 0);
+        Check("扫描/读文件抛异常跳过", DragonCompletion.Scan(dir, _ => throw new IOException(), ListAll).Count == 0);
+
+        // ---- 读当前值 ----
+        Check("当前值/读得到", DragonCompletion.CurrentValue(files[Path.Combine(dir, "日常.json")]) == "Shutdown");
+        Check("当前值/没设返回空", DragonCompletion.CurrentValue(files[Path.Combine(dir, "没设.json")]) == "");
+        Check("当前值/坏 JSON 返回空", DragonCompletion.CurrentValue("{ 坏") == "");
+
+        // ---- 比较：区分大小写 ----
+        Check("比较/相同为真", DragonCompletion.IsSameValue("Sleep", "Sleep"));
+        Check("比较/大小写不同为假", !DragonCompletion.IsSameValue("Sleep", "sleep"));
+        Check("比较/两个空为真", DragonCompletion.IsSameValue("", ""));
+        Check("比较/null 与空等价", DragonCompletion.IsSameValue(null, ""));
+
+        // ---- 改值：只动那一个键 ----
+        string src = files[Path.Combine(dir, "日常.json")];
+        string? applied = DragonCompletion.Apply(src, "Sleep");
+        Check("改值/返回新内容", applied != null);
+        Check("改值/目标变了", DragonCompletion.CurrentValue(applied!) == "Sleep");
+        // 注意：SetString 走 WriteIndented，写回去是 "name": "日常"（冒号后有空格），
+        // 所以这里按读回来的值判断，不去匹配格式化后的字面量。
+        Check("改值/别的字段没动", BgiConfigWriter.GetString(applied, "name") == "日常",
+            BgiConfigWriter.GetString(applied, "name") ?? "null");
+        Check("改值/中文没被转义", (applied ?? "").Contains("日常", StringComparison.Ordinal));
+        Check("改值/空值返回 null", DragonCompletion.Apply(src, "") == null);
+        Check("改值/结构不认识返回 null", DragonCompletion.Apply("{\"name\":\"x\"}", "Sleep") == null);
+        Check("改值/坏 JSON 返回 null", DragonCompletion.Apply("{ 坏", "Sleep") == null);
+        Check("改值/值会先清洗", DragonCompletion.CurrentValue(DragonCompletion.Apply(src, "  Sleep  ") ?? "") == "Sleep");
+
+        // ---- 下拉文案：呈现事实，不编中文含义 ----
+        Check("文案/带用例", DragonCompletion.OptionText(shutdown).Contains("Shutdown") && DragonCompletion.OptionText(shutdown).Contains("日常"));
+        Check("文案/没用例就只给值", DragonCompletion.OptionText(new CompletionOption { Value = "X" }) == "X");
+        Check("文案/null 返回空", DragonCompletion.OptionText(null) == "");
+
+        // ---- 确认弹窗必须说清三件事 ----
+        string confirm = DragonCompletion.ConfirmText("日常", "Shutdown", "Sleep");
+        Check("确认/含文件名", confirm.Contains("日常.json", StringComparison.Ordinal));
+        Check("确认/含从什么到什么", confirm.Contains("Shutdown", StringComparison.Ordinal) && confirm.Contains("Sleep", StringComparison.Ordinal));
+        Check("确认/提到会备份", confirm.Contains("bgi-backup", StringComparison.Ordinal));
+        Check("确认/说明含义由 BGI 决定", confirm.Contains("BetterGI", StringComparison.Ordinal));
+        Check("确认/原值为空时说不空转", DragonCompletion.ConfirmText("日常", "", "Sleep").Contains("现在是空的", StringComparison.Ordinal));
+
+        // ---- 接线：界面里真的接上了 ----
+        string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        Check("接线/下拉在界面上", mainXaml.Contains("\"CbCompletion\"", StringComparison.Ordinal));
+        Check("接线/有提示行", mainXaml.Contains("\"TbCompletionHint\"", StringComparison.Ordinal));
+        Check("接线/选了会处理", mainXaml.Contains("CbCompletion_SelectionChanged", StringComparison.Ordinal));
+        Check("接线/写入前过拒写闸", mainCs.Contains("BgiConfigWriter.RefuseReason(target", StringComparison.Ordinal));
+        Check("接线/写入走 Save（带备份）", mainCs.Contains("BgiConfigWriter.Save(AppContext.BaseDirectory, target", StringComparison.Ordinal));
+        Check("接线/不忽略大小写选值", mainCs.Contains("SelectCompletionByValue", StringComparison.Ordinal));
+        Check("接线/有节流", mainCs.Contains("_completionRefreshedAt", StringComparison.Ordinal));
+
+        Console.WriteLine($"RESULT completion fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
     }
 
