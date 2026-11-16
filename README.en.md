@@ -115,7 +115,7 @@ Requires .NET 8 SDK. Zero NuGet dependencies:
 dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
 ```
 
-Tests run through a hand-written probe: 65 modes, several hundred assertions.
+Tests run through a hand-written probe: 66 modes, several hundred assertions.
 
 ```
 dotnet build tests\CoordinatorProbe\CoordinatorProbe.csproj -c Release
@@ -147,4 +147,4 @@ Released under [GNU AGPL-3.0](LICENSE). You may use, modify and redistribute it 
 
 ## Version
 
-Latest release **v1.16** (in-app `1.16.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).
+Latest release **v1.17** (in-app `1.17.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).

@@ -617,14 +617,14 @@ internal static class RenderProbe
                         }
                     }
 
-                    if (mode == "main" || mode == "advanced" || mode == "top" || mode == "running" || mode == "notify" || mode == "all")
+                    if (mode == "main" || mode == "advanced" || mode == "top" || mode == "running" || mode == "notify" || mode == "backup" || mode == "all")
                     {
                         var w = new MainWindow();
                         // 折叠状态下的「高级设置」在渲染里看不见，而 v1.10 新增的开关就在那儿。
                         // 专门留一个 advanced 模式把它展开再截图，否则只能靠读代码确认布局。
                         // v1.12：advanced 滚到底，top 滚到顶——同一张长图两头都要能看清，
                         // 只留滚到底那种会让第一行被切掉半截。
-                        bool expanded = mode == "advanced" || mode == "top" || mode == "notify";
+                        bool expanded = mode == "advanced" || mode == "top" || mode == "notify" || mode == "backup";
                         if (expanded)
                         {
                             // v1.15 / L6：通知卡也要能展开拍——模板输入框就在那张卡里。
@@ -655,6 +655,16 @@ internal static class RenderProbe
                                 w.UpdateLayout();
                             }
                         }
+                        // v1.17：备份那一行在系统卡末尾，滚到底会被状态条压住，同样用 BringIntoView。
+                        if (mode == "backup")
+                        {
+                            w.UpdateLayout();
+                            if (w.FindName("BtnBackupNow") is FrameworkElement row)
+                            {
+                                row.BringIntoView();
+                                w.UpdateLayout();
+                            }
+                        }
                         // v1.13：实时条是跑起来才出现的，构造完窗口不会自己刷一次——
                         // 不在这里手动触发，running 模式截到的永远是空着的队列卡。
                         if (mode == "running")
@@ -671,6 +681,7 @@ internal static class RenderProbe
                                     : mode == "top" ? "advanced_top.png"
                                     : mode == "running" ? "running.png"
                                     : mode == "notify" ? "notify.png"
+                                    : mode == "backup" ? "backup.png"
                                     : "main.png";
                         bool ok = Save(w, Path.Combine(spot, file), 980, 0);
                         Console.WriteLine($"RENDER {Path.GetFileNameWithoutExtension(file)}={ok}");

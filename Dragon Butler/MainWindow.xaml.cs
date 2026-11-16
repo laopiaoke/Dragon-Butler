@@ -2098,6 +2098,217 @@ public partial class MainWindow : Window
         AppState.PublishLog("✓ 已重新识别 BetterGI 配置组");
     }
 
+    // ===== 备份与恢复（v1.17）=====
+
+    /// <summary>
+    /// 备份：先问要不要连一条龙配置一起带（它可能含账号路线，不是人人都想发出去），
+    /// 再打包。包落在 exe 旁「备份」目录，打完立刻把路径显示出来并选中——
+    /// 用户下一步多半是把它发给自己或拷到 U 盘，「打好了但不知道在哪」等于没打。
+    /// </summary>
+    private void BtnBackupNow_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string cfgDir = Path.GetDirectoryName(AppState.SettingsPath) ?? "";
+            if (cfgDir.Length == 0)
+            {
+                AppDialog.Show("找不到配置目录，没法备份。", null, AppDialog.Kind.Warning, "备份", owner: this);
+                return;
+            }
+
+            var oneDragon = BgiConfigWriter.ConfigPath(BgiDiscovery.BgiRoot, "probe.json");
+            string? oneDragonDir = oneDragon == null ? null : Path.GetDirectoryName(oneDragon);
+            int bgiCount = 0;
+            if (oneDragonDir != null && Directory.Exists(oneDragonDir))
+                bgiCount = SettingsBackup.CollectBgiFiles(oneDragonDir, File.Exists, Directory.GetFiles).Count;
+
+            bool withBgi = false;
+            if (bgiCount > 0)
+            {
+                withBgi = AppDialog.Show(
+                    $"要不要把 {bgiCount} 个一条龙配置也打进包里？",
+                    "带上：换台机器也能直接用同一套路线。\n不带：包更小，也不含你自己写的路线内容。",
+                    AppDialog.Kind.Info, "备份设置", "带上", "只备份设置", owner: this);
+            }
+
+            var files = new List<KeyValuePair<string, string>>();
+            foreach (var name in SettingsBackup.CollectFiles(cfgDir, File.Exists))
+                files.Add(new(name, Path.Combine(cfgDir, name)));
+            if (withBgi && oneDragonDir != null)
+            {
+                foreach (var name in SettingsBackup.CollectBgiFiles(oneDragonDir, File.Exists, Directory.GetFiles))
+                    files.Add(new(SettingsBackup.BgiEntry + name, Path.Combine(oneDragonDir, name)));
+            }
+
+            string zip = Path.Combine(SettingsBackup.Dir, SettingsBackup.FileName(DateTime.Now));
+            var (ok, msg) = SettingsBackup.WritePackage(zip, files, DateTime.Now);
+            if (!ok)
+            {
+                AppDialog.Show(msg, null, AppDialog.Kind.Warning, "备份设置", owner: this);
+                AppState.PublishLog("✗ 备份没成功：" + msg);
+                return;
+            }
+
+            LogService.LogEvent("已备份设置：" + zip);
+            AppState.PublishLog("✓ 已备份到 " + Path.GetFileName(zip));
+            AppDialog.Show("备份好了。", zip, AppDialog.Kind.Info, "备份设置", "知道了", "打开所在文件夹",
+                () => RevealInExplorer(zip), this, zip);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("备份失败：" + ex.Message);
+            AppDialog.Show("备份时出了点问题：" + ex.Message, null, AppDialog.Kind.Warning, "备份设置", owner: this);
+        }
+    }
+
+    /// <summary>
+    /// 恢复：这是全程序唯一一个「点一下就把现有东西换掉」的操作，所以分三步——
+    /// 先说会覆盖什么 → 先把当前这份自动备份一次 → 再解包。
+    /// **自动备份失败就整个不做**：宁可这次恢复不成功，也不能让用户两头落空。
+    /// </summary>
+    private void BtnBackupRestore_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string cfgDir = Path.GetDirectoryName(AppState.SettingsPath) ?? "";
+            if (cfgDir.Length == 0)
+            {
+                AppDialog.Show("找不到配置目录，没法恢复。", null, AppDialog.Kind.Warning, "恢复设置", owner: this);
+                return;
+            }
+
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "选一个之前备份的包",
+                Filter = "一条龙管家备份|*.zip|所有文件|*.*",
+                InitialDirectory = Directory.Exists(SettingsBackup.Dir) ? SettingsBackup.Dir : cfgDir,
+            };
+            if (dlg.ShowDialog(this) != true) return;
+
+            var manifest = SettingsBackup.ReadManifest(dlg.FileName, out string reason);
+            if (manifest == null)
+            {
+                AppDialog.Show(reason, null, AppDialog.Kind.Warning, "恢复设置", owner: this);
+                return;
+            }
+
+            bool hasBgi = manifest.BgiFiles.Count > 0;
+            string extra = hasBgi ? $"\n包里还有 {manifest.BgiFiles.Count} 个一条龙配置。" : "";
+            if (!AppDialog.Show(SettingsBackup.RestorePrompt(manifest, dlg.FileName) + extra,
+                    Path.GetFileName(dlg.FileName), AppDialog.Kind.Warning, "恢复设置", "恢复", "算了", owner: this))
+                return;
+
+            // 先给现在这份留底
+            var current = new List<KeyValuePair<string, string>>();
+            foreach (var name in SettingsBackup.CollectFiles(cfgDir, File.Exists))
+                current.Add(new(name, Path.Combine(cfgDir, name)));
+            string safety = Path.Combine(SettingsBackup.Dir, "恢复前-" + SettingsBackup.FileName(DateTime.Now));
+            var (bOk, bMsg) = SettingsBackup.WritePackage(safety, current, DateTime.Now);
+            if (!bOk)
+            {
+                AppDialog.Show("没能先备份现在这份，为了不丢东西这次没有恢复。", bMsg,
+                    AppDialog.Kind.Warning, "恢复设置", owner: this);
+                AppState.PublishLog("✗ 恢复中止（自动备份失败）：" + bMsg);
+                return;
+            }
+
+            string? oneDragonDir = null;
+            if (hasBgi)
+            {
+                var probe = BgiConfigWriter.ConfigPath(BgiDiscovery.BgiRoot, "probe.json");
+                if (probe != null) oneDragonDir = Path.GetDirectoryName(probe);
+                if (oneDragonDir == null || !Directory.Exists(oneDragonDir))
+                {
+                    AppDialog.Show("包里有一条龙配置，但这台机器还没填 BetterGI 路径，这次只恢复设置。",
+                        null, AppDialog.Kind.Info, "恢复设置", owner: this);
+                    oneDragonDir = null;
+                }
+            }
+
+            var (restored, skipped, msg) = SettingsBackup.Extract(dlg.FileName, cfgDir, oneDragonDir, oneDragonDir != null);
+            if (restored == 0)
+            {
+                AppDialog.Show(msg, null, AppDialog.Kind.Warning, "恢复设置", owner: this);
+                AppState.PublishLog("✗ 恢复没成功：" + msg);
+                return;
+            }
+
+            LogService.LogEvent($"已从 {Path.GetFileName(dlg.FileName)} 恢复 {restored} 个文件，恢复前那份在 {safety}");
+            AppState.PublishLog($"✓ 已恢复 {restored} 个文件");
+
+            string detail = skipped.Count > 0
+                ? $"{msg}跳过 {skipped.Count} 个不认识的条目。\n恢复前那份在：{safety}"
+                : $"恢复前那份在：{safety}";
+            AppDialog.Show("恢复完了。程序需要重开一次才会用上新设置。", detail,
+                AppDialog.Kind.Info, "恢复设置", "重开程序", "稍后", RestartSelf, this);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("恢复失败：" + ex.Message);
+            AppDialog.Show("恢复时出了点问题：" + ex.Message, null, AppDialog.Kind.Warning, "恢复设置", owner: this);
+        }
+    }
+
+    private void BtnBackupOpen_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsBackup.Dir);
+            RevealInExplorer(SettingsBackup.Dir);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开备份目录失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>在资源管理器里定位到某个文件或目录（选中它，而不是只打开一层）</summary>
+    private static void RevealInExplorer(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{path}\"")
+                {
+                    UseShellExecute = true,
+                });
+                return;
+            }
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{path}\"")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开资源管理器失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>重启自己：把当前 exe 路径交给系统再拉一次，然后关掉这个进程</summary>
+    private void RestartSelf()
+    {
+        try
+        {
+            string? exe = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exe))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe)
+                {
+                    UseShellExecute = true,
+                });
+            }
+            LogService.LogEvent("恢复后重启程序");
+            Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("重启失败，请手动重开：" + ex.Message);
+            AppDialog.Show("没能自动重开，请手动关掉再打开一次。", null, AppDialog.Kind.Warning, "恢复设置", owner: this);
+        }
+    }
+
     private void RefreshDetectedGroups(bool force = false)
     {
         try

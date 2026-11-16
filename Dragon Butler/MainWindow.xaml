@@ -1588,6 +1588,7 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <Grid Grid.Row="0" Grid.Column="0" Margin="0,6,14,6">
@@ -1701,6 +1702,27 @@
                                     <TextBlock Text="跑完说一句话" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="TgSpeech" Style="{StaticResource SwitchStyle}"
                                                   HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSpeech_Click"/>
+                                </Grid>
+
+                                <!-- v1.17：备份与恢复（唯一一个「点一下会换掉现有东西」的入口，所以措辞刻意啰嗦） -->
+                                <Grid Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,10,0,6">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="备份设置" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <Button x:Name="BtnBackupNow" Content="存一份" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0" Click="BtnBackupNow_Click"/>
+                                                <Button x:Name="BtnBackupRestore" Content="从包恢复" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0" Margin="6,0,0,0" Click="BtnBackupRestore_Click"/>
+                                                <Button x:Name="BtnBackupOpen" Content="打开文件夹" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0" Margin="6,0,0,0" Click="BtnBackupOpen_Click"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock x:Name="TbBackupHint"
+                                                   Text="把设置、配置组常用、运行台账和个人收益记录打成一个 zip；一条龙配置要不要一起带上，在弹窗里选。恢复前会先把现在这份备份一次。"
+                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                    </StackPanel>
                                 </Grid>
                             </Grid>
                         </StackPanel>
