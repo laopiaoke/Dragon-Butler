@@ -45,6 +45,9 @@ public static class CommandRegistry
         new("view.logrules",  "日志规则",               "导航", "日志 规则 关键词 提醒 rules log keyword"),
         new("view.depends",   "依赖编排",               "导航", "依赖 dag 顺序 depends"),
         new("view.groups",    "配置组切片",             "导航", "配置组 切片 groups slice"),
+        new("view.preflight", "开跑前体检",             "导航", "体检 检查 自检 开跑 前置 preflight check doctor"),
+        new("view.presets",   "配置组合",               "导航", "组合 预设 方案 preset presets"),
+        new("view.notify",    "通知设置",               "导航", "通知 提醒 推送 notify"),
 
         new("tool.copyToken", "复制控制 API 令牌",      "控制", "令牌 token api 复制"),
         new("tool.apiToggle", "开关本机控制 API",       "控制", "api 控制 开关"),

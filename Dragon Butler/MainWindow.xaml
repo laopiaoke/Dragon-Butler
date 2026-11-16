@@ -1607,7 +1607,7 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <Grid Grid.Row="0" Grid.Column="0" Margin="0,6,14,6">
@@ -1739,6 +1739,25 @@
                                         </Grid>
                                         <TextBlock x:Name="TbBackupHint"
                                                    Text="把设置、配置组常用、运行台账和个人收益记录打成一个 zip；一条龙配置要不要一起带上，在弹窗里选。恢复前会先把现在这份备份一次。"
+                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- v1.19：开跑前体检。放这里而不是队列卡标题行——那边已经有五个按钮，
+                                     再加一个就把标题压没了（v1.15 修过一次）。真正的拦截在「一键开跑」上，
+                                     这里只是一个能随时自己打开看的入口。 -->
+                                <Grid Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,4,0,6">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="开跑前体检" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <Button x:Name="BtnPreflight" Content="检查一下" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0" Click="BtnPreflight_Click"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock x:Name="TbPreflightHint"
+                                                   Text="看路径、队列、配置组、通知有没有没弄好的地方。只读，不改任何东西；开跑时也会自动查一遍，只有真挡路的才会拦你。"
                                                    FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
                                                    TextWrapping="Wrap" Margin="0,3,0,0"/>
                                     </StackPanel>

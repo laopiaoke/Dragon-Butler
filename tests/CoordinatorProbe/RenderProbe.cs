@@ -597,6 +597,42 @@ internal static class RenderProbe
                         w.Close();
                     }
 
+                    // v1.19：开跑前体检窗。两种状态各截一张——全是坑的和基本健康的，
+                    // 只截一种看不出「重的排前面」和「只提示不挡路」到底长什么样。
+                    if (mode == "preflight" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedHeroState("ready");
+
+                        PreflightInput Messy() => new(
+                            BgiConfigured: false, BgiExists: false, BgiRunning: true,
+                            EnabledTools: 2, ReadyTools: 1, GroupCount: 0,
+                            DragonConfigName: "日常", DragonConfigs: Array.Empty<string>(),
+                            NotifyMode: "Feishu", NotifyEndpoint: "",
+                            MissingPresetGroups: Array.Empty<string>(), PresetMissing: true,
+                            LastRunAt: "昨天 23:10", LastRunOk: false, LastRunReason: "退出码 1",
+                            ScheduleEnabled: false, Writable: false);
+
+                        PreflightInput Fine() => new(
+                            BgiConfigured: true, BgiExists: true, BgiRunning: false,
+                            EnabledTools: 2, ReadyTools: 2, GroupCount: 3,
+                            DragonConfigName: "日常", DragonConfigs: new[] { "日常", "深渊" },
+                            NotifyMode: "Feishu", NotifyEndpoint: "https://example.invalid/hook",
+                            MissingPresetGroups: Array.Empty<string>(), PresetMissing: false,
+                            LastRunAt: "昨天 23:10", LastRunOk: true, LastRunReason: null,
+                            ScheduleEnabled: true, Writable: true);
+
+                        var wBad = new PreflightWindow(() => Preflight.Build(Messy()));
+                        bool okBad = Save(wBad, Path.Combine(spot, "preflight_bad.png"), 700, 0);
+                        Console.WriteLine($"RENDER preflight_bad={okBad}");
+                        wBad.Close();
+
+                        var wFine = new PreflightWindow(() => Preflight.Build(Fine()));
+                        bool okFine = Save(wFine, Path.Combine(spot, "preflight_fine.png"), 700, 0);
+                        Console.WriteLine($"RENDER preflight_fine={okFine}");
+                        wFine.Close();
+                    }
+
                     // v1.17 / M1-B：「跑完后让 BetterGI 自己做什么」那一行。
                     // 这一行只有展开 BetterGI 卡才看得见，而且下拉里必须有真候选值，
                     // 否则截出来是个空下拉，等于没验。

@@ -911,6 +911,17 @@ public partial class MainWindow : Window
             NotifyService.Show(NotifyLevel.Warning, "龙管家", "队列为空：请先在工具卡里勾选要运行的工具。");
             return;
         }
+
+        // v1.19：开跑前体检。只有真挡路的（Block）才拦，其余一律放行——
+        // 半夜点了开跑却被一句「你没开定时」挡住，比不检查还烦人。
+        var report = SafePreflight();
+        if (report != null && !report.CanRun)
+        {
+            AppState.PublishLog("✗ 开跑前还有没弄好的事，先看一眼");
+            OpenPreflight();
+            return;
+        }
+
         _ = QueueService.StartAsync(QueueTrigger.Manual);
     }
 
@@ -2137,6 +2148,108 @@ public partial class MainWindow : Window
             return Path.GetDirectoryName(probe) ?? "";
         }
         catch { return ""; }
+    }
+
+    // ===== 开跑前体检（v1.19）=====
+    //
+    // 这一块只做一件事：把散在各处的原始事实收集起来，交给 Preflight.Build 出结论。
+    // 判定逻辑一行都不写在这里——写在 Preflight 里才能被探针断言，也才不会
+    // 因为界面控件改名而悄悄变味。
+
+    /// <summary>收集当前事实。任何一步出错都退化成「不知道」，不抛。</summary>
+    private static PreflightInput CollectPreflight()
+    {
+        var s = AppState.Settings;
+        var bgi = ProfileRegistry.Get("bettergi");
+        bool configured = bgi != null && !string.IsNullOrWhiteSpace(bgi.ExecutablePath);
+        bool exists = configured && File.Exists(bgi!.ExecutablePath);
+        bool running = false;
+        try { running = bgi != null && ToolRunner.IsRunning(bgi); } catch { }
+
+        var queue = s.Queue ?? new List<QueueEntry>();
+        int enabled = queue.Count(q => q.Enabled);
+        int ready = queue.Where(q => q.Enabled)
+                         .Select(q => ProfileRegistry.Get(q.ToolId))
+                         .Count(p => p != null && ToolRunner.HasExecutable(p));
+
+        int groups = 0;
+        var dragonConfigs = new List<string>();
+        try
+        {
+            var scan = BgiDiscovery.Scan();
+            groups = scan.Groups.Count;
+            dragonConfigs = scan.DragonConfigs.ToList();
+        }
+        catch { }
+
+        var preset = ConfigPresets.FindById(s.Presets, s.ActivePresetId);
+        bool presetMissing = s.ActivePresetId.Length > 0 && preset == null;
+        var missingGroups = preset == null || groups == 0
+            ? new List<string>()
+            : ConfigPresets.MissingGroups(preset, BgiDiscovery.Scan().Groups).ToList();
+
+        string endpoint = Preflight.NotifyEndpointOf(s.NotifyMode, s);
+        bool writable = true;
+        try
+        {
+            string dir = Path.GetDirectoryName(AppState.SettingsPath) ?? AppContext.BaseDirectory;
+            Directory.CreateDirectory(dir);
+            string probe = Path.Combine(dir, ".dbtmp-write-probe");
+            File.WriteAllText(probe, "ok");
+            File.Delete(probe);
+        }
+        catch { writable = false; }
+
+        return new PreflightInput(
+            BgiConfigured: configured,
+            BgiExists: exists,
+            BgiRunning: running,
+            EnabledTools: enabled,
+            ReadyTools: ready,
+            GroupCount: groups,
+            DragonConfigName: s.DragonConfigName,
+            DragonConfigs: dragonConfigs,
+            NotifyMode: s.NotifyMode,
+            NotifyEndpoint: endpoint,
+            MissingPresetGroups: missingGroups,
+            PresetMissing: presetMissing,
+            LastRunAt: s.LastRunAt,
+            LastRunOk: s.LastRunOk,
+            LastRunReason: null,
+            ScheduleEnabled: s.ScheduleEnabled,
+            Writable: writable);
+    }
+
+    /// <summary>体检结果；出错时返回 null（调用方一律当「没意见」处理）。</summary>
+    private static PreflightReport? SafePreflight()
+    {
+        try { return Preflight.Build(CollectPreflight()); }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("体检收集失败：" + ex.Message);
+            return null;
+        }
+    }
+
+    private void BtnPreflight_Click(object sender, RoutedEventArgs e) => OpenPreflight();
+
+    private void OpenPreflight()
+    {
+        try
+        {
+            var w = new PreflightWindow(SafePreflight, RunCommand) { Owner = this };
+            w.ShowDialog();
+            if (w.WentToFix)
+            {
+                RefreshHomeHero();
+                RefreshToolCards();
+                RefreshPresetRow();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开体检失败：" + ex.Message);
+        }
     }
 
     private static string? ReadAllTextOrNull(string path)
@@ -4224,6 +4337,9 @@ public partial class MainWindow : Window
                 case "view.logrules": OpenLogRules(); break;
                 case "view.depends": OpenDepends(); break;
                 case "view.groups": OpenGroupSlice(); break;
+                case "view.preflight": OpenPreflight(); break;
+                case "view.presets": OpenPresets(); break;
+                case "view.notify": RevealCard(NotifyCard); break;
 
                 case "tool.copyToken": BtnCopyToken_Click(this, new RoutedEventArgs()); break;
                 case "tool.apiToggle":
