@@ -342,6 +342,25 @@ public static class QueueService
         KeepAwakeService.Acquire();
         try
         {
+            // v1.20 / 奇思妙想 #7：开跑前记一次窗口位置，跑完才好挪回去。
+            // 记的是「跑之前在哪」，所以必须在任何工具启动之前。
+            try
+            {
+                if (AppState.Settings.TidyEnabled && AppState.Settings.TidyRestoreWindows)
+                {
+                    foreach (string name in TidyService.GameProcessNames)
+                    {
+                        var spot = TidyService.Capture(name);
+                        if (spot != null) TidyService.Remember(spot.ProcessName, spot.Title,
+                            spot.Left, spot.Top, spot.Width, spot.Height);
+                    }
+                    var bgiSpot = TidyService.Capture("BetterGenshinImpact");
+                    if (bgiSpot != null) TidyService.Remember(bgiSpot.ProcessName, bgiSpot.Title,
+                        bgiSpot.Left, bgiSpot.Top, bgiSpot.Width, bgiSpot.Height);
+                }
+            }
+            catch { }
+
             int finished = 0;
             // v1.9 / P2：这一轮里成没成，依赖门只认本轮结果 + 今天台账（跨轮次也能接着跑）
             var doneThisRun = new HashSet<string>(RunJournal.DoneToolsToday(), StringComparer.OrdinalIgnoreCase);
@@ -363,6 +382,10 @@ public static class QueueService
                                  && QueueGraph.ShouldAbortOnDependencyFail(entry);
                     LogService.LogEvent($"队列：{profile.DisplayName} 依赖未满足（{gate.Reason}）"
                         + (abort ? "，按设置中止整队" : "，跳过这一项"));
+                    // v1.20：这句话同时进「为什么」台账——用户看不到日志，但会问「它怎么没跑」。
+                    DecisionLog.Add(DecisionSource.Queue,
+                        abort ? $"跳过 {profile.DisplayName}，整队停下" : $"跳过 {profile.DisplayName}",
+                        gate.Reason);
                     LastResults.Add(new QueueItemResult
                     {
                         ToolId = profile.ToolId,
@@ -386,6 +409,7 @@ public static class QueueService
                 var pre = PreCheck(profile, trigger);
                 if (pre.Skip)
                 {
+                    DecisionLog.Add(DecisionSource.Queue, $"跳过 {profile.DisplayName}", pre.Message);
                     LastResults.Add(new QueueItemResult
                     {
                         ToolId = profile.ToolId,
@@ -415,6 +439,8 @@ public static class QueueService
                 {
                     // 悬置：队列立刻停止，等用户处理，绝不自动推进
                     LogService.LogEvent($"队列：{profile.DisplayName} 悬置，队列停止");
+                    DecisionLog.Add(DecisionSource.Queue, "整队停下",
+                        $"{profile.DisplayName} 状态不明（悬置），不敢替你继续往下跑");
                     break;
                 }
 
@@ -424,6 +450,8 @@ public static class QueueService
                 {
                     // 疑似挂起：未开自动终止时队列停止，进程保留等用户处理。
                     LogService.LogEvent($"队列：{profile.DisplayName} 疑似挂起，队列停止");
+                    DecisionLog.Add(DecisionSource.Queue, "整队停下",
+                        $"{profile.DisplayName} 疑似卡住，而「自动终止」没开，留给你处理");
                     break;
                 }
 
@@ -432,6 +460,8 @@ public static class QueueService
                 if (failed && string.Equals(AppState.Settings.FailStrategy, "Abort", StringComparison.OrdinalIgnoreCase))
                 {
                     LogService.LogEvent($"队列：失败策略=中止，剩余 {items.Count - i - 1} 项不再执行");
+                    DecisionLog.Add(DecisionSource.Queue, "后面的不跑了",
+                        $"{profile.DisplayName} 没跑成，而你选的是「一项失败就整队停」");
                     break;
                 }
 
@@ -1145,6 +1175,19 @@ public static class QueueService
         }
         catch { }
 
+        // v1.20 / 奇思妙想 #7：收拾必须在跑完动作**之前**——那条链最后可能是关机，
+        // 关机之后才收拾等于什么都没做。任何失败都不冒泡（收拾是收尾动作）。
+        try
+        {
+            var tidy = TidyService.PlanFromSettings(anyFailed);
+            string did = TidyService.Execute(tidy);
+            if (did.Length > 0) SetStatus(did);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("收拾失败：" + ex.Message);
+        }
+
         AfterRunActionService.Execute(new AfterRunContext
         {
             Total = total,
@@ -1263,6 +1306,8 @@ public static class IdleGuard
         if (IdleFor >= IdleThreshold) return true;
 
         LogService.LogEvent($"防打扰：检测到用户正在用电脑（最近输入 {IdleFor.TotalSeconds:F0} 秒前），推迟 {PostponeDelay.TotalMinutes:F0} 分钟");
+        DecisionLog.Add(DecisionSource.Schedule, "先不开始",
+            $"你 {IdleFor.TotalSeconds:F0} 秒前还在动键鼠，等 {PostponeDelay.TotalMinutes:F0} 分钟再看");
         QueueService.IsWaitingIdle = true;
         NotifyService.Show(NotifyLevel.Info, "龙管家",
             "定时任务等待电脑空闲中，空闲后自动开始（可在队列卡点「立即开始」跳过等待）。");

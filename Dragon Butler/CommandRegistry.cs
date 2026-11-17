@@ -46,6 +46,7 @@ public static class CommandRegistry
         new("view.depends",   "依赖编排",               "导航", "依赖 dag 顺序 depends"),
         new("view.groups",    "配置组切片",             "导航", "配置组 切片 groups slice"),
         new("view.preflight", "开跑前体检",             "导航", "体检 检查 自检 开跑 前置 preflight check doctor"),
+        new("view.handover",  "出门前看一眼",           "导航", "出门 交接 旅行 离开 几天 handover travel away"),
         new("view.presets",   "配置组合",               "导航", "组合 预设 方案 preset presets"),
         new("view.notify",    "通知设置",               "导航", "通知 提醒 推送 notify"),
 

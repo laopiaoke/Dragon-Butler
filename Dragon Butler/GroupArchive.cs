@@ -206,6 +206,33 @@ public static class GroupArchive
         }
     }
 
+    /// <summary>
+    /// v1.20 时间银行：把一段日期区间里每天的合计分钟数数出来。含今天与两端。
+    /// 没有记录的日子**跳过**，不当 0——「那天没跑」和「那天跑了 0 分钟」不是一回事。
+    /// </summary>
+    public static List<(DateTime Date, double Minutes)> DailyMinutes(DateTime from, DateTime to)
+    {
+        var list = new List<(DateTime, double)>();
+        if (to < from) return list;
+        lock (Gate)
+        {
+            EnsureLoaded();
+            for (var day = from.Date; day <= to.Date; day = day.AddDays(1))
+            {
+                string key = day.ToString("yyyy-MM-dd");
+                if (!_data.TryGetValue(key, out var recs) || recs.Count == 0) continue;
+                double total = 0;
+                foreach (var r in recs)
+                {
+                    var d = DurationOf(r);
+                    if (d.HasValue) total += d.Value.TotalMinutes;
+                }
+                if (total > 0) list.Add((day, total));
+            }
+        }
+        return list;
+    }
+
     /// <summary>今天尚未结束的组名列表（供"继续跑"）</summary>
     public static List<string> GetUnfinished()
     {

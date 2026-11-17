@@ -151,7 +151,7 @@ public partial class MainWindow : Window
             StartBackgroundUpdateCheck();
         };
 
-        _scheduleTimer.Tick += (_, _) => CheckSchedule();
+        _scheduleTimer.Tick += (_, _) => { CheckSchedule(); CheckAway(); };
         _scheduleTimer.Start();
         _countdownTimer.Start();
         _groupScanTimer.Start();
@@ -348,10 +348,20 @@ public partial class MainWindow : Window
         try
         {
             var s = AppState.Settings;
-            ScheduleBar.Visibility = s.ScheduleEnabled ? Visibility.Visible : Visibility.Collapsed;
-            NextDot.Fill = s.ScheduleEnabled ? (BrushOf("BrandBrush") ?? DotGray) : DotGray;
+            bool anyTrigger = s.ScheduleEnabled || s.AwayStartEnabled;
+            ScheduleBar.Visibility = anyTrigger ? Visibility.Visible : Visibility.Collapsed;
+            NextDot.Fill = anyTrigger ? (BrushOf("BrandBrush") ?? DotGray) : DotGray;
 
-            if (!s.ScheduleEnabled) TbCountdown.Text = "定时未开启";
+            // v1.20：「你走开就跑」没有「下次几点」，所以它单独一句话，
+            // 而不是在倒计时位置显示一个假的时间点。
+            if (s.AwayStartEnabled && !s.ScheduleEnabled)
+            {
+                var snap = AwayWatcher.Snapshot;
+                TbCountdown.Text = snap?.State == AwaySense.Presence.Away
+                    ? "你不在，随时会开跑"
+                    : "你走开 20 分钟后开跑";
+            }
+            else if (!s.ScheduleEnabled) TbCountdown.Text = "定时未开启";
             else
             {
                 var next = NextScheduleTime();
@@ -386,10 +396,60 @@ public partial class MainWindow : Window
         ScheduleDetail.Visibility = quick ? Visibility.Collapsed : Visibility.Visible;
         if (!quick) return;
 
+        // v1.20：「你走开就跑」也停在简版——它没有「几点」可调，
+        // 摊开时间与星期只会让人以为那些设置也生效。
+        if (s.AwayStartEnabled)
+        {
+            TbQuickTitle.Text = "你走开，我就开跑";
+            TbQuickDesc.Text = "盯着键鼠，连续安静 20 分钟才认账。\n中途碰一下鼠标就重新数。";
+            BtnQuickAccept.Content = "改回按时间跑";
+            BtnQuickAccept.Tag = "schedule";
+            BtnQuickPick.Content = "现在就开跑";
+            BtnQuickPick.Tag = "runnow";
+            BtnQuickAway.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        TbQuickTitle.Text = "每天 8 点，自己开跑";
+        TbQuickDesc.Text = "到点自动拉起 BetterGI 跑一遍，跑完告诉你结果。\n你什么都不用做。";
+        BtnQuickAccept.Content = "就这样，打开定时";
+        BtnQuickAccept.Tag = null;
+        BtnQuickPick.Content = "我自己挑时间";
+        BtnQuickPick.Tag = null;
+        BtnQuickAway.Visibility = Visibility.Visible;
+
         // 已经改过时间的人（不是默认的 8:00）看到的是自己定的时间，不能一律写「8 点」。
         string at = $"{Math.Clamp(s.ScheduleHour, 0, 23):00}:{Math.Clamp(s.ScheduleMinute, 0, 59):00}";
         bool everyDay = s.ScheduleWeekdays == 0x7F;
         TbQuickTitle.Text = everyDay ? $"每天 {at}，自己开跑" : $"下次 {at}，自己开跑";
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #2：「或者：我一走开就跑」。
+    /// 与「就这样，打开定时」摆在一起，因为它回答的是同一个问题——什么时候开始，
+    /// 只是答案从「几点」换成了「你在不在」。
+    /// </summary>
+    private void BtnQuickAway_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var s = AppState.Settings;
+            s.AwayStartEnabled = true;
+            s.ScheduleEnabled = false;      // 两种触发互斥：同时开会让「为什么现在跑」说不清
+            AppState.SaveSettings();
+
+            try { TgSchedule.IsChecked = false; } catch { }
+            AwayWatcher.Reset();
+            UpdateScheduleStatus();
+            RefreshHomeHero();
+
+            AppState.PublishLog("✓ 改成「你走开就跑」：盯着键鼠，连续安静 20 分钟才认账");
+            LogService.LogEvent("触发器：切换为一走开就跑");
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("切换到一走开就跑失败：" + ex.Message);
+        }
     }
 
     /// <summary>「就这样，打开定时」：把默认值落实并打开，不再问第二个问题。</summary>
@@ -398,6 +458,20 @@ public partial class MainWindow : Window
         try
         {
             var s = AppState.Settings;
+
+            // v1.20：在「你走开就跑」状态下，这个按钮变成「改回按时间跑」——
+            // 用户想换回来时不该还要去找别的地方。
+            if (string.Equals(BtnQuickAccept.Tag as string, "schedule", StringComparison.Ordinal))
+            {
+                s.AwayStartEnabled = false;
+                AppState.SaveSettings();
+                AwayWatcher.Reset();
+                RefreshScheduleQuick(s);
+                UpdateScheduleStatus();
+                RefreshHomeHero();
+                AppState.PublishLog("✓ 改回按时间跑，挑个时间就行");
+                return;
+            }
 
             // 只在「真的还是默认值」时才写默认，避免把用户以前挑过的星期冲掉。
             if (s.ScheduleWeekdays == 0 || s.ScheduleWeekdays == 0x7F) s.ScheduleWeekdays = 0x7F;
@@ -430,6 +504,14 @@ public partial class MainWindow : Window
     {
         try
         {
+            // v1.20：走开模式下这个按钮是「现在就开跑」，不是挑时间。
+            if (string.Equals(BtnQuickPick.Tag as string, "runnow", StringComparison.Ordinal))
+            {
+                AwayWatcher.Reset();
+                _ = QueueService.StartAsync(QueueTrigger.Manual);
+                return;
+            }
+
             // 先落到详细页，再直接进时间选择器——点「我自己挑」的人多半就想改时间。
             ScheduleQuick.Visibility = Visibility.Collapsed;
             ScheduleDetail.Visibility = Visibility.Visible;
@@ -482,6 +564,43 @@ public partial class MainWindow : Window
         {
             BtnCatchUp.Visibility = s.ScheduleEnabled ? Visibility.Visible : Visibility.Collapsed;
             TbCatchUp.Text = "补跑：" + SchedulePlanner.WindowText(s.ScheduleCatchUpMinutes);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #2：每 30 秒采一次样，看看你是不是走开了。
+    /// <para>
+    /// 判定逻辑全在 <see cref="AwaySense"/>（纯函数）；这里只管三件事：
+    /// 要不要问、要不要开、以及开完把话说明白。判错的代价是「你还在它就开跑了」，
+    /// 所以 <see cref="AwaySense.ConfirmTicks"/> 次连续判定才认账，中途一动立刻清零。
+    /// </para>
+    /// </summary>
+    private void CheckAway()
+    {
+        try
+        {
+            var s = AppState.Settings;
+            if (!s.AwayStartEnabled) return;
+
+            // 定时优先：两个都开时按定时走，因为定时能说清「几点」，而它说不清「你在不在」。
+            if (s.ScheduleEnabled) return;
+
+            var snap = AwayWatcher.Sample();
+            bool ranToday = QueueService.DoneToolIdsToday().Count > 0
+                            || AppState.Settings.LastRunAt is { Length: > 0 } last
+                               && DateTime.TryParse(last, out var at) && at.Date == DateTime.Today;
+
+            if (AwaySense.ShouldStart(snap, QueueService.IsRunning, ranToday))
+            {
+                DecisionLog.Add(DecisionSource.Schedule, "你走开，那就现在跑",
+                    $"连续 {AwaySense.ConfirmTicks} 次判定都没人动键鼠，已经安静 {AwaySense.Describe(snap).Split('，').Last()}");
+                AppState.PublishLog("✓ 你好像走了，开始跑今天的队列");
+                LogService.LogEvent("触发器：一走开就跑 —— " + AwaySense.Describe(snap));
+                AwayWatcher.Reset();       // 跑过一次就清零，免得你回来坐下又触发
+                _ = QueueService.StartAsync(QueueTrigger.Timer);
+                UpdateScheduleStatus();
+            }
         }
         catch { }
     }
@@ -2252,6 +2371,94 @@ public partial class MainWindow : Window
         }
     }
 
+    // ===== 出门前看一眼（v1.20 / 奇思妙想 #6）=====
+
+    /// <summary>
+    /// 收集交接单要的事实。和体检共用同一批数据源，但问的问题不同：
+    /// 体检问「现在能不能跑」，交接单问「这几天会怎么跑、哪几件会让这趟白跑」。
+    /// </summary>
+    private static Handover.Input CollectHandover(int days)
+    {
+        var s = AppState.Settings;
+        var bgi = ProfileRegistry.Get("bettergi");
+        bool bgiOk = bgi != null && !string.IsNullOrWhiteSpace(bgi.ExecutablePath)
+                     && File.Exists(bgi.ExecutablePath);
+
+        var queue = s.Queue ?? new List<QueueEntry>();
+        int enabled = queue.Count(q => q.Enabled);
+        int ready = queue.Where(q => q.Enabled)
+                         .Select(q => ProfileRegistry.Get(q.ToolId))
+                         .Count(p => p != null && ToolRunner.HasExecutable(p));
+
+        int groups = 0;
+        try { groups = BgiDiscovery.Scan().Groups.Count; } catch { }
+
+        int restarts = 0;
+        try { restarts = SentinelService.HealthSnapshot().RestartCount; } catch { }
+
+        int freeMb = -1;
+        try
+        {
+            var drive = new DriveInfo(Path.GetPathRoot(AppContext.BaseDirectory) ?? "C:\\");
+            freeMb = (int)Math.Min(int.MaxValue, drive.AvailableFreeSpace / (1024 * 1024));
+        }
+        catch { }
+
+        string next = $"{Math.Clamp(s.ScheduleHour, 0, 23):00}:{Math.Clamp(s.ScheduleMinute, 0, 59):00}";
+
+        return new Handover.Input(
+            Days: days,
+            ScheduleEnabled: s.ScheduleEnabled,
+            AwayStartEnabled: s.AwayStartEnabled,
+            NextRunText: next,
+            NotifyLocalOnly: Preflight.IsLocalChannel(s.NotifyMode),
+            NotifyReady: Preflight.NotifyReady(s.NotifyMode, Preflight.NotifyEndpointOf(s.NotifyMode, s)),
+            EnabledTools: enabled,
+            ReadyTools: ready,
+            AutoRestartBgi: s.AutoRestartBgi,
+            RestartsToday: restarts,
+            StopWhenFailed: string.Equals(s.FailStrategy, "Abort", StringComparison.OrdinalIgnoreCase),
+            AfterRunDestructive: AfterRunActionService.IsDestructive(s.AfterRunAction),
+            BgiPathOk: bgiOk,
+            GroupCount: groups,
+            FreeDiskMb: freeMb);
+    }
+
+    private static Handover.Sheet? SafeHandover(int days)
+    {
+        try { return Handover.Build(CollectHandover(days)); }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("交接单生成失败：" + ex.Message);
+            return null;
+        }
+    }
+
+    private void BtnHandover_Click(object sender, RoutedEventArgs e) => OpenHandover();
+
+    private void BtnTidyConfig_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            new TidyWindow { Owner = this }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开收拾设置失败：" + ex.Message);
+        }
+    }
+
+    private void OpenHandover()
+    {
+        try
+        {
+            new HandoverWindow(SafeHandover, CollectHandover) { Owner = this }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开交接单失败：" + ex.Message);
+        }
+    }
     private static string? ReadAllTextOrNull(string path)
     {
         try { return File.ReadAllText(path); } catch { return null; }
@@ -3661,6 +3868,7 @@ public partial class MainWindow : Window
                 ? Visibility.Collapsed : Visibility.Visible;
 
             RenderHomeSteps(view.ShowSteps);
+            RefreshHomeRecap();
 
             // 出错时整张卡换描边色：这一条比任何文字都快。
             HomeHero.BorderBrush = trouble
@@ -3671,6 +3879,117 @@ public partial class MainWindow : Window
         {
             LogService.LogEvent("首屏主卡刷新失败：" + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// v1.20 复盘：主卡下方那三两句。
+    /// 只在「昨天/今天已经跑完」时出现——正在跑的时候主卡已经说了跑到哪，
+    /// 再贴一段复盘只会让人以为跑完了。
+    /// </summary>
+    private void RefreshHomeRecap()
+    {
+        try
+        {
+            HomeRecap.Children.Clear();
+
+            var input = BuildRecapInput();
+            bool show = input != null && !QueueService.IsRunning;
+            HomeRecap.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (!show || input == null) return;
+
+            var lines = Recap.Build(input);
+            if (lines.Count == 0)
+            {
+                HomeRecap.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            foreach (var line in lines)
+            {
+                HomeRecap.Children.Add(RecapLine(line));
+            }
+        }
+        catch (Exception ex)
+        {
+            HomeRecap.Visibility = Visibility.Collapsed;
+            LogService.LogEvent("复盘生成失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>把五张表读成 <see cref="Recap.Input"/>。读失败就是 null，界面按没有处理。</summary>
+    private static Recap.Input? BuildRecapInput()
+    {
+        try
+        {
+            var s = AppState.Settings;
+            var today = DateTime.Today;
+
+            var groups = GroupArchive.GetDay(today)
+                .Select(g => new Recap.GroupRow(
+                    g.Name,
+                    GroupArchive.DurationOf(g),
+                    g.End == null,
+                    GroupArchive.MedianMinutes(g.Name)))
+                .ToList();
+
+            var entries = RunJournal.GetDay(today);
+            var tools = entries
+                .Select(e => new Recap.ToolRow(e.Name, e.State, e.Reason))
+                .ToList();
+
+            var harvest = HarvestLedger.GetDay(today);
+            int done = QueueService.DoneToolIdsToday().Count;
+            int total = done + QueueService.UnfinishedToday().Count;
+
+            // 起止时刻：**不能从台账的 At 推**。台账是一条覆盖式的「今天这项最后什么结果」，
+            // 每项都在记录那一刻写入，几项挤在同一秒，据此算出的时长永远是「不到 1 分钟」。
+            // 真正可靠的只有 Settings 里那对：LastRunAt 是这一轮的开始，LastRunSeconds 是它跑了多久。
+            DateTime? startAt = ParseLastRunAt(s);
+            DateTime? endAt = startAt.HasValue && s.LastRunSeconds > 0
+                ? startAt.Value.AddSeconds(s.LastRunSeconds)
+                : null;
+
+            return new Recap.Input(
+                startAt,
+                endAt,
+                done,
+                total,
+                groups,
+                tools,
+                harvest.Mora,
+                harvest.Exp,
+                harvest.Materials,
+                RunEvidence.LastErrorLine,
+                StoppedByUser: false,
+                RanNothing: total == 0 && groups.Count == 0 && tools.Count == 0);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("复盘取数失败：" + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>一条复盘。Gap 用 Warning 色，其余用次要色——一致性比好看重要。</summary>
+    private UIElement RecapLine(Recap.Line line)
+    {
+        var tb = new TextBlock
+        {
+            Text = line.Text,
+            FontSize = 12.5,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 520,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, line.Kind == Recap.LineKind.Lead ? 0 : 5, 0, 0),
+            Foreground = line.Kind switch
+            {
+                Recap.LineKind.Lead => BrushOf("TextPrimaryBrush") ?? DotGreen,
+                Recap.LineKind.Gap => BrushOf("WarningBrush") ?? DotYellow,
+                _ => BrushOf("TextSecondaryBrush") ?? DotGray,
+            },
+            FontWeight = line.Kind == Recap.LineKind.Lead ? FontWeights.SemiBold : FontWeights.Normal,
+        };
+        return tb;
     }
 
     /// <summary>引导三步。只在「什么都没配」时出现——配好之后这块是空的，不留坑。</summary>
@@ -4338,6 +4657,7 @@ public partial class MainWindow : Window
                 case "view.depends": OpenDepends(); break;
                 case "view.groups": OpenGroupSlice(); break;
                 case "view.preflight": OpenPreflight(); break;
+                case "view.handover": OpenHandover(); break;
                 case "view.presets": OpenPresets(); break;
                 case "view.notify": RevealCard(NotifyCard); break;
 

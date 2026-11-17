@@ -813,6 +813,9 @@
                                            Foreground="{DynamicResource TextSecondaryBrush}"
                                            TextWrapping="Wrap" MaxWidth="520"
                                            HorizontalAlignment="Left"/>
+                                <!-- v1.20 复盘：跑完之后，把五张表拼成三两句话贴在这里。
+                                     不用点开任何窗口就能读完昨晚，这是主卡存在的理由。 -->
+                                <StackPanel x:Name="HomeRecap" Margin="0,14,0,0" Visibility="Collapsed"/>
                                 <!-- 引导三步：只在「什么都没配」时出现，配好之后整块不占地方 -->
                                 <StackPanel x:Name="HomeHeroSteps" Margin="0,16,0,0" Visibility="Collapsed"/>
                                 <!-- v1.16：有新版本时才出现。点一下开浏览器，不自动下载。 -->
@@ -897,18 +900,25 @@
                                                     <TextBlock x:Name="TbQuickTitle" Text="每天 8 点，自己开跑" FontSize="19"
                                                                FontWeight="SemiBold" TextAlignment="Center"
                                                                Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                                    <TextBlock Text="到点自动拉起 BetterGI 跑一遍，跑完告诉你结果。&#10;你什么都不用做。"
+                                                    <TextBlock x:Name="TbQuickDesc"
+                                                               Text="到点自动拉起 BetterGI 跑一遍，跑完告诉你结果。&#10;你什么都不用做。"
                                                                FontSize="12" Margin="0,10,0,0" TextAlignment="Center"
                                                                LineHeight="19"
                                                                Foreground="{DynamicResource TextSecondaryBrush}"/>
                                                     <Button x:Name="BtnQuickAccept" Content="就这样，打开定时"
-                                                            Style="{StaticResource LaunchPrimary}" Height="40"
-                                                            MinWidth="150" Margin="0,16,0,0"
-                                                            HorizontalAlignment="Center"
-                                                            Click="BtnQuickAccept_Click"/>
-                                                    <Button Content="我自己挑时间" Style="{StaticResource LinkButton}"
+                                                             Style="{StaticResource LaunchPrimary}" Height="40"
+                                                             MinWidth="150" Margin="0,16,0,0"
+                                                             HorizontalAlignment="Center"
+                                                             Click="BtnQuickAccept_Click"/>
+                                                    <Button x:Name="BtnQuickPick" Content="我自己挑时间" Style="{StaticResource LinkButton}"
                                                             HorizontalAlignment="Center" Margin="0,8,0,0"
                                                             Click="BtnQuickPick_Click"/>
+                                                    <!-- v1.20 / 奇思妙想 #2：换一种触发条件，而不是加一个新开关。
+                                                         定时回答「几点」，它回答「你在不在」——问的是同一件事。 -->
+                                                    <Button x:Name="BtnQuickAway" Content="或者：我一走开就跑"
+                                                            Style="{StaticResource LinkButton}"
+                                                            HorizontalAlignment="Center" Margin="0,2,0,0"
+                                                            Click="BtnQuickAway_Click"/>
                                                 </StackPanel>
                                             </Grid>
 
@@ -1165,6 +1175,17 @@
                                     </Grid>
                                     <Button x:Name="BtnQueueStart" Style="{StaticResource LaunchPrimary}" Height="44"
                                             Content="一键开跑" Click="BtnQueueStart_Click"/>
+                                    <!-- v1.20 / 奇思妙想 #7：跑完收拾一下。放在「跑完后」下面而不是高级设置，
+                                         因为它和那三件事是同一类：跑完之后机器会变成什么样。 -->
+                                    <Grid x:Name="TidyRow" Margin="0,9,0,0">
+                                        <TextBlock Text="跑完收拾一下" FontSize="11.5" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   ToolTip="关掉工具、把窗口放回原处；关游戏要另外打开。默认全关。"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <Button x:Name="BtnTidyConfig" Content="设置…" Style="{StaticResource MiniAction}"
+                                                    Height="26" Padding="10,0" Click="BtnTidyConfig_Click"/>
+                                        </StackPanel>
+                                    </Grid>
                                     <!-- v1.6 / F2 接着跑：只补今天没跑成的项，已完成的组不重跑 -->
                                     <Button x:Name="BtnQueueContinue" Style="{StaticResource LaunchGhost}" Height="32"
                                             Content="接着跑（今天还剩 0 项）" Margin="0,7,0,0" Visibility="Collapsed"
@@ -1608,6 +1629,7 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <Grid Grid.Row="0" Grid.Column="0" Margin="0,6,14,6">
@@ -1758,6 +1780,24 @@
                                         </Grid>
                                         <TextBlock x:Name="TbPreflightHint"
                                                    Text="看路径、队列、配置组、通知有没有没弄好的地方。只读，不改任何东西；开跑时也会自动查一遍，只有真挡路的才会拦你。"
+                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- v1.20：出门前看一眼。和体检同一套位置的道理——它是一年用一次的东西，
+                                     不该占主界面的固定面积。 -->
+                                <Grid Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="出门前看一眼" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <Button x:Name="BtnHandover" Content="看这几天会发生什么" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0" Click="BtnHandover_Click"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock x:Name="TbHandoverHint"
+                                                   Text="先说要出几天，它把这段时间里会发生什么、哪几件会让这趟白跑，列成人话。只读。"
                                                    FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
                                                    TextWrapping="Wrap" Margin="0,3,0,0"/>
                                     </StackPanel>

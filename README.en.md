@@ -40,6 +40,14 @@ It does exactly four things: start processes, read the public logs those tools w
 - **You don't dare walk away** — stalls, frozen screens, memory pressure and tool crashes are all detected; notify, capture evidence, or stop the queue, as you configure.
 - **You still have to shut down by hand** — sleep or shut down after a successful run, cancellable for 60 seconds.
 - **Nothing to investigate with** — on failure it packs log tail + screenshot + redacted config into `全部日志\incidents\`.
+- **All you get afterwards is a wall of logs** — the home card gives you a plain-language recap: what succeeded, what ran long, which group never finished.
+- **You can't tell what it decided for you** — every skip, defer, restart and abort leaves one sentence of *why*, listed by time under "Today".
+- **No sense of "how does today compare"** — it compares against your own 14-day median, not a hard-coded threshold, and stays quiet when samples are thin.
+- **No idea how much time it saved you** — one number: hours it ran for you this month.
+
+## One self-imposed rule
+
+**This program's success metric is: you open it less often.** No daily-active chasing, no message centre, no "come back and check". A good night means you glance once the next day and read "done". If you haven't opened it in a month, it did its job.
 
 ## Quick start
 
@@ -115,7 +123,7 @@ Requires .NET 8 SDK. Zero NuGet dependencies:
 dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
 ```
 
-Tests run through a hand-written probe: 68 modes, several hundred assertions.
+Tests run through a hand-written probe: 77 modes, several hundred assertions.
 
 ```
 dotnet build tests\CoordinatorProbe\CoordinatorProbe.csproj -c Release
@@ -147,4 +155,4 @@ Released under [GNU AGPL-3.0](LICENSE). You may use, modify and redistribute it 
 
 ## Version
 
-Latest release **v1.19** (in-app `1.19.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).
+Latest release **v1.20** (in-app `1.20.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).

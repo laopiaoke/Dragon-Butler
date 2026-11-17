@@ -159,6 +159,37 @@ public static class RunJournal
         }
     }
 
+    /// <summary>
+    /// 往某一天塞几条记录。只给验证用（渲染探针要造「过去几天的成绩」来看基线），
+    /// 生产代码不该调它——正常路径一律走 <see cref="Record"/>。
+    /// 与 <see cref="GroupArchive.Seed"/> 同一立场：只写内存，不落盘。
+    /// </summary>
+    public static void SeedForTest(DateTime day, params JournalEntry[] entries)
+    {
+        if (entries == null || entries.Length == 0) return;
+        lock (Gate)
+        {
+            EnsureLoaded();
+            string key = day.ToString("yyyy-MM-dd");
+            if (!_data.TryGetValue(key, out var list))
+            {
+                list = new List<JournalEntry>();
+                _data[key] = list;
+            }
+            foreach (var e in entries)
+            {
+                if (e == null || string.IsNullOrWhiteSpace(e.ToolId)) continue;
+                int idx = list.FindIndex(x => string.Equals(x.ToolId, e.ToolId, StringComparison.OrdinalIgnoreCase));
+                var copy = new JournalEntry
+                {
+                    ToolId = e.ToolId, Name = e.Name, State = e.State, At = e.At,
+                    Attempts = e.Attempts, Reason = e.Reason,
+                };
+                if (idx >= 0) list[idx] = copy; else list.Add(copy);
+            }
+        }
+    }
+
     /// <summary>今天已经跑成（终态 Done）的工具 id 集合。</summary>
     public static HashSet<string> DoneToolsToday()
     {

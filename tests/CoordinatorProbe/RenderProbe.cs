@@ -270,6 +270,80 @@ internal static class RenderProbe
     }
 
     /// <summary>
+    /// v1.20：给「跑完」那张主卡摆今天的道具——复盘要读今天的两张表，
+    /// 而 <see cref="SeedSampleArchive"/> 造的是过去一年且刻意跳过了今天。
+    /// 这里补三件：今天两个配置组（其中一个比往常慢，才能看到评价那句）、
+    /// 今天两项台账（一项成一项没成，才能看到 Gap）、一点收益（摩拉那句）。
+    /// 仍然全指向临时文件，不碰用户真实存档。
+    /// </summary>
+    /// <summary>
+    /// v1.20：给「今日」摆几条自动决定。刻意挑四种来源各一条——
+    /// 只摆同一种的话，看不出「队列/守护/定时/规则」这套来源标签是否有意义。
+    /// </summary>
+    private static void SeedDecisions()
+    {
+        try
+        {
+            DecisionLog.Clear();
+            DateTime now = DateTime.Now;
+            DecisionLog.AddAt(now.AddMinutes(-95), DecisionSource.Schedule, "先不开始",
+                "你 42 秒前还在动键鼠，等 15 分钟再看");
+            DecisionLog.AddAt(now.AddMinutes(-80), DecisionSource.Queue, "跳过 ok-ww",
+                "它依赖的 BetterGI 这次没跑成");
+            DecisionLog.AddAt(now.AddMinutes(-62), DecisionSource.Sentinel, "重启 BetterGI",
+                "进程 30 秒没出现，退出码 3221225477");
+            DecisionLog.AddAt(now.AddMinutes(-40), DecisionSource.Queue, "后面的不跑了",
+                "三月七助手没跑成，而你选的是「一项失败就整队停」");
+            DecisionLog.AddAt(now.AddMinutes(-12), DecisionSource.Rule, "留了现场",
+                "日志里出现了「卡在传送锚点」");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-DECISIONS-FAIL " + ex.Message);
+        }
+    }
+
+    private static void SeedRecapToday()
+    {
+        try
+        {
+            DateTime today = DateTime.Today;
+
+            // 往常中位数要有样本：往前铺三天「日常」都跑 20 分钟，
+            // 今天跑 40 分钟 → 明显比往常慢，Detail 那句才会出现。
+            for (int back = 1; back <= 3; back++)
+            {
+                GroupArchive.Seed(today.AddDays(-back), "日常", "23:04:00", "23:24:00");
+            }
+            GroupArchive.Seed(today, "日常", "23:04:00", "23:44:00");
+            GroupArchive.Seed(today, "活动", "23:44:00", "23:56:00");
+
+            // 两项都成。刻意不在这里放失败项：主卡标题读的是 LastRunOk，
+            // 台账里塞失败会让标题说「全部成功」、复盘说「1 项没成」，
+            // 截图看着像 bug。失败分支由 recap 探针的断言守着。
+            RunJournal.Record(new QueueItemResult
+            {
+                ToolId = "bettergi", DisplayName = "BetterGI", State = ToolRunState.Done,
+            });
+            RunJournal.Record(new QueueItemResult
+            {
+                ToolId = "march7th", DisplayName = "三月七助手", State = ToolRunState.Done,
+            });
+
+            HarvestLedger.AddToDay(today, new Harvest
+            {
+                Mora = 128400,
+                Exp = 42,
+                Materials = new Dictionary<string, int>(StringComparer.Ordinal) { ["刀镡"] = 12 },
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SEED-RECAP-FAIL " + ex.Message);
+        }
+    }
+
+    /// <summary>
     /// 造一年的挂机记录，让日历那面墙真的有颜色。
     /// 不这么干的话渲染出来的 53 周全是灰格——图例四种颜色一个都对不上，
     /// 看不出「绿=全跑成、黄=有失败、红=全没成」这套设计到底成不成立。
@@ -282,6 +356,15 @@ internal static class RenderProbe
             RunJournal.PathOverride = Path.Combine(Path.GetTempPath(), "dragon-ui", "fake-run-journal.json");
             if (File.Exists(RunJournal.PathOverride)) File.Delete(RunJournal.PathOverride);
             RunJournal.Load();
+
+            // v1.20：给基线造历史——过去 6 天每天「2 项里 1 项没成」，
+            // 今天两项都没成 → 明显高于平时，才验得到「今日」顶部那行。
+            // 只造今天的话，历史样本为 0，基线会按设计闭嘴，截图就看不出这个功能。
+            // 过去 6 天都没出过问题 → 今天这 1 项没成，正好命中「平时一次都没有」那种该报警的情况。
+            for (int back = 1; back <= 6; back++)
+            {
+                SeedJournalFor(DateTime.Today.AddDays(-back), failed: 0);
+            }
 
             RunJournal.Record(new QueueItemResult
             {
@@ -296,6 +379,24 @@ internal static class RenderProbe
         {
             Console.WriteLine("SEED-JOURNAL-FAIL " + ex.Message);
         }
+    }
+
+    /// <summary>往台账的某一天写两条记录，<paramref name="failed"/> 决定其中几条是失败。</summary>
+    private static void SeedJournalFor(DateTime day, int failed)
+    {
+        RunJournal.SeedForTest(day,
+            new JournalEntry
+            {
+                ToolId = "bettergi", Name = "BetterGI",
+                State = nameof(ToolRunState.Done), At = "08:30:00",
+            },
+            new JournalEntry
+            {
+                ToolId = "march7th", Name = "三月七助手",
+                State = failed >= 1 ? nameof(ToolRunState.Failed) : nameof(ToolRunState.Done),
+                At = "09:00:00",
+                Reason = failed >= 1 ? "退出码 1" : null,
+            });
     }
 
     private static void SeedSampleArchive()
@@ -424,7 +525,12 @@ internal static class RenderProbe
                     // 日历读的是 GroupArchive，不造历史的话 53 周全灰，看不出四色设计。
                     if (mode == "calendar" || mode == "all") SeedSampleArchive();
                     // v1.13「今日运行」同样读 GroupArchive（今天那一段）+ RunJournal。
-                    if (mode == "today") { SeedSampleArchive(); SeedSampleJournal(); }
+                    if (mode == "today")
+                    {
+                        SeedSampleArchive();
+                        SeedSampleJournal();
+                        SeedDecisions();
+                    }
                     // v1.13：running 模式要在截图里看到实时条本身，所以得先造出"队列在跑"。
                     if (mode == "running")
                     {
@@ -498,13 +604,26 @@ internal static class RenderProbe
 
                     // v1.15：主卡五种脸各截一张。不摆道具就只能看到「先告诉我在哪」，
                     // 而这张卡的全部价值在它怎么变——只截一种等于没验。
-                    if (mode == "hero" || mode == "all")
+                    // v1.20：多截一张 recap——复盘贴在主卡下方，光验内核不算数，
+                    // 得看到它跟标题、按钮挤在同一张卡里是什么样。
+                    if (mode == "hero" || mode == "recap" || mode == "all")
                     {
-                        foreach (string st in new[] { "first", "ready", "running", "trouble", "done" })
+                        var states = mode == "recap"
+                            ? new[] { "recap" }
+                            : new[] { "first", "ready", "running", "trouble", "done" };
+                        foreach (string st in states)
                         {
                             SeedSampleQueue();
                             SeedSampleArchive();
-                            SeedHeroState(st);
+                            if (mode == "recap") SeedRecapToday();
+                            SeedHeroState(st == "recap" ? "done" : st);
+                            // 标题那句读 LastRunAt、复盘那句读台账 At，两边差两小时会让人以为
+                            // 「跑了两轮」。截图里对齐成同一轮，看着才像真的。
+                            if (st == "recap")
+                            {
+                                AppState.Settings.LastRunAt = DateTime.Now.AddMinutes(-49).ToString("yyyy-MM-dd HH:mm");
+                                AppState.Settings.LastRunSeconds = 49 * 60;
+                            }
                             var w = new MainWindow();
                             w.UpdateLayout();
                             var refresh = typeof(MainWindow).GetMethod("RefreshHomeHero",
@@ -513,8 +632,9 @@ internal static class RenderProbe
                             w.UpdateLayout();
                             // v1.15 / L3：320 高只能看到定时卡顶部，L3 的一键默认在卡片中间，
                             // 看不到就等于没验。放宽到 460。
-                            bool ok = Save(w, Path.Combine(spot, $"hero_{st}.png"), 980, 460);
-                            Console.WriteLine($"RENDER hero_{st}={ok}");
+                            string file = st == "recap" ? "recap.png" : $"hero_{st}.png";
+                            bool ok = Save(w, Path.Combine(spot, file), 980, 460);
+                            Console.WriteLine($"RENDER {System.IO.Path.GetFileNameWithoutExtension(file)}={ok}");
                             w.Close();
                         }
                     }
@@ -631,6 +751,48 @@ internal static class RenderProbe
                         bool okFine = Save(wFine, Path.Combine(spot, "preflight_fine.png"), 700, 0);
                         Console.WriteLine($"RENDER preflight_fine={okFine}");
                         wFine.Close();
+                    }
+
+                    // v1.20：交接单。两种状态——有会让这趟白跑的事 / 基本能自己过。
+                    // 只截一种就看不出「风险排前面、计划在后面」这条设计。
+                    if (mode == "handover" || mode == "all")
+                    {
+                        Handover.Input Risky() => new(
+                            Days: 3, ScheduleEnabled: true, AwayStartEnabled: false, NextRunText: "08:00",
+                            NotifyLocalOnly: true, NotifyReady: true, EnabledTools: 3, ReadyTools: 2,
+                            AutoRestartBgi: true, RestartsToday: 0, StopWhenFailed: false,
+                            AfterRunDestructive: true, BgiPathOk: true, GroupCount: 3, FreeDiskMb: 30000);
+
+                        Handover.Input Smooth() => new(
+                            Days: 3, ScheduleEnabled: true, AwayStartEnabled: false, NextRunText: "08:00",
+                            NotifyLocalOnly: false, NotifyReady: true, EnabledTools: 3, ReadyTools: 3,
+                            AutoRestartBgi: true, RestartsToday: 0, StopWhenFailed: false,
+                            AfterRunDestructive: false, BgiPathOk: true, GroupCount: 3, FreeDiskMb: 30000);
+
+                        var wRisk = new HandoverWindow(d => Handover.Build(Risky()), d => Risky());
+                        bool okRisk = Save(wRisk, Path.Combine(spot, "handover_risk.png"), 660, 0);
+                        Console.WriteLine($"RENDER handover_risk={okRisk}");
+                        wRisk.Close();
+
+                        var wSmooth = new HandoverWindow(d => Handover.Build(Smooth()), d => Smooth());
+                        bool okSmooth = Save(wSmooth, Path.Combine(spot, "handover_smooth.png"), 660, 0);
+                        Console.WriteLine($"RENDER handover_smooth={okSmooth}");
+                        wSmooth.Close();
+                    }
+
+                    // v1.20 / 奇思妙想 #7：跑完收拾一下。只截全关状态——
+                    // 这一窗的价值是「默认全关、关游戏单独一行」，开起来反而看不出这点。
+                    if (mode == "tidy" || mode == "all")
+                    {
+                        AppState.Settings.TidyEnabled = false;
+                        AppState.Settings.TidyCloseGame = false;
+                        AppState.Settings.TidyCloseTool = false;
+                        AppState.Settings.TidyRestoreWindows = false;
+
+                        var w = new TidyWindow();
+                        bool ok = Save(w, Path.Combine(spot, "tidy.png"), 560, 0);
+                        Console.WriteLine($"RENDER tidy={ok}");
+                        w.Close();
                     }
 
                     // v1.17 / M1-B：「跑完后让 BetterGI 自己做什么」那一行。

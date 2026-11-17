@@ -281,6 +281,8 @@ public static class SentinelService
             MutateHealth(h => h.RestartCount++);
             Emit(SentinelEventKind.BgiRestarted, "工具崩溃，自动重启");
             LogService.LogEvent($"守护：判定崩溃（30 秒无进程），自动重启 {profile.DisplayName}" + (because.Length > 0 ? "，" + because : ""));
+            DecisionLog.Add(DecisionSource.Sentinel, $"重启 {profile.DisplayName}",
+                "进程 30 秒没出现" + (because.Length > 0 ? "，" + because : ""));
             NotifyService.Show(NotifyLevel.Critical, "龙管家",
                 $"检测到 {profile.DisplayName} 异常退出，已尝试自动重启。" + (because.Length > 0 ? " " + because : ""));
             _ = QueueService.StartSingleAsync(profile, QueueTrigger.Sentinel);
@@ -289,6 +291,8 @@ public static class SentinelService
         {
             State = SentinelState.Idle;
             LogService.LogEvent("守护：判定崩溃，但处于 60 秒重启冷却期，只通知不重启");
+            DecisionLog.Add(DecisionSource.Sentinel, "这次没重启",
+                "一分钟内已经重启过一次，怕反复崩溃时越帮越忙");
             NotifyService.Show(NotifyLevel.Warning, "龙管家",
                 "检测到工具异常退出，处于重启冷却期，暂不自动重启。" + (because.Length > 0 ? " " + because : ""));
         }
@@ -296,6 +300,7 @@ public static class SentinelService
         {
             State = SentinelState.Idle;
             LogService.LogEvent("守护：判定崩溃，未开启自动重启，只通知");
+            DecisionLog.Add(DecisionSource.Sentinel, "这次没重启", "你没开「自动重启」");
             NotifyService.Show(NotifyLevel.Warning, "龙管家",
                 "检测到工具意外退出，未开启自动重启。" + (because.Length > 0 ? " " + because : ""));
         }

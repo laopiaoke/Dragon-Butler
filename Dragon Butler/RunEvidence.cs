@@ -70,7 +70,14 @@ public static class RunEvidence
         string head = string.IsNullOrWhiteSpace(reason) ? "未完成" : reason.Trim();
         var parts = new System.Collections.Generic.List<string> { head };
 
-        if (exitCode is int code) parts.Add(code == 0 ? "退出码 0" : $"退出码 {code}");
+        // v1.20：负数退出码显示成无符号十进制。Process.ExitCode 给的是补码，
+        // 而用户在原工具日志、论坛、搜索引擎里看到的都是 3221225477 这一套；
+        // 写 -1073741819 等于把一句能查的话变成一句查不到的话。
+        if (exitCode is int code)
+        {
+            long shown = code == 0 ? 0 : unchecked((uint)code);
+            parts.Add(code == 0 ? "退出码 0" : $"退出码 {shown}");
+        }
 
         string line = Compact(errorLine);
         if (line.Length > 0) parts.Add("最后一条错误：" + line);

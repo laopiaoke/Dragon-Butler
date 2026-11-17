@@ -67,6 +67,10 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="0" Background="Transparent" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
@@ -84,8 +88,18 @@
             <TextBlock x:Name="TbHeadline" Grid.Row="1" Margin="18,0,18,10" FontSize="12"
                        TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
 
+            <!-- v1.20：跟自己的过去比，而不是跟某个固定阈值比。
+                 样本不够时这行整块收起，不显示「暂无数据」。 -->
+            <TextBlock x:Name="TbBaseline" Grid.Row="2" Margin="18,0,18,10" FontSize="11.5"
+                       TextWrapping="Wrap" Visibility="Collapsed"
+                       Foreground="{DynamicResource BrandTextBrush}"/>
+            <!-- v1.20：时间银行。就一个数字，没有数据时不出现。 -->
+            <TextBlock x:Name="TbTimeBank" Grid.Row="3" Margin="18,0,18,10" FontSize="11"
+                       TextWrapping="Wrap" Visibility="Collapsed"
+                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+
             <!-- 配置组：今天 BGI 内部实际跑过的组 -->
-            <StackPanel Grid.Row="2" Margin="18,0,18,0">
+            <StackPanel Grid.Row="4" Margin="18,0,18,0">
                 <TextBlock x:Name="TbGroupHeader" Text="配置组" FontSize="11" Margin="0,0,0,6"
                            Foreground="{DynamicResource TextTertiaryBrush}"/>
                 <ScrollViewer x:Name="GroupScroll" VerticalScrollBarVisibility="Auto" MaxHeight="210">
@@ -94,7 +108,7 @@
             </StackPanel>
 
             <!-- 工具：队列台账（哪些跑成了、哪些没成、为什么） -->
-            <StackPanel Grid.Row="3" Margin="18,14,18,0">
+            <StackPanel Grid.Row="5" Margin="18,14,18,0">
                 <TextBlock x:Name="TbToolHeader" Text="队列台账" FontSize="11" Margin="0,0,0,6"
                            Foreground="{DynamicResource TextTertiaryBrush}"/>
                 <ScrollViewer x:Name="ToolScroll" VerticalScrollBarVisibility="Auto" MaxHeight="150">
@@ -102,10 +116,30 @@
                 </ScrollViewer>
             </StackPanel>
 
-            <TextBlock x:Name="TbFoot" Grid.Row="4" Margin="18,12,18,0" FontSize="10.5" TextWrapping="Wrap"
+            <!-- v1.20：程序替你做的决定，每条一句为什么。没有记录时整块收起，
+                 不留「暂无数据」这种占位行。 -->
+            <StackPanel x:Name="DecisionSection" Grid.Row="6" Margin="18,14,18,0"
+                        Visibility="Collapsed">
+                <TextBlock x:Name="TbDecisionHeader" Text="它替你做的决定" FontSize="11" Margin="0,0,0,6"
+                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                <ScrollViewer x:Name="DecisionScroll" VerticalScrollBarVisibility="Auto" MaxHeight="150">
+                    <StackPanel x:Name="DecisionHost"/>
+                </ScrollViewer>
+            </StackPanel>
+
+            <!-- v1.20 / 奇思妙想 #8：它会在你不注意的时候变好。只出建议、不自己改；
+                 没有足够样本时整块收起——「你昨天失败过一次所以换个顺序」是瞎猜。 -->
+            <StackPanel x:Name="SuggestSection" Grid.Row="7" Margin="18,14,18,0"
+                        Visibility="Collapsed">
+                <TextBlock x:Name="TbSuggestHeader" Text="可以改进的地方" FontSize="11" Margin="0,0,0,6"
+                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                <StackPanel x:Name="SuggestHost"/>
+            </StackPanel>
+
+            <TextBlock x:Name="TbFoot" Grid.Row="8" Margin="18,12,18,0" FontSize="10.5" TextWrapping="Wrap"
                        Foreground="{DynamicResource TextTertiaryBrush}"/>
 
-            <Grid Grid.Row="5" Margin="18,14,18,16">
+            <Grid Grid.Row="9" Margin="18,14,18,16">
                 <TextBlock x:Name="TbSummary" FontSize="11" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextSecondaryBrush}"/>
                 <Button Content="关闭" HorizontalAlignment="Right" Style="{StaticResource Ghost}"

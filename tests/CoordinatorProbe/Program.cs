@@ -64,6 +64,15 @@ internal static class Program
         "update" => RunUpdate(),
             "backup" => RunBackup(),
             "preflight" => RunPreflight(),
+            "recap" => RunRecap(),
+            "decision" => RunDecision(),
+            "baseline" => RunBaseline(),
+            "timebank" => RunTimeBank(),
+            "away" => RunAway(),
+            "handover" => RunHandover(),
+            "troubleshoot" => RunTroubleshoot(),
+            "tidy" => RunTidy(),
+            "suggest" => RunSuggest(),
             "idle" => RunIdle(),
             "discover" => RunDiscover(stub),
             "custom" => RunCustom(stub),
@@ -1443,6 +1452,944 @@ internal static class Program
             !ReadRepoSources("Dragon Butler/PreflightWindow.xaml.cs").Contains("SaveSettings", StringComparison.Ordinal));
 
         Console.WriteLine($"RESULT preflight fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #1：复盘。
+    ///
+    /// 这一段要钉住的不是「能拼出句子」，而是三件不肯让步的事：
+    /// ① 不编——没有数据就不出那一条，绝不拿「一切正常」凑数；
+    /// ② 顺序——Lead 永远第一，Gap 永远最后，中间最多一条 Detail；
+    /// ③ 不报流水账——四行封顶。
+    /// </summary>
+    private static int RunRecap()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        var start = new DateTime(2026, 11, 17, 23, 4, 0);
+
+        // 一切都好、还比平时快：Lead 说全成，Detail 说快了多少，没有 Gap
+        Recap.Input Good() => new(
+            StartAt: start,
+            EndAt: start.AddMinutes(41),
+            DoneTools: 2,
+            TotalTools: 2,
+            Groups: new[]
+            {
+                new Recap.GroupRow("日常", TimeSpan.FromMinutes(18), false, 22),
+            },
+            Tools: new[]
+            {
+                new Recap.ToolRow("BetterGI", nameof(ToolRunState.Done), null),
+                new Recap.ToolRow("三月七助手", nameof(ToolRunState.Done), null),
+            },
+            Mora: 0,
+            Exp: 0,
+            Materials: null,
+            LastErrorLine: null,
+            StoppedByUser: false,
+            RanNothing: false);
+
+        // ---- 1) 全成 ----
+        var good = Recap.Build(Good());
+        Check("全成/有话说", good.Count >= 2, good.Count.ToString());
+        Check("全成/第一条是 Lead", good[0].Kind == Recap.LineKind.Lead);
+        Check("全成/说了几项跑成", good[0].Text.Contains("项都跑成了"), good[0].Text);
+        Check("全成/带开跑时刻", good[0].Text.Contains("23:04"), good[0].Text);
+        Check("全成/没有 Gap", good.All(l => l.Kind != Recap.LineKind.Gap), string.Join(" | ", good.Select(l => l.Kind)));
+        Check("全成/提到比往常快", good.Any(l => l.Text.Contains("比往常快")), string.Join(" | ", good.Select(l => l.Text)));
+
+        // ---- 2) 有失败：Gap 要最后一条，且带原因 ----
+        var bad = Recap.Build(Good() with
+        {
+            DoneTools = 1,
+            Tools = new[]
+            {
+                new Recap.ToolRow("BetterGI", nameof(ToolRunState.Done), null),
+                new Recap.ToolRow("三月七助手", nameof(ToolRunState.Failed), "退出码 1"),
+            },
+        });
+        Check("失败/说了几成几败", bad[0].Text.Contains("1 项跑成") && bad[0].Text.Contains("1 项没成"), bad[0].Text);
+        Check("失败/最后一条是 Gap", bad[^1].Kind == Recap.LineKind.Gap, bad[^1].Kind.ToString());
+        Check("失败/Gap 带名字", bad[^1].Text.Contains("三月七助手"), bad[^1].Text);
+        Check("失败/Gap 带原因", bad[^1].Text.Contains("退出码 1"), bad[^1].Text);
+
+        // ---- 3) 一项都没跑：只说一句，不硬凑 ----
+        var none = Recap.Build(Good() with { RanNothing = true, DoneTools = 0, TotalTools = 0, Groups = null, Tools = null });
+        Check("空/只有一句", none.Count == 1, none.Count.ToString());
+        Check("空/说的是没跑", none[0].Text.Contains("没跑"), none[0].Text);
+
+        // ---- 4) 用户主动停 ----
+        var stopped = Recap.Build(Good() with { StoppedByUser = true });
+        Check("停/第一条说停了", stopped[0].Text.Contains("你让它停了"), stopped[0].Text);
+        Check("停/不出 Gap（是他自己停的，不算没做到）", stopped.All(l => l.Kind != Recap.LineKind.Gap),
+            string.Join(" | ", stopped.Select(l => l.Kind)));
+
+        // ---- 5) 比往常慢 ----
+        var slow = Recap.Build(Good() with
+        {
+            Groups = new[] { new Recap.GroupRow("日常", TimeSpan.FromMinutes(40), false, 20) },
+        });
+        Check("慢/说慢了", slow.Any(l => l.Text.Contains("比往常慢")), string.Join(" | ", slow.Select(l => l.Text)));
+        Check("慢/带百分比", slow.Any(l => l.Text.Contains("%")), string.Join(" | ", slow.Select(l => l.Text)));
+
+        // ---- 6) 偏离不大就不说（±15% 以内是噪声） ----
+        var same = Recap.Build(Good() with
+        {
+            Groups = new[] { new Recap.GroupRow("日常", TimeSpan.FromMinutes(21), false, 20) },
+        });
+        Check("相近/不说快慢", same.All(l => !l.Text.Contains("比往常")), string.Join(" | ", same.Select(l => l.Text)));
+
+        // ---- 7) 样本不足：宁可不说，也不给个错数 ----
+        var noMedian = Recap.Build(Good() with
+        {
+            Groups = new[] { new Recap.GroupRow("日常", TimeSpan.FromMinutes(18), false, null) },
+        });
+        Check("无样本/不说比往常", noMedian.All(l => !l.Text.Contains("比往常")), string.Join(" | ", noMedian.Select(l => l.Text)));
+
+        // ---- 8) 没时间可评就说收益 ----
+        var income = Recap.Build(Good() with
+        {
+            Groups = null,
+            Mora = 12000,
+            Exp = 30,
+            Materials = new Dictionary<string, int>(StringComparer.Ordinal) { ["刀镡"] = 12 },
+        });
+        Check("收益/提到摩拉", income.Any(l => l.Text.Contains("摩拉")), string.Join(" | ", income.Select(l => l.Text)));
+
+        // ---- 9) 配置组没结束 ----
+        var unfinished = Recap.Build(Good() with
+        {
+            DoneTools = 0,
+            TotalTools = 0,
+            Tools = null,
+            Groups = new[]
+            {
+                new Recap.GroupRow("日常", TimeSpan.FromMinutes(18), false, 20),
+                new Recap.GroupRow("挖矿", null, true, null),
+            },
+        });
+        Check("未结束/说了一组没结束", unfinished[0].Text.Contains("没结束"), unfinished[0].Text);
+        Check("未结束/Gap 点名", unfinished[^1].Text.Contains("挖矿"), unfinished[^1].Text);
+
+        // ---- 10) 顺序与封顶：任何输入都不许超过 4 行，Lead 第一 Gap 最后 ----
+        var cases = new List<IReadOnlyList<Recap.Line>> { good, bad, none, stopped, slow, same, noMedian, income, unfinished };
+        Check("封顶/最多 4 行", cases.All(c => c.Count <= 4), string.Join(",", cases.Select(c => c.Count)));
+        Check("封顶/至少 1 行", cases.All(c => c.Count >= 1), string.Join(",", cases.Select(c => c.Count)));
+        Check("顺序/Lead 永远第一", cases.All(c => c[0].Kind == Recap.LineKind.Lead));
+        Check("顺序/Gap 只在最后", cases.All(c => c.Count(l => l.Kind == Recap.LineKind.Gap) <= 1
+                                                  && (c[^1].Kind == Recap.LineKind.Gap
+                                                      || c.All(l => l.Kind != Recap.LineKind.Gap))));
+
+        // ---- 11) 不说教、不出现产品腔 ----
+        string all = string.Join(" ", cases.SelectMany(c => c.Select(l => l.Text)));
+        Check("语气/没有「建议你」", !all.Contains("建议你"), all);
+        Check("语气/没有「请注意」", !all.Contains("请注意"), all);
+        Check("语气/没有「为了更好」", !all.Contains("为了更好"), all);
+        Check("语气/没有感叹号", !all.Contains("！"), all);
+
+        // ---- 12) Duration 人话 ----
+        Check("时长/不到一分钟", Recap.Duration(TimeSpan.FromSeconds(20)) == "不到 1 分钟");
+        Check("时长/分钟", Recap.Duration(TimeSpan.FromMinutes(18)) == "18 分钟");
+        Check("时长/整小时", Recap.Duration(TimeSpan.FromMinutes(120)) == "2 小时");
+        Check("时长/小时加分钟", Recap.Duration(TimeSpan.FromMinutes(95)) == "1 小时 35 分");
+        Check("时长/负数当零", Recap.Duration(TimeSpan.FromMinutes(-5)) == "不到 1 分钟");
+
+        // ---- 13) null 输入不抛 ----
+        Check("空输入/不抛", Recap.Build(null!).Count == 0);
+
+        // ---- 14) 接线：主卡里真的渲染了 ----
+        string xaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        string code = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        Check("接线/主卡有复盘容器", xaml.Contains("HomeRecap"), "MainWindow.xaml");
+        Check("接线/有刷新方法", code.Contains("private void RefreshHomeRecap()"), "MainWindow.xaml.cs");
+        Check("接线/刷主卡时会一起刷", code.Contains("RefreshHomeRecap();"), "MainWindow.xaml.cs");
+        Check("接线/取数走五张表", code.Contains("GroupArchive.GetDay") && code.Contains("RunJournal.GetDay")
+                                && code.Contains("HarvestLedger.GetDay"), "MainWindow.xaml.cs");
+        Check("接线/正在跑时不显示（免得以为跑完了）", code.Contains("!QueueService.IsRunning"), "MainWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT recap fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #4：自动决定台账。
+    ///
+    /// 这一段钉的是三条边界，不是「能记下来」：
+    /// ① 只在内存（不落盘）——它是「刚才发生了什么」，不是审计日志；
+    /// ② 有上限——给人扫一眼的清单，给两千条等于没给；
+    /// ③ 只记「本来可以不这样」的——正常跑完不记，否则真正要解释的那三条被淹掉。
+    /// </summary>
+    private static int RunDecision()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        DecisionLog.Clear();
+        Check("空/计数为零", DecisionLog.Count == 0);
+        Check("空/Recent 为空", DecisionLog.Recent(5).Count == 0);
+        Check("空/Summary 为空串（界面据此整块收起）", DecisionLog.Summary(DateTime.Now) == "");
+
+        var now = new DateTime(2026, 11, 17, 18, 0, 0);
+        DecisionLog.AddAt(now.AddMinutes(-30), DecisionSource.Queue, "跳过 ok-ww", "它依赖的 BetterGI 这次没跑成");
+        DecisionLog.AddAt(now.AddMinutes(-20), DecisionSource.Sentinel, "重启 BetterGI", "进程 30 秒没出现");
+        DecisionLog.AddAt(now.AddMinutes(-10), DecisionSource.Schedule, "先不开始", "你 42 秒前还在动键鼠");
+
+        Check("记/三条都进了", DecisionLog.Count == 3, DecisionLog.Count.ToString());
+        var recent = DecisionLog.Recent(5);
+        Check("Recent/最新在前", recent[0].Title == "先不开始", recent[0].Title);
+        Check("Recent/取几条就几条", DecisionLog.Recent(2).Count == 2);
+        Check("Recent/0 条返回空", DecisionLog.Recent(0).Count == 0);
+        Check("Recent/负数返回空", DecisionLog.Recent(-3).Count == 0);
+
+        // ---- 来源名 ----
+        Check("来源/队列", DecisionLog.SourceName(DecisionSource.Queue) == "队列");
+        Check("来源/守护", DecisionLog.SourceName(DecisionSource.Sentinel) == "守护");
+        Check("来源/定时", DecisionLog.SourceName(DecisionSource.Schedule) == "定时");
+        Check("来源/规则", DecisionLog.SourceName(DecisionSource.Rule) == "规则");
+        Check("来源/程序", DecisionLog.SourceName(DecisionSource.System) == "程序");
+
+        // ---- 一句话 ----
+        string line = DecisionLog.Describe(recent[0]);
+        Check("话/带来源", line.Contains("定时"), line);
+        Check("话/带标题", line.Contains("先不开始"), line);
+        Check("话/带理由", line.Contains("动键鼠"), line);
+        Check("话/没有空理由", !line.Contains("没留下理由"), line);
+        Check("话/null 安全", DecisionLog.Describe(null) == "");
+
+        var noWhy = new Decision(now, DecisionSource.Queue, "跳过某工具", "");
+        Check("话/理由空时明说", DecisionLog.Describe(noWhy).Contains("没留下理由"), DecisionLog.Describe(noWhy));
+
+        // ---- 空输入不记（免得清单被空条目撑满） ----
+        int before = DecisionLog.Count;
+        DecisionLog.Add(DecisionSource.Queue, "", "");
+        DecisionLog.Add(DecisionSource.Queue, null!, null!);
+        DecisionLog.Add(DecisionSource.Queue, "   ", "  ");
+        Check("空/全空的条目不入账", DecisionLog.Count == before, (DecisionLog.Count - before).ToString());
+
+        // ---- 上限 ----
+        DecisionLog.Clear();
+        for (int i = 0; i < DecisionLog.Capacity + 50; i++)
+        {
+            DecisionLog.AddAt(now.AddSeconds(i), DecisionSource.Queue, $"第 {i} 条", "压测");
+        }
+        Check("上限/不超过 Capacity", DecisionLog.Count == DecisionLog.Capacity, DecisionLog.Count.ToString());
+        var top = DecisionLog.Recent(1);
+        Check("上限/留下的是最新那条", top[0].Title == $"第 {DecisionLog.Capacity + 49} 条", top[0].Title);
+
+        // ---- 按天取 ----
+        DecisionLog.Clear();
+        DecisionLog.AddAt(now.Date.AddDays(-1).AddHours(23), DecisionSource.Queue, "昨天的", "x");
+        DecisionLog.AddAt(now, DecisionSource.Queue, "今天的", "y");
+        Check("按天/只到今天", DecisionLog.Today(now).Count == 1);
+        Check("按天/取到的是今天那条", DecisionLog.Today(now)[0].Title == "今天的");
+
+        // ---- Summary ----
+        DecisionLog.Clear();
+        for (int i = 0; i < 6; i++)
+            DecisionLog.AddAt(now.AddMinutes(-i), DecisionSource.Queue, $"第 {i} 条", "理由");
+        string summary = DecisionLog.Summary(now, 3);
+        Check("总结/最多三行", summary.Split('\n').Length == 3, summary.Split('\n').Length.ToString());
+        Check("总结/含来源", summary.Contains("队列"), summary);
+
+        // ---- 清空 ----
+        DecisionLog.Clear();
+        Check("清空/归零", DecisionLog.Count == 0);
+
+        // ---- 接线：决定真的被写进去了（不是只有台账自己在跑） ----
+        string queue = ReadRepoSources("Dragon Butler/QueueService.cs");
+        string sentinel = ReadRepoSources("Dragon Butler/SentinelService.cs");
+        Check("接线/跳过要留理由", queue.Contains("DecisionLog.Add(DecisionSource.Queue, $\"跳过"), "QueueService.cs");
+        Check("接线/整队停下要留理由", queue.Contains("DecisionLog.Add(DecisionSource.Queue, \"整队停下\""), "QueueService.cs");
+        Check("接线/防打扰要留理由", queue.Contains("DecisionLog.Add(DecisionSource.Schedule, \"先不开始\""), "QueueService.cs");
+        Check("接线/重启要留理由", sentinel.Contains("DecisionLog.Add(DecisionSource.Sentinel"), "SentinelService.cs");
+        Check("接线/冷却期不重启要说清", sentinel.Contains("一分钟内已经重启过一次"), "SentinelService.cs");
+
+        // ---- 边界：不许落盘 ----
+        Check("边界/不写文件", !queue.Contains("DecisionLog.Save") && !sentinel.Contains("DecisionLog.Save"));
+        Check("边界/没有序列化特性（它不是存档）",
+            !ReadRepoSources("Dragon Butler/DecisionLog.cs").Contains("JsonPropertyName"),
+            "DecisionLog.cs");
+
+        // ---- 界面 ----
+        string todayXaml = ReadRepoSources("Dragon Butler/TodayWindow.xaml");
+        string todayCode = ReadRepoSources("Dragon Butler/TodayWindow.xaml.cs");
+        Check("界面/今日有决策区", todayXaml.Contains("DecisionSection"), "TodayWindow.xaml");
+        Check("界面/默认收起（没有就不占地方）", todayXaml.Contains("Visibility=\"Collapsed\""), "TodayWindow.xaml");
+        Check("界面/渲染时会算可见性", todayCode.Contains("DecisionSection.Visibility"), "TodayWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT decision fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #3：基线。
+    ///
+    /// 最要紧的一条不是「能算出中位数」，而是<b>样本不足时必须闭嘴</b>——
+    /// 跑了两天就说「你平时怎样」是在编，而编出来的数字用户没法反驳。
+    /// </summary>
+    private static int RunBaseline()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // ---- 中位数 ----
+        Check("中位/空返回 null", Baseline.Median(Array.Empty<double>()) == null);
+        Check("中位/null 返回 null", Baseline.Median(null) == null);
+        Check("中位/单个", Baseline.Median(new[] { 7.0 }) == 7.0);
+        Check("中位/奇数取中间", Baseline.Median(new[] { 10.0, 20.0, 60.0 }) == 20.0);
+        Check("中位/偶数取均值", Baseline.Median(new[] { 10.0, 20.0, 40.0, 80.0 }) == 30.0);
+        // 0 是有效样本，负数才忽略。这一条改的是断言不是实现：
+        // 「那天一项都没失败」必须能参与中位数，否则「平时从没出过问题」这种最常见的
+        // 情况会永远算不出基线。
+        Check("中位/保留 0、忽略负数", Baseline.Median(new[] { 0.0, -5.0, 20.0, 10.0 }) == 10.0,
+            Baseline.Median(new[] { 0.0, -5.0, 20.0, 10.0 })?.ToString() ?? "null");
+        Check("中位/忽略 NaN 与无穷", Baseline.Median(new[] { double.NaN, double.PositiveInfinity, 20.0 }) == 20.0);
+        Check("中位/不被极端值拉走", Baseline.Median(new[] { 20.0, 20.0, 20.0, 20.0, 999.0 }) == 20.0);
+
+        // ---- 样本不足必须闭嘴 ----
+        var few = new[] { 20.0, 20.0, 20.0 };   // 3 天 < MinSamples
+        var vFew = Baseline.Judge(few, 40, " 分钟", "日常");
+        Check("闭嘴/样本不足不给话", vFew.Text.Length == 0, vFew.Text);
+        Check("闭嘴/样本不足级别是 Ok", vFew.Level == Baseline.Level.Ok);
+        Check("闭嘴/阈值就是 5 天", Baseline.MinSamples == 5);
+        Check("闭嘴/刚好 5 天开始说话",
+            Baseline.Judge(new[] { 20.0, 20.0, 20.0, 20.0, 20.0 }, 40, " 分钟", "日常").Text.Length > 0);
+
+        // ---- 正常范围不说话 ----
+        var history = new[] { 20.0, 20.0, 20.0, 20.0, 20.0 };
+        Check("正常/±20% 内不说话", Baseline.Judge(history, 22, " 分钟").Text.Length == 0);
+        Check("正常/轻微偏高不说话", Baseline.Judge(history, 23.9, " 分钟").Text.Length == 0);
+        Check("正常/不偏低不说话", Baseline.Judge(history, 17, " 分钟").Text.Length == 0);
+
+        // ---- 偏离要说，且分两档 ----
+        var notice = Baseline.Judge(history, 26, " 分钟", "日常");
+        Check("偏高/超过 20% 说话", notice.Text.Length > 0, notice.Text);
+        Check("偏高/级别 Notice", notice.Level == Baseline.Level.Notice, notice.Level.ToString());
+        Check("偏高/文案带「高」", notice.Text.Contains("高"), notice.Text);
+        Check("偏高/文案带基线值", notice.Text.Contains("20"), notice.Text);
+        Check("偏高/文案带实测值", notice.Text.Contains("26"), notice.Text);
+        Check("偏高/文案带百分比", notice.Text.Contains("30%"), notice.Text);
+
+        var warn = Baseline.Judge(history, 40, " 分钟", "日常");
+        Check("偏高/超过 50% 升到 Warn", warn.Level == Baseline.Level.Warn, warn.Level.ToString());
+
+        // 低于基线一律不说话：好消息不该用警告色，且「今天跑得少」未必值得夸。
+        var low = Baseline.Judge(history, 10, " 分钟", "日常");
+        Check("偏低/不说话", low.Text.Length == 0, low.Text);
+        Check("偏低/级别是 Ok", low.Level == Baseline.Level.Ok);
+
+        // ---- 今天 0 项失败：不该显示成「低 100%」 ----
+        var zero = Baseline.Judge(new[] { 2.0, 2.0, 2.0, 2.0, 2.0 }, 0, " 项", "没跑成的项");
+        Check("零失败/不说话（不是报表）", zero.Text.Length == 0, zero.Text);
+
+        // ---- 边界输入 ----
+        Check("边界/actual 为 null 不说话", Baseline.Judge(history, null).Text.Length == 0);
+        Check("边界/actual 负数不说话", Baseline.Judge(history, -1).Text.Length == 0);
+        // 平时一直是 0、今天不是 0 —— 最该报的一种（「以前从没出过问题」）。
+        var fromZero = Baseline.Judge(new[] { 0.0, 0.0, 0.0, 0.0, 0.0 }, 2, " 项", "没跑成的项");
+        Check("从零/今天不是零说话", fromZero.Text.Length > 0, fromZero.Text);
+        Check("从零/升到 Warn", fromZero.Level == Baseline.Level.Warn, fromZero.Level.ToString());
+        Check("从零/文案说「平时一次都没有」", fromZero.Text.Contains("一次都没有"), fromZero.Text);
+        Check("边界/基线为 0 且今天也是 0 不说话",
+            Baseline.Judge(new[] { 0.0, 0.0, 0.0, 0.0, 0.0 }, 0).Text.Length == 0);
+
+        // ---- JudgeLast ----
+        Check("JudgeLast/取最后一个当今天",
+            Baseline.JudgeLast(history, new[] { 40.0 }, " 分钟").Level == Baseline.Level.Warn);
+        Check("JudgeLast/空的 recent 不说话", Baseline.JudgeLast(history, Array.Empty<double>()).Text.Length == 0);
+
+        // ---- Describe ----
+        Check("描述/不足时明说", Baseline.Describe(few).Contains("不够"), Baseline.Describe(few));
+        Check("描述/够了就给中位数", Baseline.Describe(history).Contains("20"), Baseline.Describe(history));
+
+        // ---- 适配层：不数今天 ----
+        string facts = ReadRepoSources("Dragon Butler/BaselineFacts.cs");
+        Check("适配/不含今天", facts.Contains("for (int back = 1; back <= days; back++)"), "BaselineFacts.cs");
+        Check("适配/没跑的日子不算 0", facts.Contains("if (entries.Count == 0) continue"), "BaselineFacts.cs");
+        Check("适配/读的是已有台账", facts.Contains("RunJournal.GetDay"), "BaselineFacts.cs");
+        Check("适配/读的是已有存档", facts.Contains("GroupArchive.GetDay"), "BaselineFacts.cs");
+
+        // ---- 界面 ----
+        string xaml = ReadRepoSources("Dragon Butler/TodayWindow.xaml");
+        string code = ReadRepoSources("Dragon Butler/TodayWindow.xaml.cs");
+        Check("界面/今日有基线行", xaml.Contains("TbBaseline"), "TodayWindow.xaml");
+        Check("界面/默认收起", xaml.Contains("Visibility=\"Collapsed\""), "TodayWindow.xaml");
+        Check("界面/渲染时按文案有无决定可见性", code.Contains("v.Text.Length > 0 ? Visibility.Visible"), "TodayWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT baseline fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #5：时间银行。
+    ///
+    /// 这个数字的全部价值在于「诚实」——不折算、不推测、没数据就不显示。
+    /// 所以断言里一半在验「什么时候必须闭嘴」。
+    /// </summary>
+    private static int RunTimeBank()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        var now = new DateTime(2026, 11, 17);
+        var days = new List<TimeBank.Day>
+        {
+            new(new DateTime(2026, 11, 1), 30),   // 本月
+            new(new DateTime(2026, 11, 2), 45),   // 本月
+            new(new DateTime(2026, 10, 31), 60),  // 上月
+            new(new DateTime(2026, 10, 30), 90),  // 上月
+        };
+
+        var t = TimeBank.Sum(days, now);
+        Check("累计/本月合计", Math.Abs(t.ThisMonthMinutes - 75) < 0.01, t.ThisMonthMinutes.ToString());
+        Check("累计/全部合计", Math.Abs(t.AllMinutes - 225) < 0.01, t.AllMinutes.ToString());
+        Check("累计/本月天数", t.MonthActiveDays == 2, t.MonthActiveDays.ToString());
+        Check("累计/总天数", t.ActiveDays == 4, t.ActiveDays.ToString());
+
+        // 0 分钟的日子不算「跑过」
+        var withZero = new List<TimeBank.Day>
+        {
+            new(new DateTime(2026, 11, 3), 0),
+            new(new DateTime(2026, 11, 4), 0),
+        };
+        Check("累计/零分钟不算活跃天", TimeBank.Sum(withZero, now).ActiveDays == 0);
+        Check("累计/null 安全", TimeBank.Sum(null, now).AllMinutes == 0);
+
+        // 跨月才有「从装上到现在」，本月内不提累计
+        string both = TimeBank.Describe(t, now);
+        Check("描述/带本月小时", both.Contains("1.3"), both);
+        Check("描述/带本月天数", both.Contains("2 天"), both);
+        Check("描述/跨月提累计", both.Contains("从装上到现在"), both);
+        Check("描述/以句号结尾", both.EndsWith("。"), both);
+
+        var sameMonth = new List<TimeBank.Day>
+        {
+            new(new DateTime(2026, 11, 1), 30),
+            new(new DateTime(2026, 11, 2), 45),
+        };
+        Check("描述/同月不提累计", !TimeBank.Describe(TimeBank.Sum(sameMonth, now), now).Contains("从装上"), "");
+
+        // 没数据就不显示——不能出现「本月 0 小时」
+        Check("闭嘴/没有数据返回空", TimeBank.Describe(TimeBank.Sum(new List<TimeBank.Day>(), now), now).Length == 0);
+        Check("闭嘴/null 返回空", TimeBank.Describe(null, now).Length == 0);
+        Check("闭嘴/只有上月数据时本月为空", TimeBank.Describe(
+            TimeBank.Sum(new List<TimeBank.Day> { new(new DateTime(2026, 10, 5), 120) }, now), now).Length == 0);
+
+        // 小时格式
+        Check("格式/不到 1 小时说分钟", TimeBank.Hours(45) == "45 分钟", TimeBank.Hours(45));
+        Check("格式/零说 0 分钟", TimeBank.Hours(0) == "0 分钟", TimeBank.Hours(0));
+        Check("格式/负数说 0 分钟", TimeBank.Hours(-5) == "0 分钟", TimeBank.Hours(-5));
+        Check("格式/整数小时", TimeBank.Hours(120) == "2 小时", TimeBank.Hours(120));
+        Check("格式/带一位小数", TimeBank.Hours(75) == "1.3 小时", TimeBank.Hours(75));
+        Check("格式/十小时以上取整", TimeBank.Hours(6600) == "110 小时", TimeBank.Hours(6600));
+
+        // 适配层
+        string arch = ReadRepoSources("Dragon Butler/GroupArchive.cs");
+        Check("适配/有按天求分钟", arch.Contains("public static List<(DateTime Date, double Minutes)> DailyMinutes"), "GroupArchive.cs");
+        Check("适配/没跑的日子跳过", arch.Contains("if (!_data.TryGetValue(key, out var recs) || recs.Count == 0) continue"), "GroupArchive.cs");
+
+        // 界面
+        string xaml = ReadRepoSources("Dragon Butler/TodayWindow.xaml");
+        string code = ReadRepoSources("Dragon Butler/TodayWindow.xaml.cs");
+        Check("界面/今日有时间银行一行", xaml.Contains("TbTimeBank"), "TodayWindow.xaml");
+        Check("界面/默认收起", xaml.Contains("TbTimeBank"), "TodayWindow.xaml");
+        Check("界面/按文案有无决定可见性", code.Contains("text.Length > 0 ? Visibility.Visible"), "TodayWindow.xaml.cs");
+        Check("界面/渲染里调用了", code.Contains("RenderTimeBank()"), "TodayWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT timebank fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #2：你走开就跑。
+    ///
+    /// 这块的核心不是「能不能判断没人」，而是 <b>判错的代价不对称</b>：
+    /// 早开一次会打断你，晚开一次只是少跑一晚。所以断言大半在验
+    /// 「什么情况下必须不开」。
+    /// </summary>
+    private static int RunAway()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        var th = TimeSpan.FromMinutes(20);
+
+        // ---- 单次判定 ----
+        Check("空闲/刚好 20 分钟算没人", AwaySense.LooksAway(th, false));
+        Check("空闲/19 分钟不算", !AwaySense.LooksAway(TimeSpan.FromMinutes(19), false));
+        Check("空闲/0 不算", !AwaySense.LooksAway(TimeSpan.Zero, false));
+        Check("空闲/前台是游戏一律不算", !AwaySense.LooksAway(TimeSpan.FromHours(2), true));
+        Check("空闲/阈值可调", AwaySense.LooksAway(TimeSpan.FromMinutes(5), false, TimeSpan.FromMinutes(5)));
+        Check("空闲/阈值为 0 时不算", !AwaySense.LooksAway(TimeSpan.FromHours(5), false, TimeSpan.Zero));
+        Check("空闲/负阈值时不算", !AwaySense.LooksAway(TimeSpan.FromHours(5), false, TimeSpan.FromMinutes(-1)));
+
+        // ---- 连续判定：必须攒够 ConfirmTicks 次 ----
+        AwaySense.Snapshot? s = null;
+        for (int i = 0; i < AwaySense.ConfirmTicks - 1; i++)
+            s = AwaySense.Step(s, true, th, false);
+        Check("确认/差一次还不算走开", s!.State != AwaySense.Presence.Away, s.State.ToString());
+        Check("确认/记录已攒的连续次数", s.Streak == AwaySense.ConfirmTicks - 1, s.Streak.ToString());
+        Check("确认/提示里带进度", s.Reason.Contains("/"), s.Reason);
+
+        s = AwaySense.Step(s, true, th, false);
+        Check("确认/够次数才认账", s.State == AwaySense.Presence.Away, s.State.ToString());
+        Check("确认/认账时说明白", s.Reason == "你好像走了", s.Reason);
+
+        // 中途一动就清零——这是「判错代价不对称」的直接体现
+        var back = AwaySense.Step(s, false, TimeSpan.FromSeconds(3), false);
+        Check("清零/一动就回到 Present", back.State == AwaySense.Presence.Present, back.State.ToString());
+        Check("清零/连续次数归零", back.Streak == 0, back.Streak.ToString());
+        Check("清零/理由说清是键鼠", back.Reason.Contains("键鼠"), back.Reason);
+
+        var gameBack = AwaySense.Step(null, false, TimeSpan.Zero, true);
+        Check("清零/因为游戏而不算时理由不同", gameBack.Reason.Contains("游戏"), gameBack.Reason);
+
+        // 已经在 Away 状态，又采到一次「不算」→ 立刻回 Present，不能保持 Away
+        var stayed = AwaySense.Step(new AwaySense.Snapshot(AwaySense.Presence.Away, th, 99, ""), false, TimeSpan.Zero, false);
+        Check("清零/从 Away 退回 Present", stayed.State == AwaySense.Presence.Present, stayed.State.ToString());
+
+        // ---- ShouldStart：三重闸门 ----
+        var away = new AwaySense.Snapshot(AwaySense.Presence.Away, th, AwaySense.ConfirmTicks, "你好像走了");
+        Check("开跑/不在且没跑过→开", AwaySense.ShouldStart(away, false, false));
+        Check("开跑/已经在跑→不开", !AwaySense.ShouldStart(away, true, false));
+        Check("开跑/今天跑过→不开", !AwaySense.ShouldStart(away, false, true));
+        Check("开跑/你还在→不开", !AwaySense.ShouldStart(
+            new AwaySense.Snapshot(AwaySense.Presence.Present, th, 0, ""), false, false));
+        Check("开跑/还没看出来→不开", !AwaySense.ShouldStart(
+            new AwaySense.Snapshot(AwaySense.Presence.Unknown, th, 0, ""), false, false));
+        Check("开跑/null→不开", !AwaySense.ShouldStart(null, false, false));
+
+        // ---- 文案 ----
+        Check("描述/null 安全", AwaySense.Describe(null) == "还没看过", AwaySense.Describe(null));
+        Check("描述/你不在", AwaySense.Describe(away).Contains("你不在"), AwaySense.Describe(away));
+        Check("描述/带闲置时长", AwaySense.Describe(away).Contains("20"), AwaySense.Describe(away));
+        Check("描述/你在", AwaySense.Describe(
+            new AwaySense.Snapshot(AwaySense.Presence.Present, TimeSpan.Zero, 0, "")).Contains("你在"), "");
+
+        // ---- 默认值：必须默认关 ----
+        Check("默认/开关默认关", !new AppSettings().AwayStartEnabled);
+
+        // ---- 接线 ----
+        string code = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        string xaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        Check("接线/定时器里调了 CheckAway", code.Contains("CheckSchedule(); CheckAway();"), "MainWindow.xaml.cs");
+        Check("接线/有 CheckAway 实现", code.Contains("private void CheckAway()"), "MainWindow.xaml.cs");
+        Check("接线/定时开着时让位", code.Contains("if (s.ScheduleEnabled) return;"), "MainWindow.xaml.cs");
+        Check("接线/开跑前写一条决定", code.Contains("你走开，那就现在跑"), "MainWindow.xaml.cs");
+        Check("接线/开完清零", code.Contains("AwayWatcher.Reset();"), "MainWindow.xaml.cs");
+        Check("接线/没有取消按钮的诱惑", !xaml.Contains("取消走开"), "MainWindow.xaml");
+        Check("接线/首屏有第三条路", xaml.Contains("BtnQuickAway"), "MainWindow.xaml");
+        Check("接线/切换时互斥", code.Contains("s.ScheduleEnabled = false;"), "MainWindow.xaml.cs");
+        // 走开模式下仍停在简版：摊开时间与星期会让人以为那些也生效。
+        Check("接线/走开模式不摊开时间页", code.Contains("if (s.AwayStartEnabled)"), "MainWindow.xaml.cs");
+        Check("接线/走开模式主按钮是改回按时间", code.Contains("改回按时间跑"), "MainWindow.xaml.cs");
+        Check("接线/走开模式副按钮是现在就跑", code.Contains("\"runnow\""), "MainWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT away fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #6：交接单。
+    ///
+    /// 这块要挡的不是「能不能算出来」，而是 <b>顺序与语气</b>：
+    /// 兜不住的事必须排在会发生的事前面，否则就成了宣传单。
+    /// </summary>
+    private static int RunHandover()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        Handover.Input Healthy(int days = 3) => new(
+            Days: days, ScheduleEnabled: true, AwayStartEnabled: false, NextRunText: "08:00",
+            NotifyLocalOnly: false, NotifyReady: true, EnabledTools: 2, ReadyTools: 2,
+            AutoRestartBgi: true, RestartsToday: 0, StopWhenFailed: false,
+            AfterRunDestructive: false, BgiPathOk: true, GroupCount: 3, FreeDiskMb: 20000);
+
+        // ---- 健康：没有风险项，结论必须是「能自己过」 ----
+        var ok = Handover.Build(Healthy());
+        Check("健康/没有风险项", !ok.HasRisk, ok.Headline);
+        Check("健康/结论说能自己过", ok.Headline.Contains("能自己过"), ok.Headline);
+        Check("健康/有会发生的事", ok.Items.Count(i => i.Level == Handover.Severity.Plan) >= 2);
+        Check("健康/提到会推手机", ok.Items.Any(i => i.Key == "fine.notify"));
+
+        // ---- 每条风险都能单独触发，且以 × 开头 ----
+        var cases = new (string Name, Func<Handover.Input, Handover.Input> Mutate, string Key)[]
+        {
+            ("路径不通", i => i with { BgiPathOk = false }, "bgi"),
+            ("没有启用工具", i => i with { EnabledTools = 0, ReadyTools = 0 }, "tools"),
+            ("有工具没路径", i => i with { ReadyTools = 1 }, "tools.partial"),
+            ("只走本机通知", i => i with { NotifyLocalOnly = true }, "notify"),
+            ("远程通知没配齐", i => i with { NotifyReady = false }, "notify.broken"),
+            ("没有触发方式", i => i with { ScheduleEnabled = false }, "trigger"),
+            ("没有配置组", i => i with { GroupCount = 0 }, "groups"),
+            ("磁盘紧张", i => i with { FreeDiskMb = 100 }, "disk"),
+        };
+        foreach (var (name, mutate, key) in cases)
+        {
+            var sheet = Handover.Build(mutate(Healthy()));
+            Check($"风险/{name}被标出", sheet.HasRisk && sheet.Items.Any(i => i.Key == key && i.Level == Handover.Severity.Risk), key);
+        }
+
+        // ---- 顺序：风险必须全部排在计划前面 ----
+        var mixed = Handover.Build(Healthy() with { BgiPathOk = false, GroupCount = 0, FreeDiskMb = 10 });
+        int lastRisk = mixed.Items.Select((x, idx) => (x, idx)).Where(t => t.x.Level == Handover.Severity.Risk).Max(t => t.idx);
+        int firstPlan = mixed.Items.Select((x, idx) => (x, idx)).Where(t => t.x.Level == Handover.Severity.Plan).Min(t => t.idx);
+        Check("顺序/风险全在计划前", lastRisk < firstPlan, $"{lastRisk} < {firstPlan}");
+        Check("顺序/结论报出件数", mixed.Headline.Contains("3 件"), mixed.Headline);
+
+        // ---- 文案要点 ----
+        var one = Handover.Build(Healthy() with { BgiPathOk = false });
+        Check("文案/一件时说一件", one.Headline.Contains("有一件事"), one.Headline);
+        Check("文案/风险句说清后果", one.Items.First(i => i.Key == "bgi").Text.Contains("一次都不会跑"),
+            one.Items.First(i => i.Key == "bgi").Text);
+
+        var notify = Handover.Build(Healthy() with { NotifyLocalOnly = true });
+        Check("文案/本机通知的后果是人不在等于没有",
+            notify.Items.First(i => i.Key == "notify").Text.Contains("等于没有"),
+            notify.Items.First(i => i.Key == "notify").Text);
+
+        var abort = Handover.Build(Healthy() with { StopWhenFailed = true });
+        Check("文案/失败即停要说出来", abort.Items.Any(i => i.Key == "plan.tools" && i.Text.Contains("整队停")));
+
+        var noRestart = Handover.Build(Healthy() with { AutoRestartBgi = false });
+        Check("文案/不重启要说清停在那儿", noRestart.Items.Any(i => i.Key == "plan.norestart" && i.Text.Contains("停在那儿")));
+
+        var restarted = Handover.Build(Healthy() with { RestartsToday = 4 });
+        Check("文案/重启带次数", restarted.Items.Any(i => i.Key == "plan.restart" && i.Text.Contains("4 次")));
+
+        var destructive = Handover.Build(Healthy() with { AfterRunDestructive = true });
+        Check("文案/会自动关机要说出来", destructive.Items.Any(i => i.Key == "plan.afterrun" && i.Text.Contains("关机")));
+
+        var away = Handover.Build(Healthy() with { ScheduleEnabled = false, AwayStartEnabled = true });
+        Check("文案/走开模式有自己的计划句", away.Items.Any(i => i.Key == "plan.away"));
+        Check("文案/走开模式不再说每天几点", !away.Items.Any(i => i.Key == "plan.schedule"));
+
+        // ---- 天数会影响措辞 ----
+        Check("天数/2 天", Handover.Build(Healthy(2)).Headline.Contains("2 天"));
+        Check("天数/0 天兜底为 1", Handover.Build(Healthy(0)).Headline.Contains("1 天"));
+
+        // ---- 纯文本版 ----
+        string report = Handover.Report(mixed, Healthy() with { BgiPathOk = false, GroupCount = 0, FreeDiskMb = 10 });
+        Check("报告/含天数", report.Contains("离开 3 天"), report.Split('\n')[0]);
+        Check("报告/风险用叉", report.Contains("× "), "");
+        Check("报告/计划用点", report.Contains("· "), "");
+        Check("报告/以结论开头第二行", report.Split('\n')[1].Contains("白跑"), report.Split('\n')[1]);
+
+        // ---- 接线 ----
+        string xaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        string code = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        string win = ReadRepoSources("Dragon Butler/HandoverWindow.xaml.cs");
+        Check("接线/系统区有入口", xaml.Contains("BtnHandover"), "MainWindow.xaml");
+        Check("接线/有打开方法", code.Contains("private void OpenHandover()"), "MainWindow.xaml.cs");
+        Check("接线/命令面板能搜到", code.Contains("case \"view.handover\""), "MainWindow.xaml.cs");
+        Check("接线/窗口只读（不改设置）", !win.Contains("SaveSettings"), "HandoverWindow.xaml.cs");
+        Check("接线/窗口不写文件", !win.Contains("File.WriteAllText"), "HandoverWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT handover fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #9：先替你把话说清楚。
+    ///
+    /// 这块的底线是 <b>「不知道就说不知道」</b>：认不出的退出码必须给一条诚实的
+    /// 「我们没收录」，而不是套一句放之四海皆准的话。猜错一次，用户下次不信这个提示。
+    /// </summary>
+    private static int RunTroubleshoot()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // ---- 退出码：负数补码要认得出来 ----
+        var av = Troubleshoot.FromExitCode(unchecked((int)3221225477u));
+        Check("退出码/访问冲突按补码认得出", av != null && av.Key == "exit.access-violation", av?.Key ?? "null");
+        Check("退出码/说清和管家无关", av != null && av.Why.Contains("无关"), av?.Why ?? "");
+        Check("退出码/给的是下一步不是结论", av != null && av.Todo.Contains("事件查看器"), av?.Todo ?? "");
+        Check("退出码/带可点的命令", av?.Action == "view.log", av?.Action ?? "null");
+
+        Check("退出码/缺运行库", Troubleshoot.FromExitCode(unchecked((int)3221225781u))?.Key == "exit.dll-missing");
+        Check("退出码/CLR 异常", Troubleshoot.FromExitCode(unchecked((int)3762504530u))?.Key == "exit.clr-exception");
+        Check("退出码/退出码 1", Troubleshoot.FromExitCode(1)?.Key == "exit.code-1");
+        Check("退出码/0 不解释（成功了不该出现在这里）", Troubleshoot.FromExitCode(0) == null);
+        Check("退出码/没收录返回 null", Troubleshoot.FromExitCode(12345) == null);
+        Check("退出码/null 返回 null", Troubleshoot.FromExitCode(null) == null);
+
+        // ---- 日志行 ----
+        Check("日志/任务启动失败", Troubleshoot.FromLogLine("[ERR] 任务启动失败")?.Key == "log.start-failed");
+        Check("日志/树脂耗尽不算故障", Troubleshoot.FromLogLine("树脂耗尽，任务结束")?.Key == "log.resin-out");
+        Check("日志/大小写不敏感", Troubleshoot.FromLogLine("accessviolation exception")?.Key == "log.access-violation");
+        Check("日志/没命中返回 null", Troubleshoot.FromLogLine("一切都好") == null);
+        Check("日志/空与 null 返回 null",
+            Troubleshoot.FromLogLine("") == null && Troubleshoot.FromLogLine(null) == null);
+        Check("日志/树脂耗尽不给命令（没什么可做）", Troubleshoot.FromLogLine("树脂耗尽")?.Action == null);
+
+        // ---- Explain：优先级与兜底 ----
+        Check("综合/退出码优先于日志", Troubleshoot.Explain(1, "任务启动失败").Key == "exit.code-1");
+        Check("综合/没退出码时用日志", Troubleshoot.Explain(null, "任务启动失败").Key == "log.start-failed");
+
+        var unknownCode = Troubleshoot.Explain(9999, null);
+        Check("综合/没收录的码说实话", unknownCode.Key == "exit.unknown");
+        Check("综合/没收录也给出这个码本身", unknownCode.What.Contains("9999"), unknownCode.What);
+        Check("综合/没收录时给行动", unknownCode.Todo.Length > 0 && unknownCode.Action == "view.log");
+
+        var nothing = Troubleshoot.Explain(null, null);
+        Check("综合/什么都没有时诚实", nothing.Key == "unknown" && nothing.Action == "view.today");
+        Check("综合/兜底不编原因", !nothing.Why.Contains("可能"), nothing.Why);
+
+        // ---- 负数在文案里要显示成无符号十进制 ----
+        var negShow = Troubleshoot.Explain(unchecked((int)3221225477u) + 1, null);
+        Check("文案/负数折成无符号十进制", negShow.What.Contains("3221225478"), negShow.What);
+        Check("文案/不出现负号", !negShow.What.Contains("-"), negShow.What);
+
+        // ---- ParseExitCode：从人话里捞 ----
+        Check("解析/标准句式", Troubleshoot.ParseExitCode("异常退出，退出码 3221225477") == unchecked((int)3221225477u));
+        Check("解析/小码", Troubleshoot.ParseExitCode("退出码 1") == 1);
+        Check("解析/多个空格", Troubleshoot.ParseExitCode("退出码   42") == 42);
+        Check("解析/没有退出码", Troubleshoot.ParseExitCode("超时") == null);
+        Check("解析/空与 null", Troubleshoot.ParseExitCode("") == null && Troubleshoot.ParseExitCode(null) == null);
+        Check("解析/超过 int 的折成补码", Troubleshoot.ParseExitCode("退出码 3762504530") == unchecked((int)3762504530u));
+
+        // ---- Brief ----
+        Check("简述/不超 60 字", Troubleshoot.Brief(av).Length <= 60, Troubleshoot.Brief(av).Length.ToString());
+        Check("简述/null 返回空", Troubleshoot.Brief(null) == "");
+
+        // ---- 表不能被清空 ----
+        Check("收录/至少八条", Troubleshoot.KnownCount >= 8, Troubleshoot.KnownCount.ToString());
+
+        // ---- 界面接线 ----
+        string today = ReadRepoSources("Dragon Butler/TodayWindow.xaml.cs");
+        string evidence = ReadRepoSources("Dragon Butler/RunEvidence.cs");
+        Check("接线/今日窗口解释失败项", today.Contains("Troubleshoot.Explain("), "TodayWindow.xaml.cs");
+        Check("接线/认不出时不加废话", today.Contains("\"unknown\" or \"exit.unknown\""), "TodayWindow.xaml.cs");
+        Check("接线/台账原因里捞退出码", today.Contains("Troubleshoot.ParseExitCode"), "TodayWindow.xaml.cs");
+        Check("接线/原因里退出码显示成无符号", evidence.Contains("unchecked((uint)code)"), "RunEvidence.cs");
+
+        Console.WriteLine($"RESULT troubleshoot fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #7：跑完收拾一下。
+    ///
+    /// 这块真正要挡的是「默认全关」和「有失败就不关游戏」两件事：
+    /// 前者是不可逆动作的分寸，后者是别把现场也一起关了。
+    /// </summary>
+    private static int RunTidy()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        Tidy.Input Ready(bool closeGame = true, bool closeTool = true, bool restore = true, bool failure = false) => new(
+            Enabled: true, CloseGameEnabled: closeGame, CloseToolEnabled: closeTool,
+            RestoreWindowsEnabled: restore, GameRunning: true, ToolRunning: true,
+            RememberedWindows: 2, AnyFailure: failure, DryRun: false);
+
+        // ---- 默认全关 ----
+        Check("设置/总开关默认关", !new AppSettings().TidyEnabled);
+        Check("设置/关游戏默认关", !new AppSettings().TidyCloseGame);
+        Check("设置/关工具默认关", !new AppSettings().TidyCloseTool);
+        Check("设置/还原窗口默认关", !new AppSettings().TidyRestoreWindows);
+
+        // ---- 总开关关着时什么都不做 ----
+        var off = Tidy.Build(Ready() with { Enabled = false });
+        Check("总开关关/没有步骤", off.Steps.Count == 0);
+        Check("总开关关/文案说没开", off.Summary.Contains("没开"), off.Summary);
+        Check("总开关关/不算有事可做", !off.Anything);
+
+        // ---- 三项都开 ----
+        var all = Tidy.Build(Ready());
+        Check("全开/三步都在", all.Steps.Count == 3, all.Steps.Count.ToString());
+        Check("全开/关游戏是破坏性的", all.Steps.First(s => s.Kind == Tidy.Action.CloseGame).Destructive);
+        Check("全开/关工具不是破坏性的", !all.Steps.First(s => s.Kind == Tidy.Action.CloseTool).Destructive);
+        Check("全开/结论说已做", all.Summary.StartsWith("已"), all.Summary);
+
+        // ---- 单项开关独立生效 ----
+        var onlyTool = Tidy.Build(Ready(closeGame: false, restore: false));
+        Check("单项/只开工具就只一步", onlyTool.Steps.Count == 1 && onlyTool.Steps[0].Kind == Tidy.Action.CloseTool);
+
+        var onlyRestore = Tidy.Build(Ready(closeGame: false, closeTool: false));
+        Check("单项/只开还原就只一步", onlyRestore.Steps.Count == 1 && onlyRestore.Steps[0].Kind == Tidy.Action.RestoreWindows);
+        Check("单项/还原两步说两个窗口", onlyRestore.Steps[0].Text.Contains("2 个"), onlyRestore.Steps[0].Text);
+
+        // ---- 进程没开就无事可做 ----
+        var nothing = Tidy.Build(Ready() with { GameRunning = false, ToolRunning = false, RememberedWindows = 0 });
+        Check("没事/三步都不成立", nothing.Steps.Count == 0 && !nothing.Anything);
+        Check("没事/文案说没什么要收拾", nothing.Summary.Contains("没什么"), nothing.Summary);
+
+        // ---- 有失败时不关游戏（最关键的一条） ----
+        var failed = Tidy.Build(Ready(failure: true));
+        Check("失败/不关游戏", !failed.Steps.Any(s => s.Kind == Tidy.Action.CloseGame && s.Destructive));
+        Check("失败/说清为什么留游戏", failed.Steps.Any(s => s.Text.Contains("没跑成")), failed.Steps[0].Text);
+        Check("失败/其余照做", failed.Steps.Any(s => s.Kind == Tidy.Action.CloseTool));
+
+        // ---- 演练不提「已」 ----
+        var dry = Tidy.Build(Ready() with { DryRun = true });
+        Check("演练/文案带演练二字", dry.Summary.Contains("演练"), dry.Summary);
+        Check("演练/不说已做", !dry.Summary.StartsWith("已"), dry.Summary);
+
+        // ---- WorthRemembering：记值得记的窗口 ----
+        Check("记忆/正常窗口值得记", Tidy.WorthRemembering(new Tidy.WindowSpot("a", "", 100, 100, 1280, 720), 1920, 1080));
+        Check("记忆/太小的不记", !Tidy.WorthRemembering(new Tidy.WindowSpot("a", "", 100, 100, 100, 80), 1920, 1080));
+        Check("记忆/整块在屏幕外不记", !Tidy.WorthRemembering(new Tidy.WindowSpot("a", "", -2000, 100, 1280, 720), 1920, 1080));
+        Check("记忆/尺寸离谱不记", !Tidy.WorthRemembering(new Tidy.WindowSpot("a", "", 0, 0, 9000, 9000), 1920, 1080));
+        Check("记忆/null 不记", !Tidy.WorthRemembering(null, 1920, 1080));
+
+        // ---- SamePlace：差几个像素不算动过 ----
+        var p1 = new Tidy.WindowSpot("a", "", 100, 100, 800, 600);
+        var p2 = new Tidy.WindowSpot("a", "", 103, 102, 802, 599);
+        var p3 = new Tidy.WindowSpot("a", "", 300, 100, 800, 600);
+        Check("归位/差三像素算归位", Tidy.SamePlace(p1, p2));
+        Check("归位/挪了两百像素不算", !Tidy.SamePlace(p1, p3));
+        Check("归位/null 不算", !Tidy.SamePlace(p1, null));
+
+        // ---- 接线 ----
+        string queue = ReadRepoSources("Dragon Butler/QueueService.cs");
+        string xaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        string win = ReadRepoSources("Dragon Butler/TidyWindow.xaml.cs");
+        Check("接线/队列跑完会收拾", queue.Contains("TidyService.Execute(tidy)"), "QueueService.cs");
+        Check("接线/收拾在跑完动作之前", queue.IndexOf("TidyService.Execute(tidy)") < queue.IndexOf("AfterRunActionService.Execute(new AfterRunContext"), "顺序");
+        Check("接线/开跑前记住窗口", queue.Contains("TidyService.Capture(name)"), "QueueService.cs");
+        Check("接线/失败不冒泡", queue.Contains("\"收拾失败：\""), "QueueService.cs");
+        Check("接线/主窗有入口", xaml.Contains("BtnTidyConfig"), "MainWindow.xaml");
+        Check("接线/窗口写的是设置不是别处", win.Contains("AppState.SaveSettings()"), "TidyWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT tidy fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #8：它会在你不注意的时候变好。
+    ///
+    /// 这是十条里唯一会碰到用户设置的一条，所以断言的重点全在<b>克制</b>上：
+    /// 样本不够闭嘴、差距不够闭嘴、只出建议不动手。
+    /// </summary>
+    private static int RunSuggest()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        Suggest.ToolStat Stat(string id, int runs, int fails2, double avg = 20) => new(id, id, runs, fails2, avg);
+
+        Suggest.Input Base(int days = 30) => new(
+            Tools: new[] { Stat("bettergi", 20, 1), Stat("march7th", 20, 14) },
+            SampleDays: days, NotifyCount30d: 0, NotifyOpenedCount: 0,
+            ScheduleEnabled: true, AwayEnabled: false, GroupsNeverRun: 0, TotalGroups: 3);
+
+        // ---- 样本不够一律闭嘴 ----
+        Check("克制/6 天不给建议", Suggest.Build(Base(6)).Count == 0);
+        Check("克制/7 天开始给", Suggest.Build(Base(7)).Count > 0);
+        Check("克制/0 天不给", Suggest.Build(Base(0)).Count == 0);
+        Check("克制/null 工具列表不抛", Suggest.Build(Base() with { Tools = null }) != null);
+
+        // ---- 队列顺序建议 ----
+        var order = Suggest.Build(Base()).FirstOrDefault(i => i.Key == "queue.order");
+        Check("顺序/失败率高才提", order != null, order?.Title ?? "null");
+        Check("顺序/说清凭什么", order != null && order.Why.Contains("14 次"), order?.Why ?? "");
+        Check("顺序/给的是去处不是开关", order?.Action == "view.queue", order?.Action ?? "");
+
+        var balanced = Suggest.Build(Base() with
+        {
+            Tools = new[] { Stat("a", 20, 5), Stat("b", 20, 4) },
+        });
+        Check("顺序/差不多就不提", !balanced.Any(i => i.Key == "queue.order"));
+
+        var fewRuns = Suggest.Build(Base() with
+        {
+            Tools = new[] { Stat("a", 2, 2), Stat("b", 2, 0) },
+        });
+        Check("顺序/跑得太少不提（样本不足）", !fewRuns.Any(i => i.Key == "queue.order"));
+
+        var allBad = Suggest.Build(Base() with
+        {
+            Tools = new[] { Stat("a", 10, 9), Stat("b", 10, 8) },
+        });
+        Check("顺序/两个都差就不比（差距不够）", !allBad.Any(i => i.Key == "queue.order"));
+
+        // ---- 通知噪音 ----
+        var noisy = Suggest.Build(Base() with { NotifyCount30d = 40, NotifyOpenedCount = 1 });
+        Check("通知/发得多看得少会提", noisy.Any(i => i.Key == "notify.noise"));
+        Check("通知/说清两个数", noisy.First(i => i.Key == "notify.noise").Why.Contains("40"));
+
+        var fine = Suggest.Build(Base() with { NotifyCount30d = 40, NotifyOpenedCount = 20 });
+        Check("通知/看得多就不提", !fine.Any(i => i.Key == "notify.noise"));
+
+        var few = Suggest.Build(Base() with { NotifyCount30d = 3, NotifyOpenedCount = 0 });
+        Check("通知/发得少不提（样本不足）", !few.Any(i => i.Key == "notify.noise"));
+
+        // ---- 没用过的配置组 ----
+        var unused = Suggest.Build(Base() with { TotalGroups = 6, GroupsNeverRun = 4 });
+        Check("配置组/一半没用过会提", unused.Any(i => i.Key == "groups.unused"));
+        Check("配置组/说清几组", unused.First(i => i.Key == "groups.unused").Title.Contains("4"));
+
+        var someUsed = Suggest.Build(Base() with { TotalGroups = 6, GroupsNeverRun = 1 });
+        Check("配置组/用得还行不提", !someUsed.Any(i => i.Key == "groups.unused"));
+
+        // ---- 定时建议 ----
+        var noSchedule = Suggest.Build(Base(20) with { ScheduleEnabled = false, AwayEnabled = false });
+        Check("定时/没开定时且跑得多会提", noSchedule.Any(i => i.Key == "schedule.auto"));
+
+        var hasSchedule = Suggest.Build(Base(20));
+        Check("定时/已经开了就不提", !hasSchedule.Any(i => i.Key == "schedule.auto"));
+
+        var away = Suggest.Build(Base(20) with { ScheduleEnabled = false, AwayEnabled = true });
+        Check("定时/开了走开模式也不提", !away.Any(i => i.Key == "schedule.auto"));
+
+        // ---- 结论句 ----
+        Check("结论/没有建议返回空", Suggest.Headline(Array.Empty<Suggest.Idea>()) == "");
+        Check("结论/null 返回空", Suggest.Headline(null) == "");
+        Check("结论/一条", Suggest.Headline(new[] { order! }).Contains("一条"), Suggest.Headline(new[] { order! }));
+
+        // ---- 接线：只出建议不动手 ----
+        string code = ReadRepoSources("Dragon Butler/Suggest.cs");
+        string today = ReadRepoSources("Dragon Butler/TodayWindow.xaml.cs");
+        string xaml = ReadRepoSources("Dragon Butler/TodayWindow.xaml");
+        Check("接线/建议模块不写设置", !code.Contains("SaveSettings"), "Suggest.cs");
+        Check("接线/建议模块不碰磁盘", !code.Contains("File."), "Suggest.cs");
+        Check("接线/今日窗口有建议区", xaml.Contains("SuggestSection"), "TodayWindow.xaml");
+        Check("接线/没有建议时整块收起", today.Contains("SuggestSection.Visibility = Visibility.Collapsed"), "TodayWindow.xaml.cs");
+        Check("接线/不给一键改", !today.Contains("Suggest.Idea") || !today.Contains("Apply("), "TodayWindow.xaml.cs");
+
+        Console.WriteLine($"RESULT suggest fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
     }
 
@@ -3070,6 +4017,7 @@ internal static class Program
             "view.schedule", "view.queue", "view.tools", "view.advanced", "view.log", "view.calendar",
             "view.today", "view.logrules", "view.depends", "view.groups",
             "view.preflight", "view.presets", "view.notify",
+            "view.handover",
             "tool.copyToken", "tool.apiToggle", "tool.lanToggle", "tool.snapshot",
             "ui.miniBar", "ui.theme", "ui.hotkey",
             "sys.openFolder", "sys.check", "sys.about",
@@ -4272,7 +5220,9 @@ internal static class Program
         // v1.17：系统区从 7 行变 8 行（「备份设置」）；v1.19 再变 9 行（「开跑前体检」）。
         // 这一条不是随手放行的数字：加行的人必须同时改这里，改的时候会想一想
         // 「这一行真的非加不可吗」——这就是它存在的意义。
-        Check("系统区 9 行（v1.17 备份 + v1.19 体检）", sysRows == 9, sysRows.ToString());
+        // 加行的人必须同时改这里——改的时候会想一想这一行真的非加不可吗。
+        Check("系统区 10 行（v1.17 备份 + v1.19 体检 + v1.20 交接单）", sysRows == 10, sysRows.ToString());
+        Check("系统区有交接单一行", main.Contains("BtnHandover"), "MainWindow.xaml");
         Check("系统区有备份一行",
             main.Contains("x:Name=\"BtnBackupNow\"", StringComparison.Ordinal)
             && main.Contains("x:Name=\"BtnBackupRestore\"", StringComparison.Ordinal)

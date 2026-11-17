@@ -77,6 +77,13 @@ public class AppSettings
     public int ScheduleCatchUpMinutes { get; set; } = SchedulePlanner.DefaultCatchUpMinutes;
 
     /// <summary>
+    /// v1.20 / 奇思妙想 #2：不看时钟，你走了就开跑。
+    /// 与定时互斥地看待：定时回答「几点」，它回答「你在不在」；两个都开时以定时为准，
+    /// 因为它能说清「几点」而定时说不清「你在不在」。默认关。
+    /// </summary>
+    public bool AwayStartEnabled { get; set; } = false;
+
+    /// <summary>
     /// 上一次「因定时而跑」的那个计划点（yyyy-MM-dd HH:mm，空=无记录）。
     /// 取代 <see cref="LastRunAt"/> 的「只记日期」语义：手动跑过不算，回去补跑仍会触发。
     /// </summary>
@@ -217,6 +224,24 @@ public class AppSettings
     /// 需要演练时把它改回 true。
     /// </summary>
     public bool AfterRunDryRun { get; set; } = false;
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #7：跑完收拾一下。总开关，默认关——
+    /// 关掉别人的程序不可逆，这件事必须用户亲口打开。
+    /// </summary>
+    public bool TidyEnabled { get; set; } = false;
+
+    /// <summary>
+    /// 收拾时是否关游戏。单独一个开关：「关掉工具」和「关掉我在玩的游戏」不是一件事。
+    /// 上一轮有失败时一律不关（用户想自己看一眼现场）。
+    /// </summary>
+    public bool TidyCloseGame { get; set; } = false;
+
+    /// <summary>收拾时是否关掉 BetterGI 进程。</summary>
+    public bool TidyCloseTool { get; set; } = false;
+
+    /// <summary>是否把记住的窗口放回原处。</summary>
+    public bool TidyRestoreWindows { get; set; } = false;
 
     /// <summary>防打扰：定时触发时若检测到用户正在用电脑则推迟（默认开）。</summary>
     public bool IdleGuardEnabled { get; set; } = true;

@@ -55,8 +55,12 @@ public partial class TodayWindow : Window
 
         TbHeadline.Text = digest.Headline;
 
+        RenderBaseline();
+        RenderTimeBank();
         RenderGroups(digest);
+        RenderSuggestions();
         RenderJournal(journal);
+        RenderDecisions();
 
         TbFoot.Text = "数据来自本机已有的两份记录（配置组存档 / 队列台账）。"
                     + "「往常」取最近 14 天的同组中位数，样本少于 2 次就不评价快慢。";
@@ -68,6 +72,117 @@ public partial class TodayWindow : Window
     }
 
     // ===== 配置组 =====
+
+    /// <summary>
+    /// v1.20 时间银行：这个月它替你跑了多久。没有记录时整行收起。
+    /// </summary>
+    private void RenderTimeBank()
+    {
+        try
+        {
+            var now = DateTime.Now;
+            // 往前数一年。GroupArchive 不裁剪历史，但一年足够覆盖「从装上到现在」，
+            // 也不至于为了一个数字把几年前的键全扫一遍。
+            var days = GroupArchive.DailyMinutes(now.Date.AddDays(-365), now.Date)
+                .Select(d => new TimeBank.Day(d.Date, d.Minutes))
+                .ToList();
+            var totals = TimeBank.Sum(days, now);
+            string text = TimeBank.Describe(totals, now);
+            TbTimeBank.Text = text;
+            TbTimeBank.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch
+        {
+            TbTimeBank.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// v1.20：跟自己的过去比。样本不足时整行收起——
+    /// 「暂无数据」只会让人以为坏了，不如不出现。
+    /// </summary>
+    private void RenderBaseline()
+    {
+        try
+        {
+            var v = BaselineFacts.Today(DateTime.Today);
+            TbBaseline.Text = v.Text;
+            TbBaseline.Visibility = v.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            TbBaseline.Foreground = v.Level switch
+            {
+                Baseline.Level.Warn => BrushOf("WarningBrush", Brushes.Orange),
+                Baseline.Level.Notice => BrushOf("WarningBrush", Brushes.Orange),
+                _ => BrushOf("BrandTextBrush", Brushes.Green),
+            };
+        }
+        catch
+        {
+            TbBaseline.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// v1.20：它替你做的决定。没有记录时整块收起——
+    /// 「暂无数据」这行字只会让人以为功能坏了。
+    /// </summary>
+    private void RenderDecisions()
+    {
+        DecisionHost.Children.Clear();
+        List<Decision> list;
+        try { list = DecisionLog.Today(DateTime.Now); }
+        catch { list = new List<Decision>(); }
+
+        bool show = list.Count > 0;
+        DecisionSection.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show) return;
+
+        TbDecisionHeader.Text = $"它替你做的决定 · {list.Count} 条";
+        foreach (var d in list.Take(30))
+        {
+            DecisionHost.Children.Add(DecisionRow(d));
+        }
+    }
+
+    private UIElement DecisionRow(Decision d)
+    {
+        var row = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var at = new TextBlock
+        {
+            Text = d.At.ToString("HH:mm"),
+            FontSize = 11,
+            Foreground = BrushOf("TextTertiaryBrush", Brushes.Gray),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        Grid.SetColumn(at, 0);
+        row.Children.Add(at);
+
+        var tag = new TextBlock
+        {
+            Text = DecisionLog.SourceName(d.Source),
+            FontSize = 11,
+            Foreground = BrushOf("BrandTextBrush", Brushes.Green),
+            Margin = new Thickness(0, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        Grid.SetColumn(tag, 1);
+        row.Children.Add(tag);
+
+        var text = new TextBlock
+        {
+            Text = (d.Title.Length > 0 ? d.Title + " —— " : "") + (d.Why.Length > 0 ? d.Why : ""),
+            FontSize = 11.5,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = BrushOf("TextSecondaryBrush", Brushes.Gray),
+        };
+        Grid.SetColumn(text, 2);
+        row.Children.Add(text);
+
+        return row;
+    }
 
     private void RenderGroups(TodayDigest.Digest digest)
     {
@@ -202,6 +317,85 @@ public partial class TodayWindow : Window
             row.Children.Add(text);
 
             ToolHost.Children.Add(row);
+
+            // v1.20 / 奇思妙想 #9：失败的那一行，下面直接跟一句「这是什么、我该干什么」。
+            // 只在真能解释清楚时才加——一句放之四海皆准的废话比不加更糟。
+            if (!ok)
+            {
+                var tip = Troubleshoot.Explain(Troubleshoot.ParseExitCode(e.Reason), e.Reason);
+                if (tip.Key is not ("unknown" or "exit.unknown"))
+                {
+                    var why = new TextBlock
+                    {
+                        Text = tip.Why + " " + tip.Todo,
+                        FontSize = 10.5,
+                        LineHeight = 16,
+                        Margin = new Thickness(18, 0, 0, 6),
+                        TextWrapping = TextWrapping.Wrap,
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        Foreground = BrushOf("TextTertiaryBrush", Brushes.Gray),
+                    };
+                    ToolHost.Children.Add(why);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// v1.20 / 奇思妙想 #8：建议区。
+    /// 只列建议、每条带「凭什么这么说」和一句「去哪里改」；
+    /// <b>不提供一键改</b>——改队列顺序、关通知都是要看上下文的事，
+    /// 一键改会让人在没看懂原因的情况下动了设置。
+    /// </summary>
+    private void RenderSuggestions()
+    {
+        try
+        {
+            var ideas = SuggestFacts.Build(DateTime.Today);
+            SuggestHost.Children.Clear();
+
+            if (ideas.Count == 0)
+            {
+                SuggestSection.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            SuggestSection.Visibility = Visibility.Visible;
+            TbSuggestHeader.Text = Suggest.Headline(ideas);
+
+            foreach (var idea in ideas)
+            {
+                var box = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+
+                var title = new TextBlock
+                {
+                    Text = idea.Title,
+                    FontSize = 11.5,
+                    FontWeight = FontWeights.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Foreground = BrushOf("TextPrimaryBrush", Brushes.White),
+                };
+                box.Children.Add(title);
+
+                var why = new TextBlock
+                {
+                    Text = idea.Why,
+                    FontSize = 10.5,
+                    LineHeight = 16,
+                    Margin = new Thickness(0, 2, 0, 0),
+                    MaxWidth = 560,
+                    TextWrapping = TextWrapping.Wrap,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Foreground = BrushOf("TextTertiaryBrush", Brushes.Gray),
+                };
+                box.Children.Add(why);
+
+                SuggestHost.Children.Add(box);
+            }
+        }
+        catch
+        {
+            SuggestSection.Visibility = Visibility.Collapsed;
         }
     }
 
