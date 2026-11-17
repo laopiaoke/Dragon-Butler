@@ -77,6 +77,71 @@
             </Setter>
         </Style>
 
+        <!-- v1.22：引导页的工具清单太长，16 个勾选框一列排下来像张表格，
+             而且小方块勾上去很难确认自己点中了哪个。改成胶囊开关：
+             整行都能点，开着的轨道是品牌色，扫一眼就知道选了什么。 -->
+        <Style x:Key="WizPill" TargetType="CheckBox">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="Track" Width="38" Height="21" CornerRadius="11"
+                                Background="{DynamicResource ControlBgBrush}"
+                                BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1"
+                                VerticalAlignment="Center">
+                            <Border x:Name="Knob" Width="15" Height="15" CornerRadius="8"
+                                    Background="{DynamicResource TextTertiaryBrush}"
+                                    HorizontalAlignment="Left" Margin="2,0,0,0"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource BrandBrush}"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                                <Setter TargetName="Knob" Property="Background" Value="{DynamicResource BrandOnBrush}"/>
+                                <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Knob" Property="Margin" Value="0,0,2,0"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- v1.22：清单变长之后出现了滚动条，而 WPF 默认滚动条是系统浅色，
+             在深色窗口里像贴了两条白胶带。自己画一条细的。 -->
+        <Style x:Key="WizScrollBar" TargetType="ScrollBar">
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Border Background="Transparent" CornerRadius="4">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="Bar" CornerRadius="4"
+                                                        Background="{DynamicResource BorderStrongBrush}" Margin="2,0"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bar" Property="Background" Value="{DynamicResource TextTertiaryBrush}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="WizCheck" TargetType="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             <Setter Property="FontSize" Value="13"/>
@@ -136,11 +201,18 @@
 
             <!-- 步骤 1：选择工具 -->
             <StackPanel x:Name="Step1" Grid.Row="1" Margin="0,16,0,0">
-                <TextBlock Text="勾选你正在用的工具（可多选，之后也能改）" FontSize="12.5"
+                <TextBlock Text="打开你在用的那几个（可多选，之后也能改）" FontSize="12.5"
                            Foreground="{DynamicResource TextSecondaryBrush}"/>
-                <CheckBox x:Name="CbBgi" Style="{StaticResource WizCheck}" Content="BetterGI（原神一条龙）" IsChecked="True"/>
-                <CheckBox x:Name="CbMarch" Style="{StaticResource WizCheck}" Content="三月七助手（星穹铁道）"/>
-                <CheckBox x:Name="CbOkww" Style="{StaticResource WizCheck}" Content="ok-ww（鸣潮）"/>
+                <!-- 列表是滚动区：以后再加工具不会把窗口越撑越高 -->
+                <ScrollViewer MaxHeight="312" VerticalScrollBarVisibility="Auto" Margin="0,10,0,0"
+                              Padding="0,0,6,0">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource WizScrollBar}"/>
+                    </ScrollViewer.Resources>
+                    <StackPanel x:Name="ToolPickHost"/>
+                </ScrollViewer>
+                <TextBlock x:Name="TbPickSummary" FontSize="11" Margin="0,8,0,0"
+                           Foreground="{DynamicResource TextTertiaryBrush}"/>
             </StackPanel>
 
             <!-- 步骤 2：找路径 -->

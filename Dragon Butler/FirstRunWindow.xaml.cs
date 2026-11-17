@@ -17,20 +17,172 @@ public partial class FirstRunWindow : Window
 {
     private int _step = 1;
     private readonly Dictionary<string, string> _found = new();
+    private readonly Dictionary<string, CheckBox> _picks = new();
 
     public FirstRunWindow()
     {
         InitializeComponent();
+        BuildToolPicks();
         ApplyQueueSelection();
         UpdateUi();
+    }
+
+    /// <summary>
+    /// v1.22：工具清单不再写死三个。列表来自 ToolCatalog（AUTO-MAS 那边有的都收进来了），
+    /// 只显示「已经在队列里 / 已经配好路径 / 是内置」的那几个，
+    /// 顺序也按这个优先级——让人先看到自己已经有的，而不是从十六行里找。
+    /// </summary>
+    private void BuildToolPicks()
+    {
+        ToolPickHost.Children.Clear();
+        _picks.Clear();
+
+        var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
+        var interesting = new List<ToolProfile>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Want(ToolProfile? p)
+        {
+            if (p == null) return;
+            if (!seen.Add(p.ToolId)) return;
+            interesting.Add(p);
+        }
+
+        foreach (var entry in queue) Want(ProfileRegistry.Get(entry.ToolId));
+        foreach (var known in ToolCatalog.All)
+        {
+            if (known.BuiltIn) Want(ProfileRegistry.Get(known.ToolId));
+        }
+        foreach (var profile in ProfileRegistry.All)
+        {
+            if (!string.IsNullOrWhiteSpace(profile.ExecutablePath)) Want(profile);
+        }
+        // v1.22：AUTO-MAS 托管列表里有的工具这里也要有。之前只列三个，
+        // 用别的脚本的人第一眼就找不到自己那款，只能关掉向导再回头加。
+        foreach (var known in ToolCatalog.All) Want(ProfileRegistry.Get(known.ToolId));
+
+        foreach (var profile in interesting) ToolPickHost.Children.Add(BuildPickRow(profile));
+
+        if (_picks.Count == 0)
+        {
+            ToolPickHost.Children.Add(new TextBlock
+            {
+                Text = "没有可选的工具，先「跳过」，进主界面后点「＋ 添加」。",
+                FontSize = 12,
+                Margin = new Thickness(0, 4, 0, 0),
+                Foreground = (Brush?)TryFindResource("TextTertiaryBrush") ?? Brushes.Gray,
+            });
+        }
+        RefreshPickSummary();
+    }
+
+    private UIElement BuildPickRow(ToolProfile profile)
+    {
+        var known = ToolCatalog.Find(profile.ToolId);
+
+        var row = new Border
+        {
+            Margin = new Thickness(0, 0, 0, 6),
+            Padding = new Thickness(12, 9, 12, 9),
+            CornerRadius = new CornerRadius(9),
+            Background = (Brush?)TryFindResource("InsetBrush") ?? Brushes.Transparent,
+            BorderBrush = (Brush?)TryFindResource("BorderBrush") ?? Brushes.Gray,
+            BorderThickness = new Thickness(1),
+            Cursor = Cursors.Hand,
+        };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var icon = new Border
+        {
+            Width = 26,
+            Height = 26,
+            CornerRadius = new CornerRadius(8),
+            Background = (Brush?)TryFindResource("ControlBgBrush") ?? Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var bitmap = ToolIconService.GetBitmap(profile);
+        if (bitmap != null)
+        {
+            icon.Child = new Image { Source = bitmap, Stretch = Stretch.Uniform };
+        }
+        else
+        {
+            icon.Child = new TextBlock
+            {
+                Text = profile.DisplayName.Length > 0 ? profile.DisplayName[..1] : "?",
+                FontSize = 12,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = (Brush?)TryFindResource("TextSecondaryBrush") ?? Brushes.Gray,
+            };
+        }
+        grid.Children.Add(icon);
+
+        var text = new StackPanel { Margin = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock
+        {
+            Text = profile.DisplayName,
+            FontSize = 12.5,
+            Foreground = (Brush?)TryFindResource("TextPrimaryBrush") ?? Brushes.White,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        if (known != null && !string.IsNullOrWhiteSpace(known.GameName))
+        {
+            text.Children.Add(new TextBlock
+            {
+                Text = known.GameName,
+                FontSize = 10.5,
+                Margin = new Thickness(0, 2, 0, 0),
+                Foreground = (Brush?)TryFindResource("TextTertiaryBrush") ?? Brushes.Gray,
+            });
+        }
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+
+        var pill = new CheckBox { Style = TryFindResource("WizPill") as Style, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(pill, 2);
+        grid.Children.Add(pill);
+
+        row.Child = grid;
+        // 整行可点：胶囊太细，十六行往下排时很容易点到隔壁
+        row.MouseLeftButtonUp += (_, _) => pill.IsChecked = pill.IsChecked != true;
+        pill.Checked += (_, _) =>
+        {
+            row.BorderBrush = (Brush?)TryFindResource("BrandBrush") ?? Brushes.Green;
+            RefreshPickSummary();
+        };
+        pill.Unchecked += (_, _) =>
+        {
+            row.BorderBrush = (Brush?)TryFindResource("BorderBrush") ?? Brushes.Gray;
+            RefreshPickSummary();
+        };
+
+        _picks[profile.ToolId] = pill;
+        return row;
+    }
+
+    private void RefreshPickSummary()
+    {
+        int on = _picks.Count(kv => kv.Value.IsChecked == true);
+        TbPickSummary.Text = on == 0
+            ? "一个都没开。选好之后点「下一步」，或者「跳过」稍后再设。"
+            : $"已选 {on} 个。下一步给它们找主程序。";
     }
 
     private void ApplyQueueSelection()
     {
         var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
-        CbBgi.IsChecked = queue.FirstOrDefault(q => q.ToolId == "bettergi")?.Enabled ?? true;
-        CbMarch.IsChecked = queue.FirstOrDefault(q => q.ToolId == "march7th")?.Enabled ?? false;
-        CbOkww.IsChecked = queue.FirstOrDefault(q => q.ToolId == "ok-ww")?.Enabled ?? false;
+        foreach (var kv in _picks)
+        {
+            string toolId = kv.Key;
+            var entry = queue.FirstOrDefault(q => string.Equals(q.ToolId, toolId, StringComparison.OrdinalIgnoreCase));
+            // 第一次打开时默认只把 BetterGI 打上：这不是「推荐」，是「多数人第一个装的是它」
+            kv.Value.IsChecked = entry != null ? entry.Enabled : string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private void UpdateUi()
@@ -48,11 +200,9 @@ public partial class FirstRunWindow : Window
 
     private List<ToolProfile> SelectedProfiles()
     {
-        var ids = new List<string>();
-        if (CbBgi.IsChecked == true) ids.Add("bettergi");
-        if (CbMarch.IsChecked == true) ids.Add("march7th");
-        if (CbOkww.IsChecked == true) ids.Add("ok-ww");
-        return ids.Select(ProfileRegistry.Get).ToList();
+        return _picks.Where(kv => kv.Value.IsChecked == true)
+                     .Select(kv => ProfileRegistry.Get(kv.Key))
+                     .ToList();
     }
 
     private void BuildFindRows()
@@ -205,9 +355,7 @@ public partial class FirstRunWindow : Window
             if (entry == null) queue.Add(new QueueEntry { ToolId = id, Enabled = on });
             else entry.Enabled = on;
         }
-        Set("bettergi", CbBgi.IsChecked == true);
-        Set("march7th", CbMarch.IsChecked == true);
-        Set("ok-ww", CbOkww.IsChecked == true);
+        foreach (var kv in _picks) Set(kv.Key, kv.Value.IsChecked == true);
         AppState.Settings.Queue = queue;
         AppState.SaveSettings();
     }

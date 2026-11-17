@@ -85,6 +85,23 @@ internal static class RenderProbe
     /// 给渲染用的样例队列：三个工具、两条依赖、一处切片。
     /// 只在本进程内改内存，不写盘——渲染探针不该改用户的配置。
     /// </summary>
+    /// <remarks>
+    /// v1.22：内容区拆成三页之后，右页（工具设置 / 高级 / 系统 / 通知）默认不在可视区里。
+    /// 渲染前必须先把页面切过去，否则截出来会是中页。用反射调 ShowPage(index, false)：
+    /// 不带动画、立即到位，截的才是稳定画面。
+    /// </remarks>
+    private static void SwitchToSettingsPage(MainWindow w)
+    {
+        try
+        {
+            var m = typeof(MainWindow).GetMethod("ShowPage",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            m?.Invoke(w, new object[] { 2, false });
+            w.UpdateLayout();
+        }
+        catch (Exception ex) { Console.WriteLine("SWITCH-PAGE-FAIL " + ex.Message); }
+    }
+
     private static void SeedSampleQueue()
     {
         try
@@ -606,6 +623,28 @@ internal static class RenderProbe
                     // 而这张卡的全部价值在它怎么变——只截一种等于没验。
                     // v1.20：多截一张 recap——复盘贴在主卡下方，光验内核不算数，
                     // 得看到它跟标题、按钮挤在同一张卡里是什么样。
+                    // v1.22：左页（运行）单独出一张。这一页新写，内容是否挤在一起、
+                    // 三句话有没有说清，只有在真窗口里看才知道。
+                    if (mode == "runpage" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedSampleArchive();
+                        SeedRecapToday();
+                        SeedDecisions();
+                        SeedHeroState("done");
+                        AppState.Settings.LastRunAt = DateTime.Now.AddMinutes(-49).ToString("yyyy-MM-dd HH:mm");
+                        AppState.Settings.LastRunSeconds = 49 * 60;
+                        var w = new MainWindow();
+                        w.UpdateLayout();
+                        var show = typeof(MainWindow).GetMethod("ShowPage",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        show?.Invoke(w, new object[] { 0, false });
+                        w.UpdateLayout();
+                        bool ok = Save(w, Path.Combine(spot, "runpage.png"), 980, 460);
+                        Console.WriteLine($"RENDER runpage={ok}");
+                        w.Close();
+                    }
+
                     if (mode == "hero" || mode == "recap" || mode == "all")
                     {
                         var states = mode == "recap"
@@ -712,15 +751,21 @@ internal static class RenderProbe
                         render?.Invoke(w, null);
                         w.UpdateLayout();
 
-                        // 桌面网格在首屏主卡与队列卡下面，不滚过去就截不到。
+                        // v1.22：「我的工具」格子挪到了右页（设置页），所以要先切到那一页再滚。
                         // BringIntoView 在没 Show 过的窗口上不生效（没有滚动宿主测量），只能直接给偏移。
-                        if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer svGrid)
+                        var showPage = typeof(MainWindow).GetMethod("ShowPage",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        showPage?.Invoke(w, new object[] { 2, false });
+                        w.UpdateLayout();
+                        if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer svGrid)
                         {
-                            svGrid.ScrollToVerticalOffset(640);
+                            svGrid.ScrollToVerticalOffset(40);
                             w.UpdateLayout();
                         }
 
-                        bool ok = Save(w, Path.Combine(spot, "grid.png"), 980, 420);
+                        // v1.22：格子从「有用的几格 + 一个＋」变成画满 2×4，
+                        // 420 高的截图只能看到第一行，第二行的虚线空格全被裁掉——看不到等于没验。
+                        bool ok = Save(w, Path.Combine(spot, "grid.png"), 980, 620);
                         Console.WriteLine($"RENDER grid={ok}");
                         w.Close();
                     }
@@ -779,7 +824,8 @@ internal static class RenderProbe
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                         picker?.Invoke(w, null);
                         w.UpdateLayout();
-                        if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer sv2)
+                        SwitchToSettingsPage(w);
+                        if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer sv2)
                         {
                             // v1.15 / L4：滚到 BetterGI 那张卡本身。430 只到折叠头，
                             // 配置组勾选区在卡片下半部分，看不到就等于没验。
@@ -890,7 +936,8 @@ internal static class RenderProbe
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                         refresh?.Invoke(w, new object[] { true });
                         w.UpdateLayout();
-                        if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer sv3)
+                        SwitchToSettingsPage(w);
+                        if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer sv3)
                         {
                             sv3.ScrollToVerticalOffset(500);
                             w.UpdateLayout();
@@ -954,7 +1001,9 @@ internal static class RenderProbe
                             // 主窗是 SizeToContent="Height" 且内容装在 ScrollViewer 里，
                             // 光设高度没用——得动滚动条，否则长图上下两端总有一头看不见。
                             w.UpdateLayout();
-                            if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer sv)
+                            // v1.22：高级/系统/通知三张卡都在右页（设置页），先把页面切过去再滚。
+                            SwitchToSettingsPage(w);
+                            if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer sv)
                             {
                                 if (mode == "top") sv.ScrollToTop();
                                 else sv.ScrollToEnd();

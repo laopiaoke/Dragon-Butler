@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -10,16 +10,16 @@
     <ApplicationIcon>Dragon Butler.ico</ApplicationIcon>
     <AssemblyName>Dragon Butler</AssemblyName>
     <RootNamespace>DragonButler</RootNamespace>
-    <Version>1.21.0</Version>
-    <FileVersion>1.21.0.0</FileVersion>
-    <AssemblyVersion>1.21.0.0</AssemblyVersion>
-    <Product>一条龙管家</Product>
+    <Version>1.22.0</Version>
+    <FileVersion>1.22.0.0</FileVersion>
+    <AssemblyVersion>1.22.0.0</AssemblyVersion>
+    <Product>涓€鏉￠緳绠″</Product>
     <Company>Dragon Butler</Company>
-    <Description>BetterGI 一条龙的启停管家与守护工具</Description>
+    <Description>BetterGI 涓€鏉￠緳鐨勫惎鍋滅瀹朵笌瀹堟姢宸ュ叿</Description>
     <Nullable>enable</Nullable>
-    <!-- v1.3 交付要求 0 warning：以下两条为存量、与本次重构无关，明确豁免 -->
-    <!-- CS8981：using wf = System.Windows.Forms 的小写别名（App.xaml.cs 既有写法） -->
-    <!-- WFAC010：WinForms 对 app.manifest DPI 段的提示；WPF 程序必须保留 manifest 设置 -->
+    <!-- v1.3 浜や粯瑕佹眰 0 warning锛氫互涓嬩袱鏉′负瀛橀噺銆佷笌鏈閲嶆瀯鏃犲叧锛屾槑纭眮鍏?-->
+    <!-- CS8981锛歶sing wf = System.Windows.Forms 鐨勫皬鍐欏埆鍚嶏紙App.xaml.cs 鏃㈡湁鍐欐硶锛?-->
+    <!-- WFAC010锛歐inForms 瀵?app.manifest DPI 娈电殑鎻愮ず锛沇PF 绋嬪簭蹇呴』淇濈暀 manifest 璁剧疆 -->
     <NoWarn>$(NoWarn);CS8981;WFAC010</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -29,9 +29,9 @@
     <Using Remove="System" />
     <Using Remove="System.Controls" />
   </ItemGroup>
-  <!-- v1.21：已知软件的官方图标。打进程序里，BGI 没装/路径没填也能看见图标，
-       否则格子里只剩一个首字母方块，八个格子看起来像八个一样的占位。
-       这些图标的版权归各工具作者，见 README「图形素材」一节。 -->
+  <!-- v1.21锛氬凡鐭ヨ蒋浠剁殑瀹樻柟鍥炬爣銆傛墦杩涚▼搴忛噷锛孊GI 娌¤/璺緞娌″～涔熻兘鐪嬭鍥炬爣锛?
+       鍚﹀垯鏍煎瓙閲屽彧鍓╀竴涓瀛楁瘝鏂瑰潡锛屽叓涓牸瀛愮湅璧锋潵鍍忓叓涓竴鏍风殑鍗犱綅銆?
+       杩欎簺鍥炬爣鐨勭増鏉冨綊鍚勫伐鍏蜂綔鑰咃紝瑙?README銆屽浘褰㈢礌鏉愩€嶄竴鑺傘€?-->
   <ItemGroup>
     <Resource Include="Assets\icons\*.png" />
     <Resource Include="Assets\icons\*.ico" />

@@ -758,6 +758,22 @@
                                VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </StackPanel>
 
+                <!-- v1.22：三个页面。左边是「刚才跑了什么」，中间是「接下来几点跑」，
+                     右边是「把东西配好」。以前这些全挤在一列里往下滚，滚到哪算哪；
+                     现在按「我现在想知道什么」分成三屏，标题栏中间就是换页的地方。 -->
+                <Border Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{DynamicResource ControlBgBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="2">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="SegPageRun" Content="运行" Tag="0"
+                                     Style="{StaticResource SegBtn}" Checked="SegPage_Checked"/>
+                        <RadioButton x:Name="SegPageHome" Content="启动" Tag="1" IsChecked="True"
+                                     Style="{StaticResource SegBtn}" Checked="SegPage_Checked"/>
+                        <RadioButton x:Name="SegPageSettings" Content="设置" Tag="2"
+                                     Style="{StaticResource SegBtn}" Checked="SegPage_Checked"/>
+                    </StackPanel>
+                </Border>
+
                 <Border Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0"
                         Background="{DynamicResource ControlBgBrush}" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="2">
@@ -781,18 +797,101 @@
                         ToolTip="关闭（可在托盘继续运行）"/>
             </Grid>
 
-            <!-- 内容区：单页、无导航、一屏装完（§3） -->
-            <ScrollViewer Grid.Row="1" x:Name="ContentScroll" VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-                <Grid Margin="14,10,14,8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
+            <!-- 内容区（v1.22）：三个页面，像手机那样整屏横移。
+                 以前所有卡片都在一列里往下滚，滚到哪算哪；一屏里同时有「现在什么状态」
+                 「今晚跑什么」「怎么配」，三件事挤在一起，谁都不突出。
+                 现在按「我现在想知道什么」分成三屏：
+                   左 = 运行（刚才跑了什么、结果怎样）
+                   中 = 启动（几��跑、跑哪些）——打开就在这一屏
+                   右 = 设置（工具、通知、系统）
+                 三个页面都一样宽，靠 PageHost 下每个页面的 TranslateTransform 做横移；
+                 PageClip 负责裁掉露在外面的部分，切换时 260ms 缓出，手感接近手机。 -->
+            <!-- v1.22：触摸板/触屏横滑也能换页（IsManipulationEnabled）。
+                 鼠标拖动不做：那会和卡片里的按钮、格子的长按拖拽抢事件。 -->
+            <!-- v1.22：三页的底比卡片更暗一层。
+                 以前内容区直接坐在窗口底色上（#0D0F13），卡片是 #16191F——
+                 亮度只差 9 级，卡片之间的 10px 缝隙几乎看不出边界，
+                 看上去像几块板子叠在一起（用户说的「每个卡都重叠一小部分」就是这个）。
+                 换成更暗的 Inset 作底，卡片自然浮起来，缝隙就清楚了。 -->
+            <Border Grid.Row="1" x:Name="PageClip" ClipToBounds="True"
+                    Background="{DynamicResource InsetBrush}"
+                    IsManipulationEnabled="True"
+                    ManipulationStarting="PageClip_ManipulationStarting"
+                    ManipulationDelta="PageClip_ManipulationDelta"
+                    ManipulationCompleted="PageClip_ManipulationCompleted">
+                <!-- 三页叠在同一个格子里，各自用 TranslateTransform 平移：
+                     当前页在 0，右邻在 +1 屏，左邻在 -1 屏。
+                     不用「三列并排 + 整体平移」，是因为列宽要等于可视区宽度，
+                     而窗口没上屏时量出来的宽度是 0，三列都塌成 0，整页变空白（渲染探针截到过两次）。
+                     这样每页自己总是撑满 PageClip，尺寸由布局给，不靠算。 -->
+                <Grid x:Name="PageHost">
+
+                    <!-- ===== 左页：运行 =====
+                         这一页回答一个问题：「刚才到底怎么样了」。
+                         以前这些答案散在「今日」窗口、日志、托盘提示里，要自己去找；
+                         现在一左滑就在眼前，三句话说完，想追细节再点按钮。 -->
+                    <ScrollViewer x:Name="ScrollRun" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="ShiftRun" X="-980"/>
+                        </ScrollViewer.RenderTransform>
+                        <Grid x:Name="PageRun" Margin="14,10,14,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16,18,16">
+                                <StackPanel>
+                                    <TextBlock Text="刚才跑了什么" FontSize="13.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock x:Name="TbRunState" Text="" FontSize="19" FontWeight="SemiBold"
+                                               Margin="0,10,0,0" TextWrapping="Wrap" HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock x:Name="TbRunDetail" Text="" FontSize="12.5" Margin="0,8,0,0"
+                                               TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <StackPanel x:Name="RunDecisionHost" Margin="0,14,0,0"/>
+                                    <WrapPanel Margin="0,16,0,0">
+                                        <Button Style="{StaticResource LaunchGhost}" Height="32" Content="今日详情"
+                                                Click="BtnRunToday_Click"
+                                                ToolTip="每组跑了多久、哪一项没成、它替你做了哪些决定"/>
+                                        <Button Style="{StaticResource LaunchGhost}" Height="32" Content="打开日志"
+                                                Margin="8,0,0,0" Click="BtnRunLog_Click"/>
+                                        <Button Style="{StaticResource LaunchGhost}" Height="32" Content="出门前看一眼"
+                                                Margin="8,0,0,0" Click="BtnRunHandover_Click"
+                                                ToolTip="接下来几天它会做什么、哪些兜不住"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                                <StackPanel>
+                                    <TextBlock Text="时间账" FontSize="13.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock x:Name="TbRunBank" Text="" FontSize="12.5" Margin="0,8,0,0"
+                                               TextWrapping="Wrap" HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock x:Name="TbRunBaseline" Text="" FontSize="12.5" Margin="0,6,0,0"
+                                               TextWrapping="Wrap" HorizontalAlignment="Left" Visibility="Collapsed"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- ===== 中页：启动 =====
+                         「接下来几点跑、跑哪些」。打开程序就停在这一页。 -->
+                    <ScrollViewer x:Name="ScrollHome" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="ShiftHome" X="0"/>
+                        </ScrollViewer.RenderTransform>
+                        <Grid x:Name="PageHome" Margin="14,10,14,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
 
                     <!-- 第零层：首屏主卡（v1.15）。
                          这块地方以前是空的——一打开就是「定时卡 + 队列卡」并排，
@@ -1204,23 +1303,43 @@
                             </Grid>
                         </Border>
                     </Grid>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- ===== 右页：设置 =====
+                         工具、通知、系统这些「配一次就不常动」的东西全在这页。
+                         它们以前压在中页下面，得滚很久；现在右滑一步就到，
+                         而中页从此只剩「今晚跑什么」这件事。 -->
+                    <ScrollViewer x:Name="ScrollSettings" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="ShiftSettings" X="980"/>
+                        </ScrollViewer.RenderTransform>
+                        <Grid x:Name="PageSettings" Margin="14,10,14,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
 
                     <!-- 第二层：工具设置（v1.15 / L2：从三张卡收成一行）
                          工具卡的唯一作用是填 exe 路径，而这件事在第一次打开时已经由主卡接管、
                          之后很少再动。它占着三张卡的版面，等于天天提醒用户「你还有东西没配」。
                          现在收成一行，点开才铺出原来的三张卡——一个控件都没删。 -->
-                    <StackPanel Grid.Row="2">
+                    <StackPanel Grid.Row="0">
 
-                    <!-- v1.21：桌面（2×4）。一格一个工具，点一下进它自己的启动设置。
+                    <!-- v1.21：工具（2×4）。一格一个工具，点一下进它自己的启动设置。
                          以前这里是三张竖着的大卡，每张都在问「路径填了吗」；
-                         现在先给一张桌面——看得见装了什么、点得开、能排序，填路径是点进去以后的事。 -->
+                         现在先给一张格子——看得见装了什么、点得开、能排序，填路径是点进去以后的事。
+                         v1.22：「桌面」这名字太虚，改成「我的工具」——它说的是这里有什么，不是它在哪。 -->
                     <Border Style="{StaticResource Card}" Padding="14,12,14,14">
                         <StackPanel>
                             <Grid>
                                 <StackPanel>
-                                    <TextBlock Text="桌面" FontSize="13.5" FontWeight="SemiBold"
+                                    <TextBlock Text="我的工具" FontSize="13.5" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                    <TextBlock x:Name="TbGridHint" Text="点一下改这个工具的启动方式；右键调整顺序或删除。"
+                                    <TextBlock x:Name="TbGridHint" Text="点一下改启动方式；按住一格拖到别处能换位置。"
                                                FontSize="10.5" Margin="0,4,0,0" TextWrapping="Wrap"
                                                Foreground="{DynamicResource TextTertiaryBrush}"/>
                                 </StackPanel>
@@ -1469,7 +1588,7 @@
 
                     <!-- 第三层：高级设置（默认折叠） -->
 
-                    <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldAdvanced" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -1646,7 +1765,7 @@
                     </Border>
 
                     <!-- ===== E 系统（折叠，默认收起；6 开关两列网格）===== -->
-                    <Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldSystem" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -1859,7 +1978,7 @@
                     </Border>
 
                     <!-- ===== F 通知（折叠，默认收起）===== -->
-                    <Border x:Name="NotifyCard" Grid.Row="5" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border x:Name="NotifyCard" Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2087,8 +2206,10 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+                        </Grid>
+                    </ScrollViewer>
                 </Grid>
-            </ScrollViewer>
+            </Border>
 
 
             <!-- 底部状态条：守护盾牌 + 最近一条事件 -->

@@ -77,6 +77,24 @@ public static class ToolGrid
         return list;
     }
 
+    /// <summary>
+    /// v1.22：长按拖拽用。把 <paramref name="toolId"/> 搬到 <paramref name="targetIndex"/> 那个位置
+    /// （其余元素依次让位，不是交换——交换会让用户抓的那一格之后顺序全变）。
+    /// 目标越界就夹到两端，返回 null 表示什么都没变。
+    /// </summary>
+    public static List<string>? MoveTo(IReadOnlyList<string>? order, string? toolId, int targetIndex)
+    {
+        if (order == null || order.Count == 0 || string.IsNullOrWhiteSpace(toolId)) return null;
+        var list = order.ToList();
+        int from = IndexOf(list, toolId);
+        if (from < 0) return null;
+        int to = Math.Clamp(targetIndex, 0, list.Count - 1);
+        if (to == from) return null;
+        list.RemoveAt(from);
+        list.Insert(to, toolId);
+        return list;
+    }
+
     /// <summary>从排列里去掉一个（删除工具后调用）。</summary>
     public static List<string> Remove(IReadOnlyList<string>? order, string? toolId)
     {

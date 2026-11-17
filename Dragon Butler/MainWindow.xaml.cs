@@ -124,6 +124,9 @@ public partial class MainWindow : Window
         _groupScanTimer.Tick += (_, _) => RefreshDetectedGroups(force: true);
         _uiRefreshTimer.Tick += (_, _) => { RefreshToolCards(); UpdateQueueButtons(); RefreshLiveStrip(); RefreshHomeHero(); };
 
+        // v1.22：三页并排，每页宽度跟着可视区走。挂一次就够，窗口改大小也由它处理。
+        PageClip.SizeChanged += OnPageClipSized;
+
         // 全局按键音：所有可交互元素在"按下"这一瞬出声
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(AnyInteractivePress), true);
 
@@ -1566,21 +1569,26 @@ public partial class MainWindow : Window
         var order = CurrentToolOrder();
         var visible = ToolGrid.Visible(order);
 
-        int slot = 0;
-        foreach (string id in visible)
+        // v1.22：整块 2×4 一直画满。以前只画「有用的格 + 一个＋」，
+        // 空位是留白，看不出这里其实还有五格；现在空格画虚线框，
+        // 一眼就知道「这台桌面能放八个」。
+        for (int slot = 0; slot < ToolGrid.Capacity; slot++)
         {
-            var profile = ProfileRegistry.Get(id);
-            var tile = BuildToolTile(profile);
-            PlaceInGrid(tile, slot++);
-            ToolGridHost.Children.Add(tile);
-        }
-
-        // 还有空位就给一个「＋」格：没有它，新用户看不出这里能加东西
-        if (visible.Count < ToolGrid.Capacity)
-        {
-            var add = BuildAddTile();
-            PlaceInGrid(add, slot);
-            ToolGridHost.Children.Add(add);
+            UIElement cell;
+            if (slot < visible.Count)
+            {
+                cell = BuildToolTile(ProfileRegistry.Get(visible[slot]));
+            }
+            else if (slot == visible.Count)
+            {
+                cell = BuildAddTile();
+            }
+            else
+            {
+                cell = BuildEmptyTile();
+            }
+            PlaceInGrid(cell, slot);
+            ToolGridHost.Children.Add(cell);
         }
 
         int overflow = ToolGrid.OverflowCount(order);
@@ -1705,8 +1713,14 @@ public partial class MainWindow : Window
             Tag = profile.ToolId,
             Cursor = System.Windows.Input.Cursors.Hand,
         };
-        tile.MouseLeftButtonUp += ToolTile_Click;
         tile.MouseRightButtonUp += ToolTile_RightClick;
+        // v1.22：长按拖拽。按下去 350ms 不动才算「抓起」，轻点仍然是打开设置——
+        // 手机上也是这么分的：点是一下，抓要按住。
+        // 松开时由 ToolTile_PressUp 统一判断是「点」还是「放过来了」，
+        // 所以这里不再单独挂 ToolTile_Click（两个 handler 抢同一个 Up 事件会双重触发）。
+        tile.MouseLeftButtonDown += ToolTile_PressDown;
+        tile.MouseMove += ToolTile_DragMove;
+        tile.MouseLeftButtonUp += ToolTile_PressUp;
 
         // 光靠 Grid 星号列还不够：窗口没真正上屏时（渲染探针、刚构造完那一刻）
         // 测量宽度是不可靠的，TextTrimming 就永远等不到有限宽度。
@@ -1779,11 +1793,165 @@ public partial class MainWindow : Window
         return tile;
     }
 
-    private void ToolTile_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    /// <summary>
+    /// v1.22：空格子。画成虚线框而不是留白——留白看起来像「卡片到这儿就结束了」，
+    /// 虚线才说得出「这里还有位置，可以放东西」。
+    /// </summary>
+    private Border BuildEmptyTile()
+    {
+        // WPF 的 Border 只认实线，虚线得自己拿 Rectangle 描一个（StrokeDashArray），
+        // 所以这里 Border 不画边，边交给里面那层 Rectangle。
+        var outline = new System.Windows.Shapes.Rectangle
+        {
+            Stroke = BrushOf("BorderBrush") ?? DotGray,
+            StrokeThickness = 1,
+            StrokeDashArray = new DoubleCollection { 3, 3 },
+            RadiusX = 12,
+            RadiusY = 12,
+            Fill = Brushes.Transparent,
+            IsHitTestVisible = false,
+        };
+
+        var label = new TextBlock
+        {
+            Text = "空",
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            Opacity = 0.5,
+        };
+
+        var layer = new Grid();
+        layer.Children.Add(outline);
+        layer.Children.Add(label);
+
+        return new Border
+        {
+            Margin = new Thickness(5),
+            Padding = new Thickness(6, 12, 6, 10),
+            MinHeight = 96,
+            CornerRadius = new CornerRadius(12),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = "空位。点「＋ 添加」或者把 exe 拖进窗口，就能放一个工具进来。",
+            Child = layer,
+        };
+    }
+
+    // ===== 长按拖拽（v1.22）=====
+    // 状态机很短：按下 → 启动一个 350ms 的计时器；计时器到点时如果鼠标还在这一格、
+    // 且没移动超过 6px，就进入拖拽态；之后 MouseMove 把这一格跟着鼠标挪，
+    // 松手时落回最近的格子位置，并把顺序存下来。
+    // 为什么不用 WPF 的 DragDrop：它是给跨程序拖文件用的，会带来一个跟随系统的
+    // 半透明幽灵，而且拖回自己身上常常收不到 Drop。这里只要「挪个位置」，自己算更快也更稳。
+    private Border? _dragTile;
+    private string? _dragToolId;
+    private System.Windows.Threading.DispatcherTimer? _dragHold;
+    private Point _dragOrigin;
+    private bool _dragging;
+
+    private void ToolTile_PressDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is not Border tile || tile.Tag is not string toolId) return;
+        _dragTile = tile;
+        _dragToolId = toolId;
+        _dragging = false;
+        _dragOrigin = e.GetPosition(ToolGridHost);
+
+        _dragHold?.Stop();
+        _dragHold = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(350),
+        };
+        _dragHold.Tick += (_, _) =>
+        {
+            _dragHold?.Stop();
+            if (_dragTile == null) return;
+            _dragging = true;
+            _dragTile.Opacity = 0.75;
+            _dragTile.BorderBrush = BrushOf("BrandBrush") ?? DotGreen;
+            TbGridHint.Text = "松手放到想放的位置。";
+        };
+        _dragHold.Start();
+    }
+
+    private void ToolTile_DragMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_dragTile == null || !_dragging)
+        {
+            // 还没进入拖拽态：手一动就取消长按，免得「想点一下」被当成「抓起」
+            if (_dragHold != null && e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                var now = e.GetPosition(ToolGridHost);
+                if (Math.Abs(now.X - _dragOrigin.X) > 6 || Math.Abs(now.Y - _dragOrigin.Y) > 6)
+                {
+                    _dragHold.Stop();
+                    _dragHold = null;
+                }
+            }
+            return;
+        }
+
+        // 拖拽态：把这一格跟着鼠标平移，并在松手时判断落在哪个格子上
+        var p = e.GetPosition(ToolGridHost);
+        var transform = new TranslateTransform(p.X - _dragOrigin.X, p.Y - _dragOrigin.Y);
+        _dragTile.RenderTransform = transform;
+        _dragTile.SetValue(Panel.ZIndexProperty, 50);
+    }
+
+    private void ToolTile_PressUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        _dragHold?.Stop();
+        _dragHold = null;
+
+        var tile = _dragTile;
+        string? toolId = _dragToolId;
+        bool dragging = _dragging;
+        var dropPoint = e.GetPosition(ToolGridHost);
+
+        _dragTile = null;
+        _dragToolId = null;
+        _dragging = false;
+
+        if (tile == null || toolId == null) return;
+
+        if (!dragging)
+        {
+            // 没长按够，就当成一次点击
+            e.Handled = true;
+            OpenToolLaunch(toolId);
+            return;
+        }
+
         e.Handled = true;
-        OpenToolLaunch(toolId);
+        tile.RenderTransform = Transform.Identity;
+        tile.Opacity = 1;
+        tile.ClearValue(Panel.ZIndexProperty);
+        TbGridHint.Text = "点一下改启动方式；按住一格拖到别处能换位置。";
+
+        int target = SlotAt(dropPoint);
+        if (target < 0) return;
+
+        var moved = ToolGrid.MoveTo(CurrentToolOrder(), toolId, target);
+        if (moved == null) return;
+        SaveToolOrder(moved);
+        RenderToolGrid();
+        LogService.LogEvent($"工具排序：{toolId} → 第 {target + 1} 格");
+    }
+
+    /// <summary>鼠标落点在 2×4 里的第几格；落在卡片外返回 -1。</summary>
+    private int SlotAt(Point p)
+    {
+        if (ToolGridHost == null || ToolGridHost.ActualWidth <= 0 || ToolGridHost.ActualHeight <= 0) return -1;
+        if (p.X < 0 || p.Y < 0 || p.X > ToolGridHost.ActualWidth || p.Y > ToolGridHost.ActualHeight) return -1;
+        double cellW = ToolGridHost.ActualWidth / ToolGrid.Columns;
+        double cellH = ToolGridHost.ActualHeight / ToolGrid.Rows;
+        if (cellW <= 0 || cellH <= 0) return -1;
+        int col = Math.Clamp((int)(p.X / cellW), 0, ToolGrid.Columns - 1);
+        int row = Math.Clamp((int)(p.Y / cellH), 0, ToolGrid.Rows - 1);
+        return row * ToolGrid.Columns + col;
     }
 
     /// <summary>点格子 = 打开这个工具的启动设置；改完立刻重画，不重启。</summary>
@@ -2622,6 +2790,203 @@ public partial class MainWindow : Window
         catch { return ""; }
     }
 
+    // ===== 三页切换（v1.22）=====
+
+    /// <summary>
+    /// 当前停在哪一页：0 = 运行，1 = 启动（打开就在这），2 = 设置。
+    /// 存成字段而不是读控件状态，是因为切页动画期间 RadioButton 已经变了、页面还没到位，
+    /// 中间会有一瞬间两者不一致，靠控件判断会把自己绊一下。
+    /// </summary>
+    private int _page = 1;
+    private int _pageWanted = 1;
+
+    /// <summary>可视区宽度变了（首次上屏、改窗口大小）：把三页重新摆到各自位置，不动画。</summary>
+    private void OnPageClipSized(object sender, SizeChangedEventArgs e)
+    {
+        if (e.NewSize.Width <= 0) return;
+        // 改窗口大小时不该放动画——拖边框的过程中每帧都想滑一次，看起来像抖。
+        PlacePages(_page, e.NewSize.Width, animate: false);
+    }
+
+    /// <summary>
+    /// 摆好三页：当前页在 0，左边的页在 -1 屏，右边的页在 +1 屏。
+    /// 每页自己撑满可视区（布局给的宽度），这里只负责挪。
+    /// </summary>
+    private void PlacePages(int index, double width, bool animate)
+    {
+        if (width <= 0) return;
+        // 每页摆在哪一屏由 Pager.Offsets 算（纯函数，探针验过），这里只负责喂给动画。
+        var offsets = Pager.Offsets(index);
+        var transforms = new (TranslateTransform? T, int Offset)[]
+        {
+            (ShiftRun, offsets[0]), (ShiftHome, offsets[1]), (ShiftSettings, offsets[2]),
+        };
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var dur = TimeSpan.FromMilliseconds(260);
+        foreach (var (t, offset) in transforms)
+        {
+            if (t == null) continue;
+            double target = offset * width;
+            if (!animate)
+            {
+                t.BeginAnimation(TranslateTransform.XProperty, null);
+                t.X = target;
+            }
+            else
+            {
+                t.BeginAnimation(TranslateTransform.XProperty,
+                    new DoubleAnimation(target, dur) { EasingFunction = ease, FillBehavior = FillBehavior.HoldEnd });
+            }
+        }
+    }
+
+    private void SegPage_Checked(object sender, RoutedEventArgs e)
+    {
+        // 构造期间 XAML 里的 IsChecked="True" 就会触发一次，那时三个平移量还没建好
+        if (ShiftRun == null || ShiftHome == null || ShiftSettings == null) return;
+        if (sender is RadioButton rb && int.TryParse(rb.Tag as string, out int want)) ShowPage(want);
+    }
+
+    /// <summary>
+    /// 触摸板/触屏横滑。判定逻辑在 <see cref="Pager.Swipe"/>（纯函数，可断言）：
+    /// 手指抖一下、或者在卡片上轻轻斜滑都不该把整屏滑走；
+    /// 往左滑是下一页，滑到头就停住、不环绕。
+    /// 这里只做一件事：把手指位移和可视宽度交给它，拿回该停在哪一页。
+    /// </summary>
+    private void PageClip_ManipulationStarting(object sender, ManipulationStartingEventArgs e)
+    {
+        e.ManipulationContainer = PageClip;
+        e.Mode = ManipulationModes.TranslateX;
+    }
+
+    private void PageClip_ManipulationDelta(object sender, ManipulationDeltaEventArgs e) => e.Handled = true;
+
+    private void PageClip_ManipulationCompleted(object sender, ManipulationCompletedEventArgs e)
+    {
+        int want = Pager.Swipe(_page, e.TotalManipulation.Translation.X, PageClip.ActualWidth);
+        if (want != _page) ShowPage(want);
+    }
+
+    /// <summary>
+    /// 整屏横移。三页叠在 PageClip 里、各自撑满，靠三个 TranslateTransform 摆位，
+    /// 所以「移一屏」就是把当前页的 X 归零、把另外两页推到 ±1 屏。
+    /// 动画只碰 RenderTransform（不参与布局），所以 260ms 不会让卡片重排、也不会闪。
+    /// </summary>
+    private void ShowPage(int index, bool animate = true)
+    {
+        try
+        {
+            index = Pager.Clamp(index);
+            _page = index;
+            _pageWanted = index;
+
+            SyncPageSegments(index);
+
+            double width = PageClip.ActualWidth;
+            if (width <= 0) width = ActualWidth;   // 还没量出来：先按窗口宽猜，SizeChanged 到位后会纠正
+            PlacePages(index, width, animate);
+
+            // 切到运行页时顺手刷一遍：那一页的东西是「刚才怎么样了」，
+            // 用户往往是刚回来才看它，进页不刷就会看到上一次的旧话。
+            if (index == 0) RefreshRunPage();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("切页失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>三个 RadioButton 与 _page 对齐。切页可能来自按钮、也可能来自命令面板或代码，两个方向都要能同步。</summary>
+    private void SyncPageSegments(int index)
+    {
+        var pairs = new (RadioButton? Btn, int Index)[]
+        {
+            (SegPageRun, 0), (SegPageHome, 1), (SegPageSettings, 2),
+        };
+        foreach (var (btn, i) in pairs)
+        {
+            if (btn == null) continue;
+            if (i == index)
+            {
+                if (btn.IsChecked != true) btn.IsChecked = true;
+            }
+            else if (btn.IsChecked == true)
+            {
+                btn.IsChecked = false;
+            }
+        }
+    }
+
+    private void BtnRunToday_Click(object sender, RoutedEventArgs e) => OpenToday();
+
+    private void BtnRunLog_Click(object sender, RoutedEventArgs e)
+    {
+        try { AppState.PublishLog("日志在 " + LogService.Dir); } catch { }
+        RevealInExplorer(LogService.Dir);
+    }
+
+    private void BtnRunHandover_Click(object sender, RoutedEventArgs e) => OpenHandover();
+
+    /// <summary>
+    /// 运行页的三句话：刚才怎么样（复用复盘）、这个月省了多少（时间银行）、
+    /// 比平时如何（基线）。三句都为空时给一句实话，而不是留三个空框。
+    /// </summary>
+    private void RefreshRunPage()
+    {
+        try
+        {
+            var now = DateTime.Now;
+            var input = BuildRecapInput();
+            var lines = input == null ? new List<Recap.Line>() : Recap.Build(input).ToList();
+
+            if (lines.Count == 0)
+            {
+                TbRunState.Text = QueueService.IsRunning ? "正在跑" : "还没有记录";
+                TbRunDetail.Text = QueueService.IsRunning
+                    ? "跑完会在这里留三句话。"
+                    : "今晚跑一次，明天这里就有话可说了。";
+            }
+            else
+            {
+                TbRunState.Text = lines[0].Text;
+                var rest = lines.Skip(1).Select(l => l.Text).ToList();
+                TbRunDetail.Text = string.Join("\n", rest);
+            }
+
+            // 决定清单：只贴今天最近的几条，多的去「今日」窗口看。
+            RunDecisionHost.Children.Clear();
+            var decisions = DecisionLog.Today(now).Take(4).ToList();
+            foreach (var d in decisions)
+            {
+                RunDecisionHost.Children.Add(new TextBlock
+                {
+                    Text = "· " + DecisionLog.Describe(d),
+                    FontSize = 11.5,
+                    LineHeight = 18,
+                    Margin = new Thickness(0, 3, 0, 0),
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = BrushOf("TextSecondaryBrush"),
+                });
+            }
+
+            var bank = TimeBank.Describe(TimeBank.Sum(
+                GroupArchive.DailyMinutes(now.Date.AddDays(-365), now.Date)
+                            .Select(d => new TimeBank.Day(d.Date, d.Minutes)), now), now);
+            TbRunBank.Text = bank.Length > 0 ? bank : "还没攒够时间，跑几天就有数了。";
+
+            var baseline = BaselineFacts.Today(DateTime.Today);
+            TbRunBaseline.Visibility = baseline.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            TbRunBaseline.Text = baseline.Text;
+            TbRunBaseline.Foreground = baseline.Level == Baseline.Level.Ok
+                ? BrushOf("TextSecondaryBrush")
+                : BrushOf("WarningBrush");
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("运行页刷新失败：" + ex.Message);
+        }
+    }
+
     // ===== 开跑前体检（v1.19）=====
     //
     // 这一块只做一件事：把散在各处的原始事实收集起来，交给 Preflight.Build 出结论。
@@ -3342,7 +3707,7 @@ public partial class MainWindow : Window
             EditorScale.ScaleX = EditorScale.ScaleY = 0.94;
             EditorShift.X = 26;
 
-            double keepOffset = ContentScroll.VerticalOffset;
+            double keepOffset = ScrollHome.VerticalOffset;
 
             // 布局拍：先清掉上一次收起动画留下的显式高度，再量出编辑页高度并锁定
             ResetHostHeight();
@@ -3354,7 +3719,7 @@ public partial class MainWindow : Window
                 SchedulePageHost.MinHeight = _editorPageHeight;
                 SchedulePageHost.UpdateLayout();
             }
-            ContentScroll.ScrollToVerticalOffset(keepOffset);
+            ScrollHome.ScrollToVerticalOffset(keepOffset);
 
             // 渲染拍：下一帧再启动动画（此时初始值已经渲染过一帧，不会"先跳后动"）
             Dispatcher.BeginInvoke(new Action(() =>
@@ -3421,7 +3786,9 @@ public partial class MainWindow : Window
             ScheduleTitle.Text = "每天自动跑一条龙";
 
             ClearPageAnimations();
-            double keepOffset = ContentScroll.VerticalOffset;
+            // v1.22：内容区拆成三页之后，纵向滚动归各页自己的 ScrollViewer 管。
+            // 定时卡在中页，所以这里取中页那个；原来只有一个 ContentScroll 时才这么写。
+            double keepOffset = ScrollHome.VerticalOffset;
 
             // 布局拍：立刻回到概览页与概览高度（编辑页直接收起，避免留下被裁一半的残影）
             ResetHostHeight();
@@ -3434,7 +3801,7 @@ public partial class MainWindow : Window
             OverviewScale.ScaleX = OverviewScale.ScaleY = 0.99;
             OverviewShift.X = -8;
             SchedulePageHost.UpdateLayout();
-            ContentScroll.ScrollToVerticalOffset(keepOffset);
+            ScrollHome.ScrollToVerticalOffset(keepOffset);
 
             // 渲染拍：下一帧只做淡入（纯 RenderTransform / Opacity，不参与布局）
             Dispatcher.BeginInvoke(new Action(() =>
@@ -5106,6 +5473,19 @@ public partial class MainWindow : Window
     {
         try
         {
+            // v1.22：内容分了三页，先判断目标在哪个页里，不然滚了也看不见。
+            // 判断顺序从里到外：先进页，再展开折叠卡，最后才滚。
+            if (PageRun != null && (PageRun == target || PageRun.IsAncestorOf(target)))
+            {
+                ShowPage(0);
+                target.BringIntoView();
+                return;
+            }
+            if (PageSettings != null && (PageSettings == target || PageSettings.IsAncestorOf(target)))
+            {
+                ShowPage(2);
+            }
+
             // 折叠卡里的元素是 Collapsed 的，先展开父级（只往上找一层已知的折叠体）
             foreach (var body in new FrameworkElement?[] { AdvancedBody, SystemBody, NotifyBody })
             {
@@ -5114,7 +5494,7 @@ public partial class MainWindow : Window
                     body.Visibility = Visibility.Visible;
             }
             target.BringIntoView();
-            ContentScroll.ScrollToVerticalOffset(ContentScroll.VerticalOffset);
+            ScrollSettings.ScrollToVerticalOffset(ScrollSettings.VerticalOffset);
         }
         catch (Exception ex)
         {

@@ -308,6 +308,147 @@ public static class ToolCatalog
                 new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数没查到可靠来源，先留空" },
             },
         },
+
+        // ===== v1.22：补齐 AUTO-MAS 托管里出现、但这里还没有的那些 =====
+        // 准则没变：exe 名与游戏名有依据才写，命令行参数查不到就留空并标「自己确认」。
+        // 一个个问「点什么」比一次给齐更难用，所以宁可口径宽、候选多，也不要在引导页
+        // 只列三个把人挡在外面。
+        new KnownTool
+        {
+            ToolId = "baah",
+            DisplayName = "BAAH",
+            ShortName = "BAAH",
+            GameName = "蔚蓝档案",
+            Blurb = "蔚蓝档案的日常与总力战。AUTO-MAS 里的 BAAH 就是它。",
+            ExeNames = new[] { "baah.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "BAAH",
+            GameProcessNames = new[] { "BlueArchive" },
+            MaxDurationMinutes = 120,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数没查到可靠来源，先留空只启动界面；知道的话自己填" },
+            },
+        },
+        new KnownTool
+        {
+            ToolId = "hsr",
+            DisplayName = "HSR",
+            ShortName = "HSR",
+            GameName = "崩坏：星穹铁道",
+            Blurb = "AUTO-MAS 自带的星铁脚本。如果你用的是三月七助手，选那个就行。",
+            ExeNames = new[] { "hsr.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "HSR",
+            GameProcessNames = new[] { "StarRail" },
+            MaxDurationMinutes = 120,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数没查到可靠来源，先留空只启动界面" },
+            },
+        },
+        new KnownTool
+        {
+            ToolId = "m9a",
+            DisplayName = "M9A",
+            ShortName = "M9A",
+            GameName = "重返未来：1999",
+            Blurb = "重返未来 1999 的自动代理，基于 MaaFramework。",
+            ExeNames = new[] { "m9a.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "M9A",
+            GameProcessNames = new[] { "Reverse1999" },
+            MaxDurationMinutes = 120,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数没查到可靠来源，先留空；M9A 主要在界面里配任务" },
+            },
+        },
+        new KnownTool
+        {
+            ToolId = "mss",
+            DisplayName = "MSS",
+            ShortName = "MSS",
+            GameName = "星塔旅人",
+            Blurb = "星塔旅人的自动代理（MaaStellaSora）。",
+            ExeNames = new[] { "mss.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "MSS",
+            GameProcessNames = new[] { "StellaSora" },
+            MaxDurationMinutes = 120,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数没查到可靠来源，先留空" },
+            },
+        },
+        new KnownTool
+        {
+            ToolId = "src",
+            DisplayName = "SRC",
+            ShortName = "SRC",
+            GameName = "崩坏：星穹铁道",
+            Blurb = "StarRailCopilot，按日程自动排星铁。主程序固定叫 src.exe。",
+            ExeNames = new[] { "src.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "src",
+            GameProcessNames = new[] { "StarRail" },
+            MaxDurationMinutes = 150,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数没查到可靠来源，先留空只启动界面" },
+            },
+        },
+        new KnownTool
+        {
+            ToolId = "maafw",
+            DisplayName = "MFW 项目",
+            ShortName = "MFW",
+            GameName = "任意 MaaFramework 项目",
+            Blurb = "任意一个装了 interface.json 的 MaaFramework 项目目录，自己指定主程序。",
+            ExeNames = new[] { "maafw.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "MFW",
+            GameProcessNames = Array.Empty<string>(),
+            MaxDurationMinutes = 150,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "这类项目没有统一入口，主程序和参数都按你手上的那个填" },
+            },
+        },
+        new KnownTool
+        {
+            ToolId = "general",
+            DisplayName = "通用脚本",
+            ShortName = "通用",
+            GameName = "任意",
+            Blurb = "什么都行：填个 exe 加参数，就当成队列里的一项来跑。",
+            ExeNames = new[] { "general.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "",
+            GameProcessNames = Array.Empty<string>(),
+            MaxDurationMinutes = 120,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数由你自己定，程序会把它们原样传给那个 exe" },
+            },
+        },
+        new KnownTool
+        {
+            ToolId = "hsr-march7th",
+            DisplayName = "三月七（命令行）",
+            ShortName = "三月七 CLI",
+            GameName = "崩坏：星穹铁道",
+            Blurb = "三月七助手另有免管理员权限的命令行入口 m7a.exe，适合挂在无人值守里。",
+            ExeNames = new[] { "m7a.exe" },
+            DefaultArguments = "",
+            ManagedProcessName = "m7a",
+            GameProcessNames = new[] { "StarRail" },
+            MaxDurationMinutes = 120,
+            Args = new()
+            {
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Documented, Hint = "官方 README 写明 m7a.exe 是免管理员权限的命令行入口" },
+            },
+        },
     };
 
     /// <summary>把已知工具变成一份可用的 ToolProfile（用户点「添加」时用）。</summary>

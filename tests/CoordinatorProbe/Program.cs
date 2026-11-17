@@ -114,7 +114,8 @@ internal static class Program
             "mem" => MemoryProbe.Run(),
             "trim" => MemoryProbe.RunTrim(),
             "toolgrid" => RunToolGrid(),
-            "toolcatalog" => RunToolCatalog(),
+        "toolcatalog" => RunToolCatalog(),
+        "pager" => RunPager(),
             _ => Help(),
         };
     }
@@ -2211,6 +2212,88 @@ internal static class Program
     /// 前者是不可逆动作的分寸，后者是别把现场也一起关了。
     /// </summary>
     /// <summary>
+    /// v1.22：三页滑动的纯计算。
+    ///
+    /// 界面那套（Grid + TranslateTransform + 260ms 动画）没法断言，
+    /// 但「翻到哪一页」「每页摆在哪」「这一下算不算翻页」全是算术，
+    /// 抽成 <see cref="Pager"/> 就是为了能在这里一条条钉住。
+    /// 重点挡三个容易写反的地方：
+    ///   1) 往左滑到底是下一页还是上一页（手指往左 = 内容往左 = 看右边那页）；
+    ///   2) 滑到最后一页再滑到底会不会绕回第一页（不该绕）；
+    ///   3) 滑动距离不够时会不会被当成翻页（不该）。
+    /// </summary>
+    private static int RunPager()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) { Console.WriteLine("  PASS " + name + (detail.Length > 0 ? " :: " + detail : "")); return; }
+            fails.Add(name);
+            Console.WriteLine("  FAIL " + name + (detail.Length > 0 ? " :: " + detail : ""));
+        }
+
+        // ---- 1) 基本常量 ----
+        Check("常量/共三页", Pager.Count == 3, Pager.Count.ToString());
+        Check("常量/打开落在启动页", Pager.Home == 1, Pager.Home.ToString());
+
+        // ---- 2) 夹取：不环绕 ----
+        Check("夹取/负数变 0", Pager.Clamp(-3) == 0);
+        Check("夹取/超界变 2", Pager.Clamp(9) == 2);
+        Check("夹取/合法值不动", Pager.Clamp(1) == 1);
+
+        // ---- 3) 每页摆位 ----
+        var atHome = Pager.Offsets(1);
+        Check("摆位/启动页时自己为 0", atHome[1] == 0, atHome[1].ToString());
+        Check("摆位/启动页时左页为 -1", atHome[0] == -1, atHome[0].ToString());
+        Check("摆位/启动页时右页为 +1", atHome[2] == 1, atHome[2].ToString());
+        var atRun = Pager.Offsets(0);
+        Check("摆位/运行页时启动页在 +1", atRun[1] == 1, atRun[1].ToString());
+        Check("摆位/运行页时设置页在 +2", atRun[2] == 2, atRun[2].ToString());
+        var atSettings = Pager.Offsets(2);
+        Check("摆位/设置页时启动页在 -1", atSettings[1] == -1, atSettings[1].ToString());
+        Check("摆位/设置页时运行页在 -2", atSettings[0] == -2, atSettings[0].ToString());
+        Check("摆位/越界按夹取算", Pager.Offsets(99)[2] == 0, Pager.Offsets(99)[2].ToString());
+
+        // ---- 4) 横滑 ----
+        const double W = 1000;   // 阈值 = max(80, 120) = 120
+        Check("滑/往左滑去下一页", Pager.Swipe(1, -300, W) == 2, Pager.Swipe(1, -300, W).ToString());
+        Check("滑/往右滑回上一页", Pager.Swipe(1, 300, W) == 0, Pager.Swipe(1, 300, W).ToString());
+        Check("滑/距离不够不动", Pager.Swipe(1, -50, W) == 1, Pager.Swipe(1, -50, W).ToString());
+        Check("滑/刚好到阈值算翻页", Pager.Swipe(1, -120, W) == 2, Pager.Swipe(1, -120, W).ToString());
+        Check("滑/差一点点不算", Pager.Swipe(1, -119, W) == 1, Pager.Swipe(1, -119, W).ToString());
+        Check("滑/第一页往右滑停住", Pager.Swipe(0, 500, W) == 0, Pager.Swipe(0, 500, W).ToString());
+        Check("滑/最后一页往左滑停住", Pager.Swipe(2, -500, W) == 2, Pager.Swipe(2, -500, W).ToString());
+        Check("滑/窄窗口阈值地板 80", Pager.Swipe(1, -100, 400) == 2, Pager.Swipe(1, -100, 400).ToString());
+        Check("滑/窄窗口 79 不算", Pager.Swipe(1, -79, 400) == 1, Pager.Swipe(1, -79, 400).ToString());
+        Check("滑/宽度为 0 不崩", Pager.Swipe(1, -200, 0) == 2, Pager.Swipe(1, -200, 0).ToString());
+
+        // ---- 5) 阈值函数本身 ----
+        Check("阈值/宽窗口按 12%", Math.Abs(Pager.SwipeThreshold(1000) - 120) < 0.01, Pager.SwipeThreshold(1000).ToString());
+        Check("阈值/窄窗口不小于 80", Pager.SwipeThreshold(400) >= 80, Pager.SwipeThreshold(400).ToString());
+        Check("阈值/宽度 0 也不小于 80", Pager.SwipeThreshold(0) >= 80, Pager.SwipeThreshold(0).ToString());
+
+        // ---- 6) 页码名字 ----
+        Check("名字/0 是运行", Pager.Name(0) == "运行", Pager.Name(0));
+        Check("名字/1 是启动", Pager.Name(1) == "启动", Pager.Name(1));
+        Check("名字/2 是设置", Pager.Name(2) == "设置", Pager.Name(2));
+        Check("名字/越界也认", Pager.Name(99) == "设置", Pager.Name(99));
+
+        // ---- 7) 接线：窗口必须真的用这三样东西 ----
+        string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        Check("接线/标题栏有三个页面按钮", mainXaml.Contains("SegPageRun") && mainXaml.Contains("SegPageHome") && mainXaml.Contains("SegPageSettings"));
+        Check("接线/三页各有一个平移量", mainXaml.Contains("ShiftRun") && mainXaml.Contains("ShiftHome") && mainXaml.Contains("ShiftSettings"));
+        Check("接线/切页走 Pager.Clamp", mainCs.Contains("Pager.Clamp("));
+        Check("接线/摆位走 Pager.Offsets", mainCs.Contains("Pager.Offsets("));
+        Check("接线/横滑走 Pager.Swipe", mainCs.Contains("Pager.Swipe("));
+        Check("接线/有触摸横滑", mainXaml.Contains("IsManipulationEnabled=\"True\""));
+        Check("接线/命令面板能跨页定位", mainCs.Contains("ShowPage(2)") && mainCs.Contains("ShowPage(0)"));
+
+        Console.WriteLine($"RESULT pager fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
     /// v1.21：软件目录（8 个已知工具 + 参数候选的可信度分级）。
     ///
     /// 这块要挡的不是「有没有列全」，而是「有没有编」——
@@ -2421,6 +2504,25 @@ internal static class Program
         Check("溢出/null 是 0", ToolGrid.OverflowCount(null) == 0);
         Check("上桌/null 空表", ToolGrid.Visible(null).Count == 0);
 
+        // ---- 10b) MoveTo：长按拖拽落点（v1.22） ----
+        // 拖拽是「插到目标位置」，不是「和那一格交换」——交换会让用户抓的那一格之后
+        // 所有格子的顺序全变，而拖拽的本意只是「把它挪到这儿」。
+        var abc = new List<string> { "a", "b", "c", "d" };
+        var m1 = ToolGrid.MoveTo(abc, "a", 2);
+        Check("拖到/往后插", m1 != null && string.Join(",", m1) == "b,c,a,d", string.Join(",", m1 ?? new List<string>()));
+        var m2 = ToolGrid.MoveTo(abc, "d", 0);
+        Check("拖到/往前插", m2 != null && string.Join(",", m2) == "d,a,b,c", string.Join(",", m2 ?? new List<string>()));
+        Check("拖到/原表没被改", string.Join(",", abc) == "a,b,c,d", string.Join(",", abc));
+        Check("拖到/挪到自己身上不动", ToolGrid.MoveTo(abc, "b", 1) == null);
+        Check("拖到/找不到不动", ToolGrid.MoveTo(abc, "zz", 2) == null);
+        Check("拖到/空 id 不动", ToolGrid.MoveTo(abc, "", 2) == null);
+        Check("拖到/null 表不动", ToolGrid.MoveTo(null, "a", 0) == null);
+        var m3 = ToolGrid.MoveTo(abc, "b", 99);
+        Check("拖到/越界夹到末尾", m3 != null && string.Join(",", m3) == "a,c,d,b", string.Join(",", m3 ?? new List<string>()));
+        var m4 = ToolGrid.MoveTo(abc, "c", -5);
+        Check("拖到/负数夹到开头", m4 != null && string.Join(",", m4) == "c,a,b,d", string.Join(",", m4 ?? new List<string>()));
+        Check("拖到/总数不变", (m1?.Count ?? -1) == abc.Count);
+
         // ---- 11) 接线 ----
         string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
         string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
@@ -2434,6 +2536,14 @@ internal static class Program
         Check("接线/订单存进设置", mainCs.Contains("SaveToolOrder("));
         Check("接线/刷新时重画网格", mainCs.Contains("RenderToolGrid()"));
         Check("接线/工具表里有 ToolOrder", ReadRepoSources("Dragon Butler/AppState.cs").Contains("ToolOrder"));
+        Check("接线/长按才拖（350ms）", mainCs.Contains("_dragHold"));
+        Check("接线/拖动用 MoveTo", mainCs.Contains("ToolGrid.MoveTo("));
+        Check("接线/落点算格子", mainCs.Contains("SlotAt("));
+        // 判「没挂接」而不是「没出现」：注释里仍会提到这个名字（说明为什么改掉），
+        // 那是有用的记录，不该被断言逼着删。
+        Check("接线/只挂一套 Up（不抢事件）",
+            !mainCs.Contains("+= ToolTile_Click") && !mainCs.Contains("void ToolTile_Click"));
+        Check("接线/空格子有虚线", mainCs.Contains("StrokeDashArray"));
 
         Console.WriteLine($"RESULT toolgrid fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
