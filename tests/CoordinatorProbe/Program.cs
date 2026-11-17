@@ -111,6 +111,10 @@ internal static class Program
             "mcp" => RunMcp(),
             "uirules" => RunUiRules(),
             "ui" => RenderProbe.RunUi(args.Length > 1 ? args[1] : "all"),
+            "mem" => MemoryProbe.Run(),
+            "trim" => MemoryProbe.RunTrim(),
+            "toolgrid" => RunToolGrid(),
+            "toolcatalog" => RunToolCatalog(),
             _ => Help(),
         };
     }
@@ -2206,6 +2210,235 @@ internal static class Program
     /// 这块真正要挡的是「默认全关」和「有失败就不关游戏」两件事：
     /// 前者是不可逆动作的分寸，后者是别把现场也一起关了。
     /// </summary>
+    /// <summary>
+    /// v1.21：软件目录（8 个已知工具 + 参数候选的可信度分级）。
+    ///
+    /// 这块要挡的不是「有没有列全」，而是「有没有编」——
+    /// 每一条参数都必须是 Documented 或 Observed，绝不允许凭空写一个值还标成已证实。
+    /// </summary>
+    private static int RunToolCatalog()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        var all = ToolCatalog.All;
+
+        // ---- 1) 收录数量与必备项 ----
+        Check("目录/至少 8 个", all.Count >= 8, all.Count.ToString());
+        Check("目录/有 BetterGI", ToolCatalog.Find("bettergi") != null);
+        Check("目录/有三月七", ToolCatalog.Find("march7th") != null);
+        Check("目录/有 ok-ww", ToolCatalog.Find("ok-ww") != null);
+        Check("目录/绝区零", ToolCatalog.Find("zzz-od") != null);
+        Check("目录/无限暖暖", ToolCatalog.Find("ok-nte") != null);
+        Check("目录/明日方舟", ToolCatalog.Find("maa") != null);
+        Check("目录/找不到返回 null", ToolCatalog.Find("no-such-tool") == null);
+        Check("目录/空 id 返回 null", ToolCatalog.Find("") == null);
+
+        // ---- 2) 内置标记：删掉 BGI 用户就回不来了 ----
+        Check("内置/三个是内置", ToolCatalog.IsBuiltIn("bettergi") && ToolCatalog.IsBuiltIn("march7th") && ToolCatalog.IsBuiltIn("ok-ww"));
+        Check("内置/绝区零不是内置", !ToolCatalog.IsBuiltIn("zzz-od"));
+        Check("内置/大小写不敏感", ToolCatalog.IsBuiltIn("BetterGI"));
+
+        // ---- 3) 每个条目都得填齐（空字段会让界面出现空白格） ----
+        var bad = all.Where(t => string.IsNullOrWhiteSpace(t.ToolId)
+                              || string.IsNullOrWhiteSpace(t.DisplayName)
+                              || string.IsNullOrWhiteSpace(t.GameName)
+                              || t.ExeNames.Length == 0
+                              || t.Args.Count == 0)
+                     .Select(t => t.ToolId).ToList();
+        Check("目录/字段不缺", bad.Count == 0, string.Join(",", bad));
+
+        // ---- 4) id 不重复 ----
+        var dup = all.GroupBy(t => t.ToolId, StringComparer.OrdinalIgnoreCase)
+                     .Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        Check("目录/id 不重复", dup.Count == 0, string.Join(",", dup));
+
+        // ---- 5) 参数候选：不允许「标成已证实其实没查过」 ----
+        // 只要 Confidence 是 Documented，就必须在 Hint 里说清它是官方写的；
+        // 这条挡的是以后有人图省事，随手写个值再标 Documented。
+        var liars = all.SelectMany(t => t.Args)
+                       .Where(a => a.Confidence == ArgConfidence.Documented
+                                   && string.IsNullOrWhiteSpace(a.Hint))
+                       .ToList();
+        Check("参数/写 Documented 的必须有说明", liars.Count == 0, liars.Count.ToString());
+
+        // ---- 6) 每个工具的默认参数必须在候选表里（否则界面下拉选不中它） ----
+        var missing = all.Where(t => !t.Args.Any(a => string.Equals(a.Value, t.DefaultArguments, StringComparison.Ordinal)))
+                         .Select(t => t.ToolId).ToList();
+        Check("参数/默认值在候选里", missing.Count == 0, string.Join(",", missing));
+
+        // ---- 7) BetterGI 的关键参数必须被标成 Documented（这是唯一查过源码的） ----
+        var bgi = ToolCatalog.Find("bettergi")!;
+        var oneDragon = bgi.Args.FirstOrDefault(a => a.Value.Contains("startOneDragon", StringComparison.Ordinal));
+        Check("BetterGI/有一条龙的参数", oneDragon != null);
+        Check("BetterGI/一条龙标成已证实", oneDragon?.Confidence == ArgConfidence.Documented,
+            oneDragon?.Confidence.ToString() ?? "null");
+        Check("BetterGI/含组名占位", oneDragon != null && oneDragon.Value.Contains("{组名}"));
+        Check("BetterGI/默认可空跑", bgi.Args.Any(a => a.Value.Length == 0));
+
+        // ---- 8) 认不出的必须诚实留空，不能编一个 ----
+        var zzz = ToolCatalog.Find("zzz-od")!;
+        Check("绝区零/参数全标自填", zzz.Args.All(a => a.Confidence == ArgConfidence.Custom));
+        Check("绝区零/默认留空", zzz.DefaultArguments.Length == 0);
+        var nte = ToolCatalog.Find("ok-nte")!;
+        Check("无限暖暖/参数全标自填", nte.Args.All(a => a.Confidence == ArgConfidence.Custom));
+
+        // ---- 9) 按 exe 名反查 ----
+        Check("反查/bettergi.exe", ToolCatalog.FromExeName("BetterGI.exe")?.ToolId == "bettergi");
+        Check("反查/三月七 launcher", ToolCatalog.FromExeName("March7th Launcher.exe")?.ToolId == "march7th");
+        Check("反查/ok-ww", ToolCatalog.FromExeName("ok-ww.exe")?.ToolId == "ok-ww");
+        Check("反查/认不出返回 null", ToolCatalog.FromExeName("notepad.exe") == null);
+        Check("反查/空返回 null", ToolCatalog.FromExeName("") == null);
+
+        // ---- 10) 从目录里一堆 exe 猜 ----
+        Check("猜目录/认出 BetterGI", ToolCatalog.GuessFromFiles(new[] { "a.exe", "BetterGI.exe" })?.ToolId == "bettergi");
+        Check("猜目录/全认不出返回 null", ToolCatalog.GuessFromFiles(new[] { "a.exe", "b.exe" }) == null);
+        Check("猜目录/null 返回 null", ToolCatalog.GuessFromFiles(null) == null);
+
+        // ---- 11) 默认参数查询 ----
+        Check("默认参数/BetterGI", ToolCatalog.DefaultArgsOf("bettergi").Contains("startOneDragon"));
+        Check("默认参数/未知工具是空串", ToolCatalog.DefaultArgsOf("no-such-tool").Length == 0);
+
+        // ---- 12) 可信度文案 ----
+        Check("文案/已证实", KnownTool.ConfidenceText(ArgConfidence.Documented).Contains("文档"));
+        Check("文案/见过", KnownTool.ConfidenceText(ArgConfidence.Observed).Contains("别人"));
+        Check("文案/自填", KnownTool.ConfidenceText(ArgConfidence.Custom).Contains("自"));
+        Check("文案/已证实带对勾", KnownTool.ArgText(new ArgChoice { Value = "x", Confidence = ArgConfidence.Documented }).StartsWith("✓"));
+        Check("文案/自填不带勾", !KnownTool.ArgText(new ArgChoice { Value = "x", Confidence = ArgConfidence.Custom }).StartsWith("✓"));
+        Check("文案/null 安全", KnownTool.ArgText(null).Length == 0);
+
+        // ---- 13) ToProfile：转出来的档案能直接用 ----
+        var profile = ToolCatalog.ToProfile(bgi);
+        Check("转档案/id 一致", profile.ToolId == "bettergi", profile.ToolId);
+        Check("转档案/有参数", profile.LaunchArguments == bgi.DefaultArguments, profile.LaunchArguments);
+        Check("转档案/有进程名", !string.IsNullOrWhiteSpace(profile.ManagedProcessName));
+        Check("转档案/BGI 用日志锚点", profile.PrimarySignal == CompletionSignalKind.LogPattern,
+            profile.PrimarySignal.ToString());
+        var zzzProfile = ToolCatalog.ToProfile(zzz);
+        Check("转档案/其余用退出码", zzzProfile.PrimarySignal == CompletionSignalKind.ProcessExit0,
+            zzzProfile.PrimarySignal.ToString());
+
+        // ---- 14) 接线：启动窗用得上这些候选 ----
+        string launchCs = ReadRepoSources("Dragon Butler/ToolLaunchWindow.xaml.cs");
+        string launchXaml = ReadRepoSources("Dragon Butler/ToolLaunchWindow.xaml");
+        Check("接线/启动窗引用参数候选", launchCs.Contains("ToolCatalog."));
+        Check("接线/启动窗有参数下拉", launchXaml.Contains("CbArgs"));
+        Check("接线/启动窗可自由改参数", launchXaml.Contains("TbArgs"));
+        Check("接线/启动窗有试启动", launchXaml.Contains("BtnTest"));
+        Check("接线/内置不可删", launchCs.Contains("IsBuiltIn"));
+
+        Console.WriteLine($"RESULT toolcatalog fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.21：桌面网格（2 行 4 列，可自由排序）。
+    ///
+    /// 这块最容易写错的三处，正好就是断言的重点：
+    /// ① 已删除的工具不能留空位；② 排到底不能循环；③ 新工具排最后不插队。
+    /// </summary>
+    private static int RunToolGrid()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        var natural = new List<string> { "bettergi", "march7th", "ok-ww" };
+
+        // ---- 1) 常量 ----
+        Check("格子/4 列", ToolGrid.Columns == 4, ToolGrid.Columns.ToString());
+        Check("格子/2 行", ToolGrid.Rows == 2, ToolGrid.Rows.ToString());
+        Check("格子/一共 8 格", ToolGrid.Capacity == 8, ToolGrid.Capacity.ToString());
+
+        // ---- 2) Order：没排过就按自然序 ----
+        var o1 = ToolGrid.Order(natural, null);
+        Check("排序/没排过按自然序", o1.Count == 3 && o1[0] == "bettergi" && o1[2] == "ok-ww",
+            string.Join(",", o1));
+        Check("排序/null 自然序", ToolGrid.Order(null, null).Count == 0);
+        Check("排序/null saved", ToolGrid.Order(natural, null).Count == 3);
+
+        // ---- 3) Order：用户排过的优先且保持原序 ----
+        var o2 = ToolGrid.Order(natural, new[] { "ok-ww", "bettergi", "march7th" });
+        Check("排序/按用户排的来", string.Join(",", o2) == "ok-ww,bettergi,march7th", string.Join(",", o2));
+
+        // ---- 4) Order：已删除的 id 静默剔除，不留空位 ----
+        var o3 = ToolGrid.Order(natural, new[] { "gone", "ok-ww", "bettergi" });
+        Check("排序/删掉的工具不留空位", string.Join(",", o3) == "ok-ww,bettergi,march7th", string.Join(",", o3));
+        Check("排序/总数不变", o3.Count == 3, o3.Count.ToString());
+
+        // ---- 5) Order：排过的在前、没排过的按自然序补后 ----
+        var o4 = ToolGrid.Order(natural, new[] { "march7th" });
+        Check("排序/排过的在前", string.Join(",", o4) == "march7th,bettergi,ok-ww", string.Join(",", o4));
+
+        // ---- 6) Order：大小写不敏感、重复不重复加 ----
+        var o5 = ToolGrid.Order(natural, new[] { "BETTERGI", "bettergi" });
+        Check("排序/大小写不敏感且不重复", string.Join(",", o5) == "BETTERGI,march7th,ok-ww", string.Join(",", o5));
+
+        // ---- 7) Move：正常左右挪 ----
+        var order = new List<string> { "bettergi", "march7th", "ok-ww" };
+        var right = ToolGrid.Move(order, "bettergi", 1);
+        Check("挪动/往右一格", right != null && string.Join(",", right) == "march7th,bettergi,ok-ww",
+            right == null ? "null" : string.Join(",", right));
+        var left = ToolGrid.Move(order, "ok-ww", -1);
+        Check("挪动/往左一格", left != null && string.Join(",", left) == "bettergi,ok-ww,march7th",
+            left == null ? "null" : string.Join(",", left));
+        Check("挪动/原列表没被改", string.Join(",", order) == "bettergi,march7th,ok-ww", string.Join(",", order));
+
+        // ---- 8) Move：越界不动（不循环） ----
+        Check("挪动/第一个再往左不动", ToolGrid.Move(order, "bettergi", -1) == null);
+        Check("挪动/最后一个再往右不动", ToolGrid.Move(order, "ok-ww", 1) == null);
+        Check("挪动/delta 为 0 不动", ToolGrid.Move(order, "bettergi", 0) == null);
+        Check("挪动/找不到的工具不动", ToolGrid.Move(order, "nope", 1) == null);
+        Check("挪动/空 id 不动", ToolGrid.Move(order, "", 1) == null);
+        Check("挪动/null 列表不动", ToolGrid.Move(null, "bettergi", 1) == null);
+        Check("挪动/空列表不动", ToolGrid.Move(new List<string>(), "bettergi", 1) == null);
+
+        // ---- 9) Remove / Append ----
+        Check("删除/去掉一个", string.Join(",", ToolGrid.Remove(order, "march7th")) == "bettergi,ok-ww");
+        Check("删除/大小写不敏感", ToolGrid.Remove(order, "MARCH7TH").Count == 2);
+        Check("删除/不存在的安全", ToolGrid.Remove(order, "nope").Count == 3);
+        Check("删除/null 返回空表", ToolGrid.Remove(null, "bettergi").Count == 0);
+        Check("追加/排最后", string.Join(",", ToolGrid.Append(order, "zzz-od")) == "bettergi,march7th,ok-ww,zzz-od");
+        Check("追加/已存在不重复", ToolGrid.Append(order, "bettergi").Count == 3);
+        Check("追加/大小写不敏感不重复", ToolGrid.Append(order, "BETTERGI").Count == 3);
+        Check("追加/空 id 不加", ToolGrid.Append(order, "").Count == 3);
+        Check("追加/null 返回单元素", ToolGrid.Append(null, "bettergi").Count == 1);
+
+        // ---- 10) Visible / OverflowCount ----
+        var nine = Enumerable.Range(0, 9).Select(i => "t" + i).ToList();
+        Check("上桌/只取前 8 个", ToolGrid.Visible(nine).Count == 8, ToolGrid.Visible(nine).Count.ToString());
+        Check("上桌/顺序不变", ToolGrid.Visible(nine)[0] == "t0" && ToolGrid.Visible(nine)[7] == "t7");
+        Check("溢出/9 个里 1 个排不进", ToolGrid.OverflowCount(nine) == 1, ToolGrid.OverflowCount(nine).ToString());
+        Check("溢出/8 个正好不溢出", ToolGrid.OverflowCount(nine.Take(8).ToList()) == 0);
+        Check("溢出/3 个不溢出", ToolGrid.OverflowCount(order) == 0);
+        Check("溢出/null 是 0", ToolGrid.OverflowCount(null) == 0);
+        Check("上桌/null 空表", ToolGrid.Visible(null).Count == 0);
+
+        // ---- 11) 接线 ----
+        string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        Check("接线/有 ToolGridHost", mainXaml.Contains("\"ToolGridHost\""));
+        Check("接线/ToolGridHost 是 4 列 Grid", mainXaml.Contains("<Grid x:Name=\"ToolGridHost\""));
+        Check("接线/有添加按钮", mainXaml.Contains("BtnGridAdd"));
+        Check("接线/有溢出提示", mainXaml.Contains("TbGridOverflow"));
+        Check("接线/点格子进启动设置", mainCs.Contains("OpenToolLaunch("));
+        Check("接线/右键菜单", mainCs.Contains("ToolTile_RightClick"));
+        Check("接线/格子里按宽度设 MaxWidth", mainCs.Contains("nameText.MaxWidth"));
+        Check("接线/订单存进设置", mainCs.Contains("SaveToolOrder("));
+        Check("接线/刷新时重画网格", mainCs.Contains("RenderToolGrid()"));
+        Check("接线/工具表里有 ToolOrder", ReadRepoSources("Dragon Butler/AppState.cs").Contains("ToolOrder"));
+
+        Console.WriteLine($"RESULT toolgrid fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
     private static int RunTidy()
     {
         var fails = new List<string>();

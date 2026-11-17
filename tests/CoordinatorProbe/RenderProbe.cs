@@ -683,6 +683,80 @@ internal static class RenderProbe
 
                     // v1.15 / L2：工具设置收成一行之后，得看两件事——
                     // 收起时那一行的摘要说得对不对，展开后原来三张卡还剩没剩。
+                    // v1.21：桌面网格（2×4）。一张就够——格子本身的形态是固定的，
+                    // 要看的是「三个内置 + 一个加号格」和长名字会不会把格子撑歪。
+                    if (mode == "grid" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedHeroState("ready");
+                        var w = new MainWindow();
+                        w.UpdateLayout();
+                        // 造一个名字很长的自定义工具，验证格子里的省略号
+                        try
+                        {
+                            var extra = new ToolProfile
+                            {
+                                ToolId = "demo-long",
+                                DisplayName = "一个名字特别特别特别长的第三方自动化工具用来试试省略号到底有没有生效",
+                                ExecutablePath = Path.Combine(Path.GetTempPath(), "dragon-ui", "fake-bgi", "BetterGI.exe"),
+                                LaunchArguments = "-t 1",
+                                ManagedProcessName = "demo-long",
+                            };
+                            ProfileRegistry.Save(extra);
+                            AppState.Settings.ToolOrder = new[] { "bettergi", "march7th", "ok-ww", "demo-long" };
+                        }
+                        catch (Exception ex) { Console.WriteLine("SEED-GRID-FAIL " + ex.Message); }
+
+                        var render = typeof(MainWindow).GetMethod("RenderToolGrid",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        render?.Invoke(w, null);
+                        w.UpdateLayout();
+
+                        // 桌面网格在首屏主卡与队列卡下面，不滚过去就截不到。
+                        // BringIntoView 在没 Show 过的窗口上不生效（没有滚动宿主测量），只能直接给偏移。
+                        if (w.FindName("ContentScroll") is System.Windows.Controls.ScrollViewer svGrid)
+                        {
+                            svGrid.ScrollToVerticalOffset(640);
+                            w.UpdateLayout();
+                        }
+
+                        bool ok = Save(w, Path.Combine(spot, "grid.png"), 980, 420);
+                        Console.WriteLine($"RENDER grid={ok}");
+                        w.Close();
+                    }
+
+                    // v1.21：点开一个格子之后的启动设置窗，四张分别是
+                    // BetterGI（文档写过参数）/ ok-ww（实战见过）/ 绝区零（全要自己填）/ 自定义工具（什么都没有）
+                    if (mode == "launch" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedHeroState("ready");
+                        foreach (var (toolId, file) in new[]
+                        {
+                            ("bettergi", "launch_bettergi.png"),
+                            ("ok-ww", "launch_okww.png"),
+                            ("zzz-od", "launch_zzz.png"),
+                        })
+                        {
+                            try
+                            {
+                                var p = ProfileRegistry.Get(toolId);
+                                if (string.IsNullOrWhiteSpace(p.ExecutablePath))
+                                {
+                                    p.ExecutablePath = Path.Combine(Path.GetTempPath(), "dragon-ui", "fake-bgi", "BetterGI.exe");
+                                    ProfileRegistry.Save(p);
+                                }
+                                var lw = new ToolLaunchWindow(p);
+                                lw.UpdateLayout();
+                                bool lok = Save(lw, Path.Combine(spot, file), 660, 0);
+                                Console.WriteLine($"RENDER {file}={lok}");
+                                lw.Close();
+                            }
+                            catch (Exception ex) { Console.WriteLine("RENDER-FAIL " + file + " " + ex.Message); }
+                        }
+                    }
+
+
                     if (mode == "tools" || mode == "all")
                     {
                         SeedSampleQueue();

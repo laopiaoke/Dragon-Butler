@@ -261,6 +261,10 @@ public partial class MainWindow : Window
         TgHotkey.IsChecked = s.HotkeyEnabled;
         TgMiniBar.IsChecked = s.MiniBarEnabled;
         TgSpeech.IsChecked = s.SpeechEnabled;
+        TgTrimToTray.IsChecked = s.TrimToTrayEnabled;
+        TbTrimHint.Text = s.TrimToTrayEnabled
+            ? "收进托盘后会销毁主窗，省 3.7 MB；再打开要多等 1 秒多。队列在跑时不销毁。"
+            : "实测只省 3.7 MB，但再打开一次要多等 1 秒多。想腾内存再开。";
         RefreshHotkeyRow(s);
         TbNightMinutes.Text = Math.Clamp(s.NightScreenMinutes, 5, 120).ToString();
         TbNightMinutes.IsEnabled = s.NightScreenEnabled;
@@ -1514,8 +1518,355 @@ public partial class MainWindow : Window
             try { RefreshCustomToolCard(id); } catch { }
         }
         RefreshToolsSummary();
+        try { RenderToolGrid(); } catch { }
         // 路径或配置名刚变过时要重读；节流在 RefreshCompletionRow 里，20 秒最多读一次盘
         try { RefreshCompletionRow(); } catch { }
+    }
+
+    // ===== 桌面网格（v1.21）=====
+
+    /// <summary>工具表的自然顺序：内置三个在前，自定义的按加入先后。</summary>
+    private static List<string> NaturalToolOrder()
+    {
+        var ids = new List<string>();
+        try
+        {
+            foreach (var p in ProfileRegistry.All)
+            {
+                if (string.IsNullOrWhiteSpace(p.ToolId)) continue;
+                if (!ids.Contains(p.ToolId, StringComparer.OrdinalIgnoreCase)) ids.Add(p.ToolId);
+            }
+        }
+        catch { }
+        return ids;
+    }
+
+    private static List<string> CurrentToolOrder()
+        => ToolGrid.Order(NaturalToolOrder(), AppState.Settings.ToolOrder);
+
+    private static void SaveToolOrder(List<string> order)
+    {
+        AppState.Settings.ToolOrder = order.ToArray();
+        AppState.SaveSettings();
+    }
+
+    /// <summary>
+    /// 画 2×4 桌面。
+    ///
+    /// <para>
+    /// 为什么是格子而不是列表：用户要「像手机桌面」。列表回答「有哪些工具」，
+    /// 格子回答「我把哪个放在第一格」——后者是他每天真的会看的那一眼。
+    /// </para>
+    /// </summary>
+    private void RenderToolGrid()
+    {
+        if (ToolGridHost == null) return;
+        ToolGridHost.Children.Clear();
+
+        var order = CurrentToolOrder();
+        var visible = ToolGrid.Visible(order);
+
+        int slot = 0;
+        foreach (string id in visible)
+        {
+            var profile = ProfileRegistry.Get(id);
+            var tile = BuildToolTile(profile);
+            PlaceInGrid(tile, slot++);
+            ToolGridHost.Children.Add(tile);
+        }
+
+        // 还有空位就给一个「＋」格：没有它，新用户看不出这里能加东西
+        if (visible.Count < ToolGrid.Capacity)
+        {
+            var add = BuildAddTile();
+            PlaceInGrid(add, slot);
+            ToolGridHost.Children.Add(add);
+        }
+
+        int overflow = ToolGrid.OverflowCount(order);
+        if (overflow > 0)
+        {
+            TbGridOverflow.Text = $"还有 {overflow} 个工具排在桌面之外——桌面只有 8 格。右键点任意工具「移到最后」，把它换上来。";
+            TbGridOverflow.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            TbGridOverflow.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>第 n 个格子摆在第几行第几列（4 列 2 行）。</summary>
+    private static void PlaceInGrid(UIElement element, int slot)
+    {
+        if (element is not FrameworkElement fe) return;
+        int col = slot % ToolGrid.Columns;
+        int row = slot / ToolGrid.Columns;
+        Grid.SetRow(fe, Math.Min(row, ToolGrid.Rows - 1));
+        Grid.SetColumn(fe, Math.Min(col, ToolGrid.Columns - 1));
+    }
+
+    private Border BuildToolTile(ToolProfile profile)
+    {
+        bool ready = false;
+        try { ready = ToolRunner.HasExecutable(profile); } catch { }
+        bool runningThis = QueueService.IsRunning
+            && string.Equals(QueueService.CurrentToolId, profile.ToolId, StringComparison.OrdinalIgnoreCase);
+
+        var icon = new Border
+        {
+            Width = 34,
+            Height = 34,
+            CornerRadius = new CornerRadius(10),
+            Background = BrushOf("InsetBrush") ?? DotGray,
+            BorderBrush = BrushOf("BorderBrush") ?? DotGray,
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        var bmp = ToolIconService.GetBitmap(profile);
+        if (bmp != null)
+        {
+            icon.Child = new Image { Source = bmp, Stretch = Stretch.Uniform, Margin = new Thickness(4) };
+        }
+        else
+        {
+            string letter = string.IsNullOrWhiteSpace(profile.DisplayName)
+                ? "?"
+                : profile.DisplayName.Trim()[..1].ToUpperInvariant();
+            icon.Child = new TextBlock
+            {
+                Text = letter,
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+
+        string stateText = runningThis ? "运行中" : ready ? "已就绪" : "未配置";
+        var stateBrush = runningThis
+            ? (BrushOf("BrandBrush") ?? DotGreen)
+            : ready ? (BrushOf("TextTertiaryBrush") ?? DotGray) : (BrushOf("WarningBrush") ?? DotYellow);
+
+        // 用 Grid 而不是 StackPanel：StackPanel 给子元素的可用宽度是无限的，
+        // TextBlock 拿到无限宽就不会触发 TextTrimming（v1.21 截了三次才发现）。
+        // Grid 会把列宽约束传给子元素，省略号才有机会出现。
+        var stack = new Grid();
+        // 默认列是 Auto＝按内容量宽＝无限宽，TextTrimming 永远不会生效。
+        // 必须显式给一个星号列，宽度才由格子决定。
+        stack.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        stack.Children.Add(icon);
+        var nameText = new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.ToolId : profile.DisplayName,
+            FontSize = 12.5,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 8, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
+        };
+        Grid.SetRow(nameText, 1);
+        stack.Children.Add(nameText);
+
+        var stateText_ = new TextBlock
+        {
+            Text = stateText,
+            FontSize = 10.5,
+            Margin = new Thickness(0, 3, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            TextAlignment = TextAlignment.Center,
+            Foreground = stateBrush,
+        };
+        Grid.SetRow(stateText_, 2);
+        stack.Children.Add(stateText_);
+
+        Grid.SetRow(icon, 0);
+
+        var tile = new Border
+        {
+            Margin = new Thickness(5),
+            Padding = new Thickness(6, 12, 6, 10),
+            MinHeight = 96,     // 名字一行与两行的格子要一样高，否则第二行会参差
+            // 长名字在被裁掉之前会先画到格子外面去（窗口没 Show 过时 UniformGrid 量到的宽度是无限大）。
+            // 裁一刀是唯一能保证「长名字不会顶穿格子」的办法，配合 TextTrimming 才有省略号。
+            ClipToBounds = true,
+            CornerRadius = new CornerRadius(12),
+            Background = BrushOf("CardBg2Brush") ?? BrushOf("ControlBgBrush") ?? DotGray,
+            BorderBrush = runningThis ? (BrushOf("BrandBrush") ?? DotGray) : (BrushOf("BorderBrush") ?? DotGray),
+            BorderThickness = new Thickness(1),
+            Child = stack,
+            ToolTip = BuildToolTileTip(profile, ready, runningThis),
+            Tag = profile.ToolId,
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+        tile.MouseLeftButtonUp += ToolTile_Click;
+        tile.MouseRightButtonUp += ToolTile_RightClick;
+
+        // 光靠 Grid 星号列还不够：窗口没真正上屏时（渲染探针、刚构造完那一刻）
+        // 测量宽度是不可靠的，TextTrimming 就永远等不到有限宽度。
+        // 这里在布局完成后按格子实际宽度给文字一个 MaxWidth，省略号才一定出现。
+        tile.SizeChanged += (_, e) =>
+        {
+            double room = e.NewSize.Width - 12 - 2;   // 减去左右 Padding 与边框
+            if (room > 0)
+            {
+                nameText.MaxWidth = room;
+                stateText_.MaxWidth = room;
+            }
+        };
+
+        // 悬停时点亮边框：格子小，没有这一步会看不出哪里能点
+        tile.MouseEnter += (_, _) => tile.BorderBrush = BrushOf("BorderStrongBrush") ?? DotGray;
+        tile.MouseLeave += (_, _) => tile.BorderBrush = runningThis
+            ? (BrushOf("BrandBrush") ?? DotGray)
+            : (BrushOf("BorderBrush") ?? DotGray);
+
+        return tile;
+    }
+
+    private string BuildToolTileTip(ToolProfile profile, bool ready, bool runningThis)
+    {
+        var lines = new List<string>();
+        lines.Add(runningThis ? profile.DisplayName + " · 正在跑" : profile.DisplayName);
+        var known = ToolCatalog.Find(profile.ToolId);
+        if (known != null && !string.IsNullOrWhiteSpace(known.GameName)) lines.Add("对应的游戏：" + known.GameName);
+        lines.Add(ready ? "程序：" + profile.ExecutablePath : "还没选程序，点进来选一次");
+        if (!string.IsNullOrWhiteSpace(profile.LaunchArguments)) lines.Add("启动参数：" + profile.LaunchArguments);
+        lines.Add("左键改启动设置 · 右键排序或删除");
+        return string.Join("\n", lines);
+    }
+
+    private Border BuildAddTile()
+    {
+        var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        stack.Children.Add(new TextBlock
+        {
+            Text = "＋",
+            FontSize = 20,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text = "添加",
+            FontSize = 10.5,
+            Margin = new Thickness(0, 4, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        });
+
+        var tile = new Border
+        {
+            Margin = new Thickness(5),
+            Padding = new Thickness(6, 12, 6, 10),
+            CornerRadius = new CornerRadius(12),
+            Background = Brushes.Transparent,
+            BorderBrush = BrushOf("BorderBrush") ?? DotGray,
+            BorderThickness = new Thickness(1),
+            Child = stack,
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = "加一个自己能启动的 exe（内置清单里没有的游戏工具也行）",
+        };
+        tile.MouseLeftButtonUp += (_, _) => BtnAddCustomTool_Click(tile, new RoutedEventArgs());
+        tile.MouseEnter += (_, _) => tile.BorderBrush = BrushOf("BorderStrongBrush") ?? DotGray;
+        tile.MouseLeave += (_, _) => tile.BorderBrush = BrushOf("BorderBrush") ?? DotGray;
+        return tile;
+    }
+
+    private void ToolTile_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not Border tile || tile.Tag is not string toolId) return;
+        e.Handled = true;
+        OpenToolLaunch(toolId);
+    }
+
+    /// <summary>点格子 = 打开这个工具的启动设置；改完立刻重画，不重启。</summary>
+    private void OpenToolLaunch(string toolId)
+    {
+        try
+        {
+            var profile = ProfileRegistry.Get(toolId);
+            var w = new ToolLaunchWindow(profile) { Owner = this };
+            w.ShowDialog();
+            if (w.Deleted)
+            {
+                SaveToolOrder(ToolGrid.Remove(CurrentToolOrder(), toolId));
+                RebuildCustomToolCards();
+                RenderQueue();
+            }
+            if (w.Changed || w.Deleted)
+            {
+                RefreshToolCards();
+                RefreshHomeHero();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开工具启动设置失败：" + ex.Message);
+            AppDialog.Show("打不开这个工具的设置，详情见日志。",
+                kind: AppDialog.Kind.Warning, title: "桌面", primary: "知道了", owner: this);
+        }
+    }
+
+    private void ToolTile_RightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not Border tile || tile.Tag is not string toolId) return;
+        e.Handled = true;
+
+        var menu = new ContextMenu
+        {
+            Background = BrushOf("CardBg2Brush") ?? BrushOf("CardBgBrush"),
+            BorderBrush = BrushOf("BorderStrongBrush") ?? BrushOf("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(4),
+        };
+        menu.Items.Add(MenuItem("改启动设置", () => OpenToolLaunch(toolId)));
+        menu.Items.Add(MenuItem("往左一格", () => MoveTool(toolId, -1)));
+        menu.Items.Add(MenuItem("往右一格", () => MoveTool(toolId, 1)));
+        menu.Items.Add(MenuItem("移到最后", () => MoveToolToEnd(toolId)));
+        if (!ProfileRegistry.IsBuiltIn(toolId))
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(MenuItem("从桌面移除（并删除这个工具）", () => OpenToolLaunch(toolId)));
+        }
+        tile.ContextMenu = menu;
+        menu.IsOpen = true;
+    }
+
+    private MenuItem MenuItem(string text, Action action)
+    {
+        var item = new MenuItem
+        {
+            Header = text,
+            Padding = new Thickness(10, 6, 10, 6),
+            Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
+        };
+        item.Click += (_, _) => { try { action(); } catch (Exception ex) { LogService.LogEvent("桌面菜单出错：" + ex.Message); } };
+        return item;
+    }
+
+    private void MoveTool(string toolId, int delta)
+    {
+        var moved = ToolGrid.Move(CurrentToolOrder(), toolId, delta);
+        if (moved == null) return;      // 到边了：不动，也不提示——格子没反应就是最清楚的回答
+        SaveToolOrder(moved);
+        RenderToolGrid();
+    }
+
+    private void MoveToolToEnd(string toolId)
+    {
+        var order = CurrentToolOrder();
+        if (!order.Contains(toolId, StringComparer.OrdinalIgnoreCase)) return;
+        order.RemoveAll(id => string.Equals(id, toolId, StringComparison.OrdinalIgnoreCase));
+        order.Add(toolId);
+        SaveToolOrder(order);
+        RenderToolGrid();
     }
 
     private void RefreshToolCard(string toolId)
@@ -1580,6 +1931,8 @@ public partial class MainWindow : Window
         var dlg = new CustomToolWindow { Owner = this };
         if (dlg.ShowDialog() != true || dlg.Result == null) return;
 
+        // v1.21：新加的工具排到桌面最后，不插队——用户排好的顺序不该被一次「添加」打乱
+        SaveToolOrder(ToolGrid.Append(CurrentToolOrder(), dlg.Result.ToolId));
         RebuildCustomToolCards();
         RenderQueue();
         RefreshToolCards();
@@ -3204,6 +3557,22 @@ public partial class MainWindow : Window
         if (AppState.Settings.SoundEnabled) SoundService.Play("toggle.wav");
     }
 
+    /// <summary>
+    /// v1.21 内存方案 B 的开关。默认关——实测省钱只有 3.7 MB，代价是每次重开多等 1 秒多。
+    /// 打开时把实测数字再说一遍，避免有人以为开了会更「轻快」。
+    /// </summary>
+    private void TgTrimToTray_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgTrimToTray.IsChecked == true;
+        AppState.Settings.TrimToTrayEnabled = on;
+        AppState.SaveSettings();
+        TbTrimHint.Text = on
+            ? "收进托盘后会销毁主窗，省 3.7 MB；再打开要多等 1 秒多。队列在跑时不销毁。"
+            : "实测只省 3.7 MB，但再打开一次要多等 1 秒多。想腾内存再开。";
+        LogService.LogEvent("收进托盘释放窗口：" + (on ? "开" : "关"));
+    }
+
     private void TgVacation_Click(object sender, RoutedEventArgs e)
     {
         if (_suppressToggle) return;
@@ -4572,6 +4941,39 @@ public partial class MainWindow : Window
         Hide();
         App.Instance?.ShowBalloon(NotifyLevel.Info, "一条龙管家",
             "一条龙管家 仍在后台运行，双击托盘图标可打开。");
+
+        // v1.21 / 内存方案 B：收进托盘就把整窗销毁，把「已经画到屏幕上」的那 28 MB 还回去。
+        // 挂在托盘图标上的只有一项设置，重建一次约 1 秒——用 1 秒换常驻少 28 MB，
+        // 对一个整晚都在后台待着的程序是划算的。
+        // 但要先确认用户真的不要再打开它了：这里加一个很短的延迟，
+        // 期间如果又收到显示请求（双击托盘、浮条双击、命令面板），就放弃这次销毁。
+        RequestTrimToTray();
+    }
+
+    /// <summary>
+    /// v1.21 / 内存方案 B 的一半：先把所有定时器停掉，再让 App 销毁本窗。
+    ///
+    /// 顺序不能反。这五个 <see cref="DispatcherTimer"/> 的 Tick 是闭包，
+    /// 闭包里抓着 this——只要还有一个在跑，WeakReference 就永远不会变 null，
+    /// 关掉窗口也回收不掉（实测：先 Close 再置 null 仍存活，先停再 Close 才回收）。
+    /// </summary>
+    internal void PrepareForTrim()
+    {
+        try { _scheduleTimer.Stop(); } catch { }
+        try { _countdownTimer.Stop(); } catch { }
+        try { _groupScanTimer.Stop(); } catch { }
+        try { _uiRefreshTimer.Stop(); } catch { }
+        try { _statusBarTimer.Stop(); } catch { }
+        try { _hotkeys?.Dispose(); } catch { }
+        try { _miniBar?.Close(); } catch { }
+        _miniBar = null;
+    }
+
+    /// <summary>请求把主窗收进托盘（真正做决策的是 App：它知道现在有没有队列在跑）。</summary>
+    private void RequestTrimToTray()
+    {
+        try { App.Instance?.TrimToTray(); }
+        catch (Exception ex) { LogService.LogEvent("收进托盘失败：" + ex.Message); }
     }
 
     // ===== v1.8 / F15：命令面板（Ctrl+K）=====

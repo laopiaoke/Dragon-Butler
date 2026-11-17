@@ -51,6 +51,13 @@ public static class ToolIconService
         }
         catch { }
 
+        // v1.21：认识的工具直接用内置的官方图标。
+        // 从 exe 抽图标有两个绕不过去的问题：没装/路径没填就什么都没有，
+        // 抽出来的常常是 Windows 通用图标或低分辨率小图，八个格子看起来像八个占位。
+        // 内置图标跟着程序走，跟路径有没有填完全无关。
+        BitmapSource? builtIn = BuiltIn(profile.ToolId);
+        if (builtIn != null) return builtIn;
+
         if (string.IsNullOrWhiteSpace(profile.ExecutablePath) || !File.Exists(profile.ExecutablePath)) return null;
 
         string source = profile.ExecutablePath;
@@ -75,6 +82,65 @@ public static class ToolIconService
     /// <summary>手动图标文件（<c>cache\icons\ov_{toolId}.png</c>）。</summary>
     public static string OverridePath(string toolId)
         => Path.Combine(CacheDir, "ov_" + SafeName(toolId) + ".png");
+
+    /// <summary>
+    /// 内置图标（打进程序里的 <c>Assets/icons/{toolId}.png|.ico</c>）。
+    /// 认不出的工具返回 null，调用方继续走从 exe 提取那条路。
+    /// </summary>
+    public static BitmapSource? BuiltIn(string toolId)
+    {
+        if (string.IsNullOrWhiteSpace(toolId)) return null;
+
+        lock (Gate)
+        {
+            if (Memory.TryGetValue("in:" + toolId, out var hit)) return hit.Bitmap;
+
+            BitmapSource? bmp = TryLoadResource("Assets/icons/" + SafeName(toolId) + ".png")
+                                ?? TryLoadResource("Assets/icons/" + SafeName(toolId) + ".ico");
+            Memory["in:" + toolId] = new CacheEntry { Source = "builtin", Bitmap = bmp };
+            return bmp;
+        }
+    }
+
+    /// <summary>这个工具是不是有内置图标（探针据此断言八个已知工具都有图）。</summary>
+    public static bool HasBuiltIn(string toolId) => BuiltIn(toolId) != null;
+
+    private static BitmapSource? TryLoadResource(string relative)
+    {
+        try
+        {
+            var uri = new Uri("pack://application:,,,/Dragon%20Butler;component/" + relative, UriKind.Absolute);
+            var info = Application.GetResourceStream(uri);
+            if (info == null) return null;
+
+            BitmapSource bmp;
+            if (relative.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
+            {
+                var dec = new IconBitmapDecoder(info.Stream, BitmapCreateOptions.PreservePixelFormat,
+                    BitmapCacheOption.OnLoad);
+                BitmapSource? best = null;
+                foreach (var frame in dec.Frames)
+                    if (best == null || frame.PixelWidth > best.PixelWidth) best = frame;
+                if (best == null) return null;
+                bmp = best;
+            }
+            else
+            {
+                var img = new BitmapImage();
+                img.BeginInit();
+                img.CacheOption = BitmapCacheOption.OnLoad;
+                img.StreamSource = info.Stream;
+                img.EndInit();
+                bmp = img;
+            }
+            bmp.Freeze();
+            return bmp;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     /// <summary>这个工具是否手动换过图标。</summary>
     public static bool HasOverride(string toolId)

@@ -25,6 +25,8 @@ public partial class App : Application
     private wf.NotifyIcon? _tray;
     private wf.ToolStripMenuItem? _miOpen, _miStart, _miContinue, _miSnapshot, _miExit;
     private MainWindow? _win;
+    private bool _trimming;          // 正在销毁主窗（Window_Closing 看到它就别再拦）
+    private wf.Timer? _trimTimer;    // 收进托盘后那次延迟销毁
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -264,10 +266,73 @@ public partial class App : Application
     {
         try
         {
-            if (_win == null) return;
+            CancelTrim();
+            // v1.21 / 内存方案 B：主窗可能已经被销毁了，这时重建一个（约 1 秒）。
+            if (_win == null) _win = new MainWindow();
             _win.Show();
             if (_win.WindowState == WindowState.Minimized) _win.WindowState = WindowState.Normal;
             _win.Activate();
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// v1.21 / 内存方案 B：主窗收进托盘后，把窗口本身销毁，只留托盘图标。
+    ///
+    /// 实测数据（docs\内存调研-计划.md）：Show 过的窗口比隐藏状态多占 3.4 MB 私有内存，
+    /// 而这台机器上从「空进程」到「主窗画出来」一共涨了 28 MB——那 28 MB 里绝大部分
+    /// 是渲染管线、字体光栅和纹理，不是控件对象。控件摘掉只省 84 KB，窗口销毁才省得下来。
+    ///
+    /// 代价是下次打开要重建：实测 1049 ms。所以这里只做「延迟一拍」，
+    /// 期间用户要是又点开了（双击托盘 / 浮条 / 命令面板），就整个放弃这次销毁。
+    /// 队列正在跑的时候不销毁——那会有半秒左右的托盘菜单迟钝，还不值得。
+    /// </summary>
+    public void TrimToTray()
+    {
+        try
+        {
+            if (_win == null || _trimming) return;
+            if (!AppState.Settings.TrimToTrayEnabled) return;   // 默认关：实测只省 3.7 MB，不值得 1.4 秒
+            if (QueueService.IsRunning) return;   // 跑着的时候保持原样，别去动它
+
+            _trimTimer?.Dispose();
+            _trimTimer = new wf.Timer { Interval = 900 };
+            _trimTimer.Tick += (_, _) =>
+            {
+                _trimTimer?.Stop();
+                _trimTimer?.Dispose();
+                _trimTimer = null;
+
+                var w = _win;
+                if (w == null || w.IsVisible) return;   // 用户又打开了，不销毁
+
+                _trimming = true;
+                try
+                {
+                    w.PrepareForTrim();      // 必须先停 timer，否则闭包抓着窗口，销毁也回收不掉
+                    w.Close();
+                }
+                catch (Exception ex) { LogService.LogEvent("销毁主窗失败：" + ex.Message); }
+                finally
+                {
+                    _trimming = false;
+                    if (ReferenceEquals(_win, w)) _win = null;
+                }
+            };
+            _trimTimer.Start();
+        }
+        catch (Exception ex) { LogService.LogEvent("安排收进托盘失败：" + ex.Message); }
+    }
+
+    /// <summary>有人要打开主窗了，撤销这次销毁。</summary>
+    private void CancelTrim()
+    {
+        try
+        {
+            if (_trimTimer == null) return;
+            _trimTimer.Stop();
+            _trimTimer.Dispose();
+            _trimTimer = null;
         }
         catch { }
     }

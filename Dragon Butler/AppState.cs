@@ -171,6 +171,13 @@ public class AppSettings
     public string ActivePresetId { get; set; } = "";
 
     /// <summary>
+    /// v1.21：桌面网格里工具的排列顺序（ToolId 列表）。
+    /// 存 id 不存位置数字——删掉一个工具之后，剩下的格子自动往前补，不会留空。
+    /// 空 = 从没排过，按工具表的自然顺序摆。
+    /// </summary>
+    public string[] ToolOrder { get; set; } = Array.Empty<string>();
+
+    /// <summary>
     /// v1.9 / P2：上一次**跑成功**时的 BetterGI 版本（只存主版本段，如 1.2.3）。
     /// 下次开跑前拿它比对，变了就提醒一句「可能不是你的配置出问题」。空＝还没记录过。
     /// </summary>
@@ -327,6 +334,16 @@ public class AppSettings
 
     /// <summary>浮条位置（-1 = 还没放过）。</summary>
     public double MiniBarTop { get; set; } = -1;
+
+    /// <summary>
+    /// v1.21：收进托盘时是否销毁主窗（默认关）。
+    ///
+    /// 实测（探针<trim>）：主窗画到屏幕上要多占约 60 MB，但其中真正属于「这个窗口」的
+    /// 只有 3.7 MB——剩下的是 WPF 渲染管线、字体光栅、纹理，关掉窗口也不会退回去。
+    /// 而重新打开一次要 1.1–1.4 秒。用 1.4 秒的等待换 3.7 MB，对大多数人是不划算的，
+    /// 所以默认关；只有确实在意常驻内存的人才该打开它。
+    /// </summary>
+    public bool TrimToTrayEnabled { get; set; } = false;
 
     /// <summary>
     /// 跑完说一句话（默认关）。走 Windows 自带 SAPI，零依赖。
