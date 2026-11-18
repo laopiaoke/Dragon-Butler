@@ -10,9 +10,9 @@
     <ApplicationIcon>Dragon Butler.ico</ApplicationIcon>
     <AssemblyName>Dragon Butler</AssemblyName>
     <RootNamespace>DragonButler</RootNamespace>
-    <Version>1.24.0</Version>
-    <FileVersion>1.24.0.0</FileVersion>
-    <AssemblyVersion>1.24.0.0</AssemblyVersion>
+    <Version>1.25.0</Version>
+    <FileVersion>1.25.0.0</FileVersion>
+    <AssemblyVersion>1.25.0.0</AssemblyVersion>
     <Product>涓€鏉￠緳绠″</Product>
     <Company>Dragon Butler</Company>
     <Description>BetterGI 涓€鏉￠緳鐨勫惎鍋滅瀹朵笌瀹堟姢宸ュ叿</Description>

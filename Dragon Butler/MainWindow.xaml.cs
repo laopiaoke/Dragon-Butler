@@ -5085,6 +5085,7 @@ public partial class MainWindow : Window
         try
         {
             var ch = NotifyService.ParseChannel(AppState.Settings.NotifyMode);
+            ChipOff.IsChecked = ch == PushChannel.Off;
             ChipToast.IsChecked = ch == PushChannel.Toast;
             ChipBalloon.IsChecked = ch == PushChannel.Balloon;
             ChipWecom.IsChecked = ch == PushChannel.Wecom;
@@ -5113,7 +5114,7 @@ public partial class MainWindow : Window
         try
         {
             var ch = NotifyService.ParseChannel(AppState.Settings.NotifyMode);
-            bool local = ch is PushChannel.Toast or PushChannel.Balloon;
+            bool local = ch is PushChannel.Off or PushChannel.Toast or PushChannel.Balloon;
             NpLocal.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
             NpWecom.Visibility = ch == PushChannel.Wecom ? Visibility.Visible : Visibility.Collapsed;
             NpFeishu.Visibility = ch == PushChannel.Feishu ? Visibility.Visible : Visibility.Collapsed;
@@ -5127,6 +5128,7 @@ public partial class MainWindow : Window
 
             TbNotifyHint.Text = ch switch
             {
+                PushChannel.Off => "什么都不弹。跑完的结果留在界面的运行页和日志里，手机上也收不到——挂机时别选这个",
                 PushChannel.Toast => "Windows 系统通知（右下角弹出 + 操作中心）；发送失败自动降级为托盘气泡",
                 PushChannel.Balloon => "只弹托盘气泡，不占用屏幕；适合已关闭 Windows 通知的系统",
                 PushChannel.Wecom => "推送到企业微信群机器人，手机可收（参数只保存在本机 config\\settings.json）",
@@ -5140,16 +5142,23 @@ public partial class MainWindow : Window
                 PushChannel.WebSocket => "连接后发送一条 JSON 即关闭；适合自建机器人（如 NoneBot/OneBot）",
                 _ => "",
             };
-            TbLocalHint.Text = ch == PushChannel.Toast
-                ? "本机通知：不需要任何配置，发送测试即可验证系统通知是否正常。"
-                : "本机提示：只弹托盘气泡，不写入操作中心。";
+            TbLocalHint.Text = ch switch
+            {
+                PushChannel.Off => "现在是「不推送」。想被提醒就选上面任意一个渠道；只想不影响别的程序，选「托盘气泡」。",
+                PushChannel.Toast => "本机通知：不需要任何配置，发送测试即可验证系统通知是否正常。",
+                _ => "本机提示：只弹托盘气泡，不写入操作中心。",
+            };
 
             bool configured = NotifyChannelConfigured(ch);
-            TbNotifyChannelState.Text = local ? "本机" : configured ? "已配置" : "待配置";
-            TbNotifyChannelState.Foreground = configured
+            TbNotifyChannelState.Text = ch == PushChannel.Off ? "关" : local ? "本机" : configured ? "已配置" : "待配置";
+            TbNotifyChannelState.Foreground = configured || ch == PushChannel.Off
                 ? (BrushOf("SuccessBrush") ?? DotGray)
                 : (BrushOf("TextTertiaryBrush") ?? DotGray);
-            BtnTestWebhook.Content = local ? "发送测试通知" : "发送测试消息";
+            BtnTestWebhook.Content = ch == PushChannel.Off ? "发送测试消息" : local ? "发送测试通知" : "发送测试消息";
+            // 「不推送」时测试按钮没有意义：发出去也不会有人收到。
+            // 禁用比让它点了弹一句失败更诚实。
+            BtnTestWebhook.IsEnabled = ch != PushChannel.Off;
+            BtnTestWebhook.ToolTip = ch == PushChannel.Off ? "现在是「不推送」，先在上面选一个渠道再测。" : null;
             TbNotifyTestResult.Text = "";
         }
         catch { }
@@ -5160,6 +5169,7 @@ public partial class MainWindow : Window
         var s = AppState.Settings;
         return ch switch
         {
+            PushChannel.Off => true,
             PushChannel.Toast or PushChannel.Balloon => true,
             PushChannel.Wecom => !string.IsNullOrWhiteSpace(s.NotifyWecomUrl),
             PushChannel.Feishu => !string.IsNullOrWhiteSpace(s.NotifyFeishuUrl),

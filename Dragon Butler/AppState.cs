@@ -190,15 +190,23 @@ public class AppSettings
     /// </summary>
     public bool HarvestEnabled { get; set; } = false;
 
-    /// <summary>推送方式：Toast（Windows 通知，默认）/ Wecom（企业微信）/ Balloon（仅托盘气泡）</summary>
-    public string NotifyMode { get; set; } = "Toast";
+    /// <summary>
+    /// 推送方式：Off（不推送，默认）/ Toast（Windows 通知）/ Balloon（仅托盘气泡）/
+    /// Wecom（企业微信）/ Feishu / DingTalk / Telegram / Bark / Email / Xxtui / Webhook / WebSocket。
+    /// v1.25：默认从 Toast 改成 Off——挂机时 Windows 通知会一条条打断桌面，
+    /// 而它又带不到人不在的地方。想要的人在首启向导第 1 步就能选。
+    /// </summary>
+    public string NotifyMode { get; set; } = "Off";
 
     // ===== v1.3：多工具档案 =====
     /// <summary>配置结构版本：0/缺省=旧版（v1.2 及以前），13=v1.3。</summary>
     public int Version { get; set; }
 
-    /// <summary>v1.6 当前配置结构版本号（v1.6 新增补跑窗口与队列续跑字段）。</summary>
-    public const int CurrentVersion = 14;
+    /// <summary>
+    /// 当前配置结构版本号。14 = v1.6 补跑窗口与队列续跑字段；
+    /// 15 = v1.25 通知默认改成「不推送」（见 <see cref="LoadSettings"/> 里的迁移）。
+    /// </summary>
+    public const int CurrentVersion = 15;
 
     /// <summary>各工具档案（键为 ToolId）。旧配置无此节时为空字典。</summary>
     public Dictionary<string, ToolProfile> Tools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -459,6 +467,18 @@ public static class AppState
             // 旧版本只有一个企业微信 Webhook 字段：升级时迁移，避免用户重填
             if (string.IsNullOrWhiteSpace(Settings.NotifyWecomUrl) && !string.IsNullOrWhiteSpace(Settings.WebhookOutUrl))
                 Settings.NotifyWecomUrl = Settings.WebhookOutUrl;
+
+            // v1.25：通知默认从「Windows 通知」改成「不推送」。
+            // 老配置里那一堆 NotifyMode="Toast" 并不是人选的，是旧默认值写进去的——
+            // 升级时把这种情况改成 Off，否则「改了默认」对老用户等于没改。
+            // 真正手动选过远程渠道（填了地址）的保持不动：那是有意为之。
+            if (Settings.Version < 15)
+            {
+                bool wasDefault = string.IsNullOrWhiteSpace(Settings.NotifyMode)
+                                  || string.Equals(Settings.NotifyMode, "Toast", StringComparison.OrdinalIgnoreCase);
+                if (wasDefault) Settings.NotifyMode = "Off";
+                Settings.Version = 15;
+            }
         }
         catch (Exception ex)
         {

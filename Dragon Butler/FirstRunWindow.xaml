@@ -112,6 +112,37 @@
 
         <!-- v1.22：清单变长之后出现了滚动条，而 WPF 默认滚动条是系统浅色，
              在深色窗口里像贴了两条白胶带。自己画一条细的。 -->
+        <!-- v1.25：推送渠道胶囊。主窗那套 NotifyChip 是窗口级资源，这里拿不到，
+             照它的样子重画一份（同样踩过「拿不到就静默退回系统浅色」的坑）。 -->
+        <Style x:Key="WizChip" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,6,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="7" Height="27" Padding="10,0"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                            <TextBlock x:Name="Tx" Text="{TemplateBinding Content}" VerticalAlignment="Center"
+                                       HorizontalAlignment="Center" Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BrandSoftBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                                <Setter TargetName="Tx" Property="Foreground" Value="{DynamicResource BrandTextBrush}"/>
+                                <Setter TargetName="Tx" Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="WizScrollBar" TargetType="ScrollBar">
             <Setter Property="Width" Value="8"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -193,9 +224,9 @@
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0">
-                <TextBlock Text="第一次使用，三步就好" FontSize="16" FontWeight="SemiBold"
+                <TextBlock Text="第一次使用，四步就好" FontSize="16" FontWeight="SemiBold"
                            Foreground="{DynamicResource TextPrimaryBrush}"/>
-                <TextBlock x:Name="TbStep" Text="第 1 步 / 共 3 步" FontSize="11" Margin="0,5,0,0"
+                <TextBlock x:Name="TbStep" Text="第 1 步 / 共 4 步" FontSize="11" Margin="0,5,0,0"
                            Foreground="{DynamicResource TextTertiaryBrush}"/>
             </StackPanel>
 
@@ -225,7 +256,38 @@
             </StackPanel>
 
             <!-- 步骤 3：完成 -->
+            <!-- 步骤 3：跑完怎么告诉你 -->
             <StackPanel x:Name="Step3" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
+                <TextBlock FontSize="12.5" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           Text="跑完之后要不要提醒你，怎么提醒。默认什么都不弹——挂机时每跑完一个工具就弹一次，比不提醒更烦。"/>
+
+                <WrapPanel x:Name="NotifyChipHost" Margin="0,12,0,0"/>
+
+                <TextBlock x:Name="TbNotifyPickHint" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
+                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+
+                <!-- 只有一个地址要填的渠道，就在这里填掉；多字段的（邮件/Telegram）留到通知卡 -->
+                <StackPanel x:Name="NotifyFieldHost" Margin="0,10,0,0" Visibility="Collapsed">
+                    <TextBlock x:Name="TbNotifyFieldLabel" FontSize="11.5"
+                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <TextBox x:Name="TbNotifyField" Style="{StaticResource InputBox}" Margin="0,5,0,0"
+                             LostFocus="TbNotifyField_LostFocus"/>
+                    <TextBlock x:Name="TbNotifyFieldNote" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button x:Name="BtnNotifyTest" Content="发一条试试" Style="{StaticResource WizGhost}"
+                            Height="28" Padding="12,0" Click="BtnNotifyTest_Click"/>
+                    <TextBlock x:Name="TbNotifyTest" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center"
+                               TextWrapping="Wrap" MaxWidth="380" HorizontalAlignment="Left"
+                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- 步骤 4：完成 -->
+            <StackPanel x:Name="Step4" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
                 <TextBlock Text="现在就绪了。" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource TextPrimaryBrush}"/>
                 <TextBlock Margin="0,8,0,0" FontSize="12.5" TextWrapping="Wrap"

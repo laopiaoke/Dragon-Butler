@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -19,6 +19,7 @@ public enum NotifyLevel { Info, Warning, Critical }
 /// <summary>推送渠道（与 BetterGI 全局通知支持的渠道对齐）</summary>
 public enum PushChannel
 {
+    Off,        // 不推送（默认：跑完不弹任何东西，界面里自己看结果）
     Toast,      // Windows 系统通知
     Balloon,    // 仅托盘气泡
     Wecom,      // 企业微信群机器人
@@ -33,10 +34,16 @@ public enum PushChannel
 }
 
 /// <summary>
-/// 通知服务（SPBGI）：本地 + 远程共 10 个渠道，默认 Windows 通知。
+/// 通知服务（SPBGI）：本地 + 远程共 11 个渠道，默认不推送。
+/// 不推送：什么都不弹，结果只留在界面与日志里。
 /// 本地：Toast（失败降级托盘气泡）/ 仅托盘气泡。
-/// 远程：企业微信、飞书、钉钉、Telegram、Bark、邮件、xxtui、自定义 Webhook。
+/// 远程：企业微信、飞书、钉钉、Telegram、Bark、邮件、xxtui、自定义 Webhook、WebSocket。
 /// 任何失败只记日志，绝不影响主流程；远程推送异步执行，不阻塞 UI。
+///
+/// v1.25：默认从「Windows 通知」改成「不推送」。挂机场景下 Windows 通知会在运行途中
+/// 一条条中断桌面（每次至少一条，队列长了就是一串），而它又不会把结果带到人不在的地方。
+/// 真正有用的是「推到手机」，那需要人自己填一次地址——所以默认留给不打扰，
+/// 想要的人第一次打开向导时就会看见选项。
 /// </summary>
 public static class NotifyService
 {
@@ -45,6 +52,7 @@ public static class NotifyService
     /// <summary>渠道清单（界面按此顺序展示）</summary>
     public static readonly (PushChannel Channel, string Name)[] AllChannels =
     {
+        (PushChannel.Off, "不推送"),
         (PushChannel.Toast, "Windows 通知"),
         (PushChannel.Balloon, "托盘气泡"),
         (PushChannel.Wecom, "企业微信"),
@@ -77,6 +85,7 @@ Write-Output 'TOAST_OK'
     /// <summary>设置的字符串 → 渠道枚举</summary>
     public static PushChannel ParseChannel(string? mode) => mode switch
     {
+        "Off" => PushChannel.Off,
         "Wecom" => PushChannel.Wecom,
         "Feishu" => PushChannel.Feishu,
         "DingTalk" => PushChannel.DingTalk,
@@ -87,7 +96,10 @@ Write-Output 'TOAST_OK'
         "Webhook" => PushChannel.Webhook,
         "WebSocket" => PushChannel.WebSocket,
         "Balloon" => PushChannel.Balloon,
-        _ => PushChannel.Toast,
+        "Toast" => PushChannel.Toast,
+        // 空/没见过的值一律当「不推送」：老配置升级上来时字段是缺的，
+        // 缺的时候弹一堆 Windows 通知才是最坏的结果。
+        _ => PushChannel.Off,
     };
 
     public static string NameOf(PushChannel c)
@@ -102,6 +114,9 @@ Write-Output 'TOAST_OK'
         try
         {
             var ch = ParseChannel(AppState.Settings.NotifyMode);
+
+            // 不推送：连降级气泡都不弹。选了这个就是不想被任何一条打断。
+            if (ch == PushChannel.Off) return;
 
             if (ch == PushChannel.Toast)
             {
@@ -168,6 +183,9 @@ Write-Output 'TOAST_OK'
         var ch = channel ?? ParseChannel(AppState.Settings.NotifyMode);
         string title = "一条龙管家";
         string body = $"测试消息：{NameOf(ch)} 通道连接成功（{DateTime.Now:HH:mm:ss}）";
+
+        if (ch == PushChannel.Off)
+            return (false, "现在是「不推送」，先在上面选一个渠道再测");
 
         if (ch == PushChannel.Toast)
         {

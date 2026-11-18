@@ -703,7 +703,7 @@ internal static class RenderProbe
                     if (mode == "wizard" || mode == "all")
                     {
                         SeedHeroState("ready");
-                        for (int step = 1; step <= 3; step++)
+                        for (int step = 1; step <= 4; step++)
                         {
                             var w = new FirstRunWindow();
                             // 步骤切换走私有方法，反射调它比自己摆一遍 Visibility 更接近真实

@@ -5,25 +5,60 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Threading.Tasks;
 using Microsoft.Win32;
 
 namespace DragonButler;
 
 /// <summary>
-/// 首启向导（三步）：选工具 → 自动寻找路径 → 完成。
+/// 首启向导：选工具 → 自动寻找路径 → 跑完怎么提醒 → 完成。
 /// 只在"首次运行且没有任何已配置工具"时由主界面弹出，可随时跳过。
+///
+/// v1.25 加了第 3 步（推送渠道）。原因是通知默认从「Windows 通知」改成了「不推送」：
+/// 默认改安静之后，得在第一次打开的地方把选择权交出去，否则「默认不推送」就变成
+/// 「这软件没有通知」——两件事不一样，前者是选择，后者是缺陷。
 /// </summary>
 public partial class FirstRunWindow : Window
 {
     private int _step = 1;
     private readonly Dictionary<string, string> _found = new();
     private readonly Dictionary<string, CheckBox> _picks = new();
+    private readonly Dictionary<string, RadioButton> _notifyPicks = new();
+
+    /// <summary>已经打过字、但还没落盘的地址，按渠道分开记（换渠道再换回来不该丢）。</summary>
+    private readonly Dictionary<string, string> _notifyTyped = new();
+
+    /// <summary>上一次 SyncNotifyStep 时显示的是哪个渠道，用来在切换前把当前输入收起来。</summary>
+    private string _notifyShownMode = "";
+
+    /// <summary>向导里能配的渠道：只放「填一个地址就能用」的。
+    /// Telegram 要两个字段、邮件要七行，塞进向导会把这一页撑成表单，
+    /// 那两个留在通知卡里配——这里给一句提示就够。</summary>
+    private static readonly (string Mode, string Label, string FieldLabel, string Note)[] NotifyChoices =
+    {
+        ("Off", "不推送", "", ""),
+        ("Toast", "Windows 通知", "", ""),
+        ("Balloon", "托盘气泡", "", ""),
+        ("Wecom", "企业微信", "群机器人 Webhook",
+            "群设置 → 群机器人 → 添加机器人 → 复制 Webhook 地址"),
+        ("Feishu", "飞书", "自定义机器人 Webhook",
+            "开启签名校验的群，密钥稍后在「通知」卡里补"),
+        ("DingTalk", "钉钉", "自定义机器人 Webhook",
+            "安全设置选「加签」的，密钥稍后在「通知」卡里补"),
+        ("Bark", "Bark（iPhone）", "推送地址",
+            "形如 https://api.day.app/你的Key，可填自建服务器"),
+        ("Xxtui", "xxtui", "API 地址或 Key",
+            "只填 Key 会自动补全成 https://www.xxtui.com/xxtui/Key"),
+        ("Webhook", "自定义 Webhook", "地址",
+            "POST JSON：source / level / title / message / timestamp"),
+    };
 
     public FirstRunWindow()
     {
         InitializeComponent();
         BuildToolPicks();
         ApplyQueueSelection();
+        BuildNotifyPicks();
         UpdateUi();
     }
 
@@ -187,15 +222,17 @@ public partial class FirstRunWindow : Window
 
     private void UpdateUi()
     {
-        TbStep.Text = $"第 {_step} 步 / 共 3 步";
+        TbStep.Text = $"第 {_step} 步 / 共 4 步";
         Step1.Visibility = _step == 1 ? Visibility.Visible : Visibility.Collapsed;
         Step2.Visibility = _step == 2 ? Visibility.Visible : Visibility.Collapsed;
         Step3.Visibility = _step == 3 ? Visibility.Visible : Visibility.Collapsed;
+        Step4.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
         BtnBack.Visibility = _step == 1 ? Visibility.Collapsed : Visibility.Visible;
-        BtnNext.Content = _step == 3 ? "完成" : "下一步";
+        BtnNext.Content = _step == 4 ? "完成" : "下一步";
 
         if (_step == 2) BuildFindRows();
-        if (_step == 3) BuildDoneSummary();
+        if (_step == 3) SyncNotifyStep();
+        if (_step == 4) BuildDoneSummary();
     }
 
     private List<ToolProfile> SelectedProfiles()
@@ -302,7 +339,202 @@ public partial class FirstRunWindow : Window
             bool ok = !string.IsNullOrWhiteSpace(profile.ExecutablePath);
             lines.Add($"{profile.DisplayName}：{(ok ? "已就绪" : "还没设置路径（可稍后在工具卡里设置）")}");
         }
+        lines.Add("跑完提醒：" + DescribeNotifySelection());
         TbDoneSummary.Text = string.Join("\n", lines);
+    }
+
+    // ===== 第 3 步：推送渠道（v1.25）=====
+
+    /// <summary>
+    /// 建渠道胶囊。渠道清单直接来自 <see cref="NotifyChoices"/>，
+    /// 与主窗通知卡用的是同一套 <see cref="PushChannel"/> 解析（模式串取自 Tag），
+    /// 所以这里选的、主窗显示的、真发出去的永远是同一个值。
+    /// </summary>
+    private void BuildNotifyPicks()
+    {
+        NotifyChipHost.Children.Clear();
+        _notifyPicks.Clear();
+
+        foreach (var (mode, label, _, _) in NotifyChoices)
+        {
+            var chip = new RadioButton
+            {
+                Content = label,
+                Tag = mode,
+                Style = TryFindResource("WizChip") as Style,
+                GroupName = "WizNotify",
+            };
+            chip.Checked += (_, _) => SyncNotifyStep();
+            _notifyPicks[mode] = chip;
+            NotifyChipHost.Children.Add(chip);
+        }
+
+        // 预选当前设置。老配置升级上来是 Off（见 AppState.LoadSettings 的迁移），
+        // 所以默认停在「不推送」——和这个程序平时的行为一致，不吓人。
+        string hit = NormalizeMode(AppState.Settings.NotifyMode);
+        if (_notifyPicks.TryGetValue(hit, out var picked)) picked.IsChecked = true;
+    }
+
+    /// <summary>设置里的值 → 向导里有的那几档。没列进向导的（Telegram/邮件/WebSocket）落到最近的一档。</summary>
+    private static string NormalizeMode(string? mode)
+    {
+        return NotifyService.ParseChannel(mode) switch
+        {
+            PushChannel.Toast => "Toast",
+            PushChannel.Balloon => "Balloon",
+            PushChannel.Wecom => "Wecom",
+            PushChannel.Feishu => "Feishu",
+            PushChannel.DingTalk => "DingTalk",
+            PushChannel.Bark => "Bark",
+            PushChannel.Xxtui => "Xxtui",
+            PushChannel.Webhook => "Webhook",
+            _ => "Off",
+        };
+    }
+
+    /// <summary>当前选中的渠道模式字符串（取自胶囊 Tag，不猜）。</summary>
+    private string SelectedNotifyMode()
+    {
+        foreach (var kv in _notifyPicks)
+            if (kv.Value.IsChecked == true) return kv.Key;
+        return "Off";
+    }
+
+    private static (string Mode, string Label, string FieldLabel, string Note) ChoiceOf(string mode)
+    {
+        foreach (var c in NotifyChoices)
+            if (string.Equals(c.Mode, mode, StringComparison.OrdinalIgnoreCase)) return c;
+        return NotifyChoices[0];
+    }
+
+    private string DescribeNotifySelection()
+    {
+        string mode = SelectedNotifyMode();
+        if (mode == "Off") return "不推送（结果在界面里自己看）";
+        string name = NotifyService.NameOf(NotifyService.ParseChannel(mode));
+        if (mode is "Toast" or "Balloon") return name;
+        string typed = FieldFor(mode);
+        return string.IsNullOrWhiteSpace(typed)
+            ? $"{name}（地址还没填，稍后在「通知」卡里补）"
+            : $"{name}（地址已填）";
+    }
+
+    /// <summary>
+    /// 这个渠道现在该显示在框里的地址：优先用这一步里打过的字，
+    /// 其次是设置里已经存着的。刻意不直接读 TextBox——切换渠道时先要把上一个渠道的字收走。
+    /// </summary>
+    private string FieldFor(string mode)
+    {
+        if (_notifyTyped.TryGetValue(mode, out var typed)) return typed;
+        return ExistingNotifyField(mode);
+    }
+
+    private void SyncNotifyStep()
+    {
+        if (TbNotifyPickHint == null) return;
+        string mode = SelectedNotifyMode();
+
+        // 先把「刚才那个渠道」框里的字收进草稿。
+        // 不做这一步的话，从飞书切到企业微信，飞书的地址会原样留在企业微信的框里，
+        // 人一不小心就把飞书的地址存成了企业微信的。
+        if (!string.IsNullOrEmpty(_notifyShownMode) && _notifyShownMode != mode)
+            _notifyTyped[_notifyShownMode] = TbNotifyField.Text ?? "";
+        _notifyShownMode = mode;
+
+        var (_, label, fieldLabel, note) = ChoiceOf(mode);
+        bool needsField = mode is not ("Off" or "Toast" or "Balloon");
+
+        NotifyFieldHost.Visibility = needsField ? Visibility.Visible : Visibility.Collapsed;
+        if (needsField)
+        {
+            TbNotifyFieldLabel.Text = fieldLabel;
+            TbNotifyFieldNote.Text = note;
+            // 换渠道时把这个渠道自己的地址带出来，别让人重填一遍
+            TbNotifyField.Text = FieldFor(mode);
+        }
+        else
+        {
+            TbNotifyField.Text = "";
+        }
+
+        TbNotifyPickHint.Text = mode switch
+        {
+            "Off" => "什么都不弹。跑完之后结果只留在界面和日志里——这是默认值，之后随时能改。",
+            "Toast" => "右下角弹一条 Windows 通知；系统把通知关掉时自动退回托盘气泡。",
+            "Balloon" => "只弹托盘气泡，不写进操作中心；适合已经关掉系统通知的电脑。",
+            _ => $"{label}：填完地址点「发一条试试」，能收到就说明这条路是通的。",
+        };
+
+        TbNotifyTest.Text = "";
+        BtnNotifyTest.IsEnabled = mode != "Off";
+    }
+
+    /// <summary>设置里这个渠道已经存着的地址（只用于带出来，不写回）。</summary>
+    private static string ExistingNotifyField(string mode)
+    {
+        var s = AppState.Settings;
+        return mode switch
+        {
+            "Wecom" => s.NotifyWecomUrl ?? "",
+            "Feishu" => s.NotifyFeishuUrl ?? "",
+            "DingTalk" => s.NotifyDingUrl ?? "",
+            "Bark" => s.NotifyBarkUrl ?? "",
+            "Xxtui" => s.NotifyXxtuiUrl ?? "",
+            "Webhook" => s.NotifyWebhookUrl ?? "",
+            _ => "",
+        };
+    }
+
+    /// <summary>把向导里选的渠道与填的地址落进设置。</summary>
+    private void SaveNotifyChoice()
+    {
+        string mode = SelectedNotifyMode();
+        AppState.Settings.NotifyMode = mode;
+
+        string v = (TbNotifyField.Text ?? "").Trim();
+        if (v.Length > 0)
+        {
+            switch (mode)
+            {
+                case "Wecom": AppState.Settings.NotifyWecomUrl = v; break;
+                case "Feishu": AppState.Settings.NotifyFeishuUrl = v; break;
+                case "DingTalk": AppState.Settings.NotifyDingUrl = v; break;
+                case "Bark": AppState.Settings.NotifyBarkUrl = v; break;
+                case "Xxtui": AppState.Settings.NotifyXxtuiUrl = v; break;
+                case "Webhook": AppState.Settings.NotifyWebhookUrl = v; break;
+            }
+        }
+        AppState.SaveSettings();
+    }
+
+    private void TbNotifyField_LostFocus(object sender, RoutedEventArgs e)
+    {
+        // 失焦就存：填了地址却直接关窗，也不该丢
+        try { SaveNotifyChoice(); } catch { }
+    }
+
+    private async void BtnNotifyTest_Click(object sender, RoutedEventArgs e)
+    {
+        string mode = SelectedNotifyMode();
+        if (mode == "Off") return;
+
+        SaveNotifyChoice();
+        BtnNotifyTest.IsEnabled = false;
+        TbNotifyTest.Foreground = (Brush?)TryFindResource("TextTertiaryBrush") ?? Brushes.Gray;
+        TbNotifyTest.Text = "正在发送…";
+        try
+        {
+            var (ok, err) = await NotifyService.SendTestAsync(NotifyService.ParseChannel(mode));
+            TbNotifyTest.Text = ok ? "✓ 发出去了，看看手机／桌面收到没有" : "✗ " + err;
+            TbNotifyTest.Foreground = ok
+                ? ((Brush?)TryFindResource("BrandBrush") ?? Brushes.Green)
+                : ((Brush?)TryFindResource("DangerBrush") ?? Brushes.Red);
+        }
+        catch (Exception ex)
+        {
+            TbNotifyTest.Text = "✗ " + ex.Message;
+        }
+        finally { BtnNotifyTest.IsEnabled = true; }
     }
 
     private void BtnNext_Click(object sender, RoutedEventArgs e)
@@ -325,6 +557,14 @@ public partial class FirstRunWindow : Window
         {
             SavePaths();
             _step = 3;
+            UpdateUi();
+            return;
+        }
+
+        if (_step == 3)
+        {
+            SaveNotifyChoice();
+            _step = 4;
             UpdateUi();
             return;
         }
@@ -386,6 +626,7 @@ public partial class FirstRunWindow : Window
     {
         SaveSelection();
         SavePaths();
+        SaveNotifyChoice();
         LogService.LogEvent("首启向导：完成");
     }
 

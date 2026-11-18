@@ -1425,6 +1425,22 @@ internal static class Program
         Check("通知/两段都要填", !Preflight.NotifyReady("Telegram", "token|") && !Preflight.NotifyReady("Telegram", "|chat"));
         Check("通知/两段都填了 ready", Preflight.NotifyReady("Telegram", "token|chat"));
 
+        // ---- 7b) v1.25：默认不推送 ----
+        Check("不推送/本地渠道（不报没配）", Preflight.IsLocalChannel("Off"));
+        Check("不推送/永远 ready", Preflight.NotifyReady("Off", ""));
+        var offReport = Preflight.Build(Healthy() with { NotifyMode = "Off" });
+        Check("不推送/挂到 notify.off", Of(offReport, "notify.off").Level == PreflightLevel.Notice,
+            Of(offReport, "notify.off").Level.ToString());
+        Check("不推送/不挡路", offReport.CanRun);
+        Check("不推送/不抬高 Worst", offReport.Worst <= PreflightLevel.Warn, offReport.Worst.ToString());
+        Check("不推送/给一条修法", Of(offReport, "notify.off").FixCommand == "view.notify");
+        Check("不推送/默认设置就是它", AppState.Settings.NotifyMode == "Off", AppState.Settings.NotifyMode);
+        Check("不推送/解析成 Off", NotifyService.ParseChannel("Off") == PushChannel.Off);
+        Check("不推送/小写也认", NotifyService.ParseChannel("off") == PushChannel.Off);
+        Check("不推送/缺字段兜底成 Off", NotifyService.ParseChannel(null) == PushChannel.Off);
+        Check("不推送/Toast 仍是 Toast", NotifyService.ParseChannel("Toast") == PushChannel.Toast);
+        Check("不推送/名字是中文", NotifyService.NameOf(PushChannel.Off) == "不推送", NotifyService.NameOf(PushChannel.Off));
+
         var s = new AppSettings
         {
             NotifyMode = "Telegram",
@@ -5653,6 +5669,32 @@ internal static class Program
             && wizard.Contains("TargetType=\"CheckBox\"", StringComparison.Ordinal)
             && wizard.Contains("Data=\"M 3.5 8 L 6.6 11 L 12.4 5\"", StringComparison.Ordinal));
         Check("向导三步都有渲染用例", probe.Contains("\"wizard\"", StringComparison.Ordinal));
+
+        // v1.25：默认不推送，但引导页得把选择权交出去——否则等于「这软件没有通知」。
+        Check("向导有渠道胶囊样式（主窗 NotifyChip 拿不到）",
+            wizard.Contains("x:Key=\"WizChip\"", StringComparison.Ordinal)
+            && wizard.Contains("TargetType=\"RadioButton\"", StringComparison.Ordinal));
+        Check("向导说清是四步", wizard.Contains("共 4 步", StringComparison.Ordinal));
+        Check("向导有第 4 步（完成页）",
+            wizard.Contains("x:Name=\"Step4\"", StringComparison.Ordinal));
+        Check("向导第 3 步是推送选择",
+            wizard.Contains("x:Name=\"NotifyChipHost\"", StringComparison.Ordinal)
+            && wizard.Contains("x:Name=\"TbNotifyField\"", StringComparison.Ordinal)
+            && wizard.Contains("x:Name=\"BtnNotifyTest\"", StringComparison.Ordinal));
+        Check("向导渲染用例已改成四步", probe.Contains("step <= 4", StringComparison.Ordinal));
+
+        // v1.25：换渠道必须把上一个渠道打在框里的字收走。
+        // 不然从飞书切到企业微信，框里还是飞书的地址，手一滑就存成了企业微信的地址。
+        string wizardCs = ReadRepoSources("Dragon Butler/FirstRunWindow.xaml.cs");
+        Check("向导/换渠道先收草稿",
+            wizardCs.Contains("_notifyTyped[_notifyShownMode] = TbNotifyField.Text", StringComparison.Ordinal));
+        Check("向导/带出的是这个渠道自己的地址",
+            wizardCs.Contains("TbNotifyField.Text = FieldFor(mode);", StringComparison.Ordinal));
+        Check("向导/第 3 步存了才前进",
+            wizardCs.Contains("SaveNotifyChoice();", StringComparison.Ordinal)
+            && wizardCs.Contains("_step = 4;", StringComparison.Ordinal));
+        Check("向导/完成时也存一次",
+            System.Text.RegularExpressions.Regex.IsMatch(wizardCs, @"SavePaths\(\);\s+SaveNotifyChoice\(\);"));
 
         Console.WriteLine($"RESULT uirules fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;

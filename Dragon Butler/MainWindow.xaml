@@ -1997,6 +1997,7 @@
                                                Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Center"/>
                                 </Grid>
                                 <WrapPanel Margin="0,6,0,0">
+                                    <RadioButton x:Name="ChipOff" Content="不推送" Tag="Off" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
                                     <RadioButton x:Name="ChipToast" Content="Windows 通知" Tag="Toast" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
                                     <RadioButton x:Name="ChipBalloon" Content="托盘气泡" Tag="Balloon" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
                                     <RadioButton x:Name="ChipWecom" Content="企业微信" Tag="Wecom" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>

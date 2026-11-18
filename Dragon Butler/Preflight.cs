@@ -204,6 +204,17 @@ public static class Preflight
 
     private static PreflightItem CheckNotify(PreflightInput i)
     {
+        // v1.25：「不推送」是默认值，不是配置错误。但它确实意味着「跑完了没人告诉你」，
+        // 所以给一条 Notice（不挡路、不抬高 Worst），只在体检页里看得见。
+        if (string.Equals(i.NotifyMode, "Off", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(i.NotifyMode))
+        {
+            return new PreflightItem("notify.off", "跑完不提醒你", PreflightLevel.Notice,
+                "这是默认设置：队列跑成什么样，只看界面和日志，不会弹窗、也不会推到手机。"
+                + "挂机的时候可以选个渠道，让结果自己找上来。",
+                "选一个渠道", "view.notify");
+        }
+
         bool local = IsLocalChannel(i.NotifyMode);
         if (local)
             return new PreflightItem("notify.local", "跑完提醒在这台电脑上弹", PreflightLevel.Ok, "", "", "");
@@ -264,7 +275,7 @@ public static class Preflight
 
     /// <summary>本地渠道（不依赖网络与地址）。</summary>
     public static bool IsLocalChannel(string? mode)
-        => mode is null or "" or "Toast" or "Balloon";
+        => mode is null or "" or "Off" or "Toast" or "Balloon";
 
     /// <summary>
     /// 从设置里取当前渠道要用的地址/凭据。多个字段拼起来（Telegram 要 token+chat，
