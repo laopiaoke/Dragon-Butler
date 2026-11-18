@@ -36,12 +36,21 @@ public static class ProfileRegistry
     /// <summary>全部已加载的工具档案（只读视图）。</summary>
     public static IReadOnlyList<ToolProfile> All => _all;
 
-    /// <summary>按 ToolId 取档案；找不到时返回同 ID 的空档案（绝不回退到 BGI，避免误改内置配置）。</summary>
+    /// <summary>按 ToolId 取档案；找不到时按 <see cref="ToolCatalog"/> 现造一份（绝不回退到 BGI，避免误改内置配置）。</summary>
     public static ToolProfile Get(string toolId)
     {
         if (_all.Count == 0) _all.AddRange(ToolProfileDefaults.CreateAll());
-        return _all.FirstOrDefault(p => string.Equals(p.ToolId, toolId, StringComparison.OrdinalIgnoreCase))
-               ?? new ToolProfile { ToolId = toolId, DisplayName = toolId };
+        var hit = _all.FirstOrDefault(p => string.Equals(p.ToolId, toolId, StringComparison.OrdinalIgnoreCase));
+        if (hit != null) return hit;
+
+        // v1.23 修：v1.22 把引导页的工具从 3 个扩到 16 个，但档案表里只有内置那三个，
+        // 于是 baah / hsr / m9a 这些工具 Get 回来的是 DisplayName = ToolId 的空壳——
+        // 名字显示成一串英文 id，ManagedProcessName 为空导致「自动寻找」必失败。
+        // 目录里这些默认值本来就写好了（ToolCatalog.ToProfile），没理由让它退化成空壳。
+        var known = ToolCatalog.Find(toolId);
+        if (known != null) return ToolCatalog.ToProfile(known);
+
+        return new ToolProfile { ToolId = toolId, DisplayName = toolId };
     }
 
     /// <summary>是否内置工具（不允许删除/改 ID）。</summary>

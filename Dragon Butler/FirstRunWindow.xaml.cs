@@ -357,6 +357,16 @@ public partial class FirstRunWindow : Window
         }
         foreach (var kv in _picks) Set(kv.Key, kv.Value.IsChecked == true);
         AppState.Settings.Queue = queue;
+
+        // v1.23：勾上的工具必须真的有一份档案落到磁盘上。
+        // 只写队列是不够的——主窗的桌面网格与自定义工具卡都是照着 ProfileRegistry.All 画的，
+        // 档案不存在的话，用户在这一页勾了 BAAH，进主界面却找不到它。
+        foreach (var kv in _picks)
+        {
+            if (kv.Value.IsChecked != true) continue;
+            try { ProfileRegistry.Save(ProfileRegistry.Get(kv.Key)); } catch { }
+        }
+
         AppState.SaveSettings();
     }
 

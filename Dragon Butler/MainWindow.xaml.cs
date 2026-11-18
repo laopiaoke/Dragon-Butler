@@ -1521,12 +1521,21 @@ public partial class MainWindow : Window
             try { RefreshCustomToolCard(id); } catch { }
         }
         RefreshToolsSummary();
-        try { RenderToolGrid(); } catch { }
+        try { SyncToolGrid(); } catch { }
         // 路径或配置名刚变过时要重读；节流在 RefreshCompletionRow 里，20 秒最多读一次盘
         try { RefreshCompletionRow(); } catch { }
     }
 
     // ===== 桌面网格（v1.21）=====
+
+    /// <summary>桌面上每一格的「状态小字」，按 ToolId 索引——刷新状态时改字不改元素。</summary>
+    private readonly Dictionary<string, TextBlock> _tileStates = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>桌面上每一格的边框，按 ToolId 索引（悬停高亮与运行中配色都靠它）。</summary>
+    private readonly Dictionary<string, Border> _tileBorders = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>上一次画出来的格子签名（ToolId 按顺序拼），用来判断「需不需要重画」。</summary>
+    private string _gridSignature = "";
 
     /// <summary>工具表的自然顺序：内置三个在前，自定义的按加入先后。</summary>
     private static List<string> NaturalToolOrder()
@@ -1561,10 +1570,68 @@ public partial class MainWindow : Window
     /// 格子回答「我把哪个放在第一格」——后者是他每天真的会看的那一眼。
     /// </para>
     /// </summary>
+    /// <summary>
+    /// v1.23：只刷新格子上那行小字，不重建格子。
+    ///
+    /// 为什么要有这么一个方法：每秒一次的状态轮询原来直接调 <see cref="RenderToolGrid"/>，
+    /// 而那个方法会 <c>Children.Clear()</c> 之后把八格全部重新造一遍——正在被长按拖起来的
+    /// 那一格因此会在一秒之内被换成一个新对象，<c>_dragTile</c> 指向的东西已经不在可视树里，
+    /// 拖拽必然断在半路。顺带每秒重解码八个图标。
+    ///
+    /// 这里只按 ToolId 找回原来的 TextBlock 改字与颜色，元素本身不动，拖拽就断不了。
+    /// </summary>
+    private void RefreshToolGridStates()
+    {
+        foreach (var kv in _tileStates)
+        {
+            try
+            {
+                var profile = ProfileRegistry.Get(kv.Key);
+                bool ready = ToolRunner.HasExecutable(profile);
+                bool runningThis = QueueService.IsRunning
+                    && string.Equals(QueueService.CurrentToolId, kv.Key, StringComparison.OrdinalIgnoreCase);
+
+                kv.Value.Text = runningThis ? "运行中" : ready ? "已就绪" : "未配置";
+                kv.Value.Foreground = runningThis
+                    ? (BrushOf("BrandBrush") ?? DotGreen)
+                    : ready ? (BrushOf("TextTertiaryBrush") ?? DotGray) : (BrushOf("WarningBrush") ?? DotYellow);
+
+                if (_tileBorders.TryGetValue(kv.Key, out var border))
+                {
+                    // 边框只在「刚跑完/刚配好」这类状态真的变了时才碰它，
+                    // 免得把鼠标正停在上面时的悬停高亮擦掉。
+                    if (border.IsMouseOver) continue;
+                    border.BorderBrush = runningThis
+                        ? (BrushOf("BrandBrush") ?? DotGray)
+                        : (BrushOf("BorderBrush") ?? DotGray);
+                }
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>
+    /// v1.23：外部状态变化时（可能是「工具集合变了」，也可能只是「某个工具装好了」）走这里。
+    /// 桌面上该摆的东西没变就只改字，变了才重画——那条每秒一次的轮询因此不会再打断拖拽。
+    /// </summary>
+    private void SyncToolGrid()
+    {
+        if (ToolGridHost == null) return;
+        string signature = string.Join("|", ToolGrid.Visible(CurrentToolOrder()));
+        if (signature != _gridSignature)
+        {
+            RenderToolGrid();
+            return;
+        }
+        RefreshToolGridStates();
+    }
+
     private void RenderToolGrid()
     {
         if (ToolGridHost == null) return;
         ToolGridHost.Children.Clear();
+        _tileStates.Clear();
+        _tileBorders.Clear();
 
         var order = CurrentToolOrder();
         var visible = ToolGrid.Visible(order);
@@ -1601,6 +1668,9 @@ public partial class MainWindow : Window
         {
             TbGridOverflow.Visibility = Visibility.Collapsed;
         }
+
+        // 记住这次画的是哪几个（顺序有意义），下次同步时用来判断「要不要重画」
+        _gridSignature = string.Join("|", visible);
     }
 
     /// <summary>第 n 个格子摆在第几行第几列（4 列 2 行）。</summary>
@@ -1722,6 +1792,19 @@ public partial class MainWindow : Window
         tile.MouseMove += ToolTile_DragMove;
         tile.MouseLeftButtonUp += ToolTile_PressUp;
 
+        // 悬停时点亮边框：格子小，没有这一步会看不出哪里能点
+        tile.MouseEnter += (_, _) => tile.BorderBrush = BrushOf("BorderStrongBrush") ?? DotGray;
+        tile.MouseLeave += (_, _) => tile.BorderBrush = runningThis
+            ? (BrushOf("BrandBrush") ?? DotGray)
+            : (BrushOf("BorderBrush") ?? DotGray);
+
+        // 交给 RefreshToolGridStates 用的两处引用（按 ToolId 找回，下次只改字不重画）
+        if (!string.IsNullOrWhiteSpace(profile.ToolId))
+        {
+            _tileStates[profile.ToolId] = stateText_;
+            _tileBorders[profile.ToolId] = tile;
+        }
+
         // 光靠 Grid 星号列还不够：窗口没真正上屏时（渲染探针、刚构造完那一刻）
         // 测量宽度是不可靠的，TextTrimming 就永远等不到有限宽度。
         // 这里在布局完成后按格子实际宽度给文字一个 MaxWidth，省略号才一定出现。
@@ -1734,12 +1817,6 @@ public partial class MainWindow : Window
                 stateText_.MaxWidth = room;
             }
         };
-
-        // 悬停时点亮边框：格子小，没有这一步会看不出哪里能点
-        tile.MouseEnter += (_, _) => tile.BorderBrush = BrushOf("BorderStrongBrush") ?? DotGray;
-        tile.MouseLeave += (_, _) => tile.BorderBrush = runningThis
-            ? (BrushOf("BrandBrush") ?? DotGray)
-            : (BrushOf("BorderBrush") ?? DotGray);
 
         return tile;
     }
@@ -1931,6 +2008,14 @@ public partial class MainWindow : Window
         tile.ClearValue(Panel.ZIndexProperty);
         TbGridHint.Text = "点一下改启动方式；按住一格拖到别处能换位置。";
 
+        // v1.23：抓起时把边框改成了品牌色，这里不论后面走哪条分支都得先还原。
+        // 以前只在下一次 MouseLeave 时才改回来，于是「拖到卡片外面松手」会留下一圈亮边。
+        bool runningThis = QueueService.IsRunning &&
+                           string.Equals(QueueService.CurrentToolId, toolId, StringComparison.OrdinalIgnoreCase);
+        tile.BorderBrush = runningThis
+            ? (BrushOf("BrandBrush") ?? DotGray)
+            : (BrushOf("BorderBrush") ?? DotGray);
+
         int target = SlotAt(dropPoint);
         if (target < 0) return;
 
@@ -2001,7 +2086,7 @@ public partial class MainWindow : Window
         if (!ProfileRegistry.IsBuiltIn(toolId))
         {
             menu.Items.Add(new Separator());
-            menu.Items.Add(MenuItem("从桌面移除（并删除这个工具）", () => OpenToolLaunch(toolId)));
+            menu.Items.Add(MenuItem("从桌面移除（并删除这个工具）", () => RemoveToolCompletely(toolId)));
         }
         tile.ContextMenu = menu;
         menu.IsOpen = true;
@@ -2017,6 +2102,47 @@ public partial class MainWindow : Window
         };
         item.Click += (_, _) => { try { action(); } catch (Exception ex) { LogService.LogEvent("桌面菜单出错：" + ex.Message); } };
         return item;
+    }
+
+    /// <summary>
+    /// v1.23：真的删掉一个自定义工具。
+    ///
+    /// 以前这个菜单项调的是 <see cref="OpenToolLaunch"/>——点「删除」打开的是设置窗，
+    /// 什么都没删，用户得在设置窗里再找一次「删除」才算数。现在就地问一句，问完才动手。
+    /// </summary>
+    private void RemoveToolCompletely(string toolId)
+    {
+        if (ProfileRegistry.IsBuiltIn(toolId)) return;
+
+        var profile = ProfileRegistry.Get(toolId);
+        string name = string.IsNullOrWhiteSpace(profile.DisplayName) ? toolId : profile.DisplayName;
+
+        bool ok = AppDialog.Show(
+            $"从桌面移除「{name}」？",
+            detail: "这个工具在管家里的档案、队列里的那一项、以及它的图标缓存都会一起清掉。\n"
+                  + "它自己的程序和配置不受影响，装在哪还在哪。",
+            kind: AppDialog.Kind.Question,
+            title: "移除工具",
+            primary: "移除",
+            secondary: "算了",
+            owner: this);
+        if (!ok) return;
+
+        if (!ProfileRegistry.Remove(toolId))
+        {
+            // Remove 拒绝内置工具；走到这里说明状态不一致，别假装删成功了
+            AppDialog.Show("这个工具没能删掉（内置工具不允许移除）。",
+                kind: AppDialog.Kind.Warning, title: "移除工具", primary: "知道了", owner: this);
+            return;
+        }
+
+        SaveToolOrder(ToolGrid.Remove(CurrentToolOrder(), toolId));
+        RebuildCustomToolCards();
+        RenderToolGrid();
+        RenderQueue();
+        RefreshToolsSummary();
+        AppState.PublishLog($"✓ 已移除工具：{name}");
+        LogService.LogEvent($"移除工具：{toolId}");
     }
 
     private void MoveTool(string toolId, int delta)
@@ -2798,7 +2924,6 @@ public partial class MainWindow : Window
     /// 中间会有一瞬间两者不一致，靠控件判断会把自己绊一下。
     /// </summary>
     private int _page = 1;
-    private int _pageWanted = 1;
 
     /// <summary>可视区宽度变了（首次上屏、改窗口大小）：把三页重新摆到各自位置，不动画。</summary>
     private void OnPageClipSized(object sender, SizeChangedEventArgs e)
@@ -2878,7 +3003,6 @@ public partial class MainWindow : Window
         {
             index = Pager.Clamp(index);
             _page = index;
-            _pageWanted = index;
 
             SyncPageSegments(index);
 

@@ -2405,6 +2405,23 @@ internal static class Program
         Check("转档案/其余用退出码", zzzProfile.PrimarySignal == CompletionSignalKind.ProcessExit0,
             zzzProfile.PrimarySignal.ToString());
 
+        // ---- 13b) 档案兜底：目录里有的工具必须拿到一份真档案（v1.23） ----
+        // v1.22 出过这个漏：引导页列了 16 个工具，档案表里只有内置三个，
+        // 用户勾了 BAAH 之后名字显示成裸 id「baah」，自动寻找也因为进程名为空永远失败。
+        var baahProfile = ProfileRegistry.Get("baah");
+        Check("兜底/名字是中文名不是裸 id", baahProfile.DisplayName == "BAAH", baahProfile.DisplayName);
+        Check("兜底/有进程名（自动寻找要用）", !string.IsNullOrWhiteSpace(baahProfile.ManagedProcessName),
+            baahProfile.ManagedProcessName);
+        Check("兜底/有最长时长", baahProfile.MaxDurationMinutes > 0, baahProfile.MaxDurationMinutes.ToString());
+        Check("兜底/有完成判定", baahProfile.PrimarySignal == CompletionSignalKind.ProcessExit0,
+            baahProfile.PrimarySignal.ToString());
+        var m7aProfile = ProfileRegistry.Get("hsr-march7th");
+        Check("兜底/命令行三月七有名字", m7aProfile.DisplayName.Contains("三月七"), m7aProfile.DisplayName);
+        // 目录里没有的必须还是老实退化，不能凭空编一个
+        var ghost = ProfileRegistry.Get("no-such-tool");
+        Check("兜底/目录里没有的仍是裸 id", ghost.DisplayName == "no-such-tool", ghost.DisplayName);
+        Check("兜底/不伪造进程名", string.IsNullOrWhiteSpace(ghost.ManagedProcessName));
+
         // ---- 14) 接线：启动窗用得上这些候选 ----
         string launchCs = ReadRepoSources("Dragon Butler/ToolLaunchWindow.xaml.cs");
         string launchXaml = ReadRepoSources("Dragon Butler/ToolLaunchWindow.xaml");
@@ -2544,6 +2561,17 @@ internal static class Program
         Check("接线/只挂一套 Up（不抢事件）",
             !mainCs.Contains("+= ToolTile_Click") && !mainCs.Contains("void ToolTile_Click"));
         Check("接线/空格子有虚线", mainCs.Contains("StrokeDashArray"));
+
+        // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
+        // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）
+        Check("接线/移除菜单真的删", mainCs.Contains("() => RemoveToolCompletely(toolId)"));
+        Check("接线/移除前会问一句", mainCs.Contains("从桌面移除「{name}」？"));
+        // ② 每秒轮询必须走 SyncToolGrid，不能每次都 Children.Clear() 重画——
+        //    否则长按拖起来的那一格一秒内就被换成新对象，拖拽必断
+        Check("接线/轮询不重画格子", mainCs.Contains("SyncToolGrid();"));
+        Check("接线/同步只在集合变了才重画", mainCs.Contains("_gridSignature"));
+        // ③ 拖拽松手必须还原边框，否则「拖到外面松手」会留一圈亮边
+        Check("接线/松手还原边框", mainCs.Contains("tile.BorderBrush = runningThis"));
 
         Console.WriteLine($"RESULT toolgrid fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
