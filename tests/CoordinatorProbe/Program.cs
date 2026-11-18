@@ -2316,7 +2316,7 @@ internal static class Program
         Check("目录/有三月七", ToolCatalog.Find("march7th") != null);
         Check("目录/有 ok-ww", ToolCatalog.Find("ok-ww") != null);
         Check("目录/绝区零", ToolCatalog.Find("zzz-od") != null);
-        Check("目录/无限暖暖", ToolCatalog.Find("ok-nte") != null);
+        Check("目录/异环", ToolCatalog.Find("ok-nte") != null);
         Check("目录/明日方舟", ToolCatalog.Find("maa") != null);
         Check("目录/找不到返回 null", ToolCatalog.Find("no-such-tool") == null);
         Check("目录/空 id 返回 null", ToolCatalog.Find("") == null);
@@ -2367,8 +2367,17 @@ internal static class Program
         var zzz = ToolCatalog.Find("zzz-od")!;
         Check("绝区零/参数全标自填", zzz.Args.All(a => a.Confidence == ArgConfidence.Custom));
         Check("绝区零/默认留空", zzz.DefaultArguments.Length == 0);
+        // ok-nte 是 v1.24 唯一「从自填升级成查到了」的工具：官方 quick-start 就写着
+        // `ok-nte.exe -t 2 -e`，而且 ok-script 在 GUI 模式下也认 -t（主窗起来后自动开跑）。
         var nte = ToolCatalog.Find("ok-nte")!;
-        Check("无限暖暖/参数全标自填", nte.Args.All(a => a.Confidence == ArgConfidence.Custom));
+        Check("异环/游戏名不再是无限暖暖", nte.GameName == "异环", nte.GameName);
+        Check("异环/进程名是 HTGame", nte.GameProcessNames.Contains("HTGame"),
+            string.Join(",", nte.GameProcessNames));
+        Check("异环/默认带 -t 2", nte.DefaultArguments.Contains("-t 2"), nte.DefaultArguments);
+        Check("异环/默认跑完退出", nte.DefaultArguments.Contains("-e"), nte.DefaultArguments);
+        Check("异环/有一条已证实参数", nte.Args.Any(a => a.Confidence == ArgConfidence.Documented
+                                                        && a.Value.Contains("-t 2")));
+        Check("异环/仍然留着「只开界面」这一档", nte.Args.Any(a => a.Value.Length == 0));
 
         // ---- 9) 按 exe 名反查 ----
         Check("反查/bettergi.exe", ToolCatalog.FromExeName("BetterGI.exe")?.ToolId == "bettergi");

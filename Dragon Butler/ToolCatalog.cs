@@ -262,16 +262,25 @@ public static class ToolCatalog
             ToolId = "ok-nte",
             DisplayName = "OK-NTE",
             ShortName = "OK-NTE",
-            GameName = "无限暖暖",
-            Blurb = "无限暖暖的日常，基于 ok-script。",
+            // v1.24 勘误：ok-nte 是《异环》的自动化（README 与 src/__init__.py 的
+            // GAME_EXE = "HTGame.exe" 都指明），此前错写成「无限暖暖」（那是另一个游戏）。
+            GameName = "异环",
+            Blurb = "异环的日常与副本，基于 ok-script，支持游戏在后台跑。",
             ExeNames = new[] { "ok-nte.exe", "oknte.exe" },
-            DefaultArguments = "",
+            // 官方 quick-start 的例子就是 "-t 2 -e"：启动后直接跑第 2 个任务，跑完退出。
+            // 第 2 个是 DailyRoutineTask（第 1 个是 LauncherTask，只负责把游戏拉起来）。
+            // 留空等于只开界面、要人自己点「开始」——那正是「得手动点一下」的来源。
+            DefaultArguments = "-t 2 -e",
             ManagedProcessName = "ok-nte",
-            GameProcessNames = new[] { "InfinityNikki" },
-            MaxDurationMinutes = 120,
+            GameProcessNames = new[] { "HTGame" },
+            MaxDurationMinutes = 180,
             Args = new()
             {
-                new ArgChoice { Value = "", Confidence = ArgConfidence.Custom, Hint = "参数没查到可靠来源；ok-script 系一般认 -t 任务号与 -e 跑完退出，可自己试" },
+                new ArgChoice { Value = "-t 2 -e", Confidence = ArgConfidence.Documented, Hint = "跑第 2 个任务（日常），跑完退出程序。官方 quick-start 的例子" },
+                new ArgChoice { Value = "-t 2", Confidence = ArgConfidence.Observed, Hint = "跑第 2 个任务（日常），跑完不退出" },
+                new ArgChoice { Value = "-t 1 -e", Confidence = ArgConfidence.Observed, Hint = "只跑第 1 个任务（把游戏拉起来），跑完退出——这就是「看起来啥也没干」的那个" },
+                new ArgChoice { Value = "-e", Confidence = ArgConfidence.Observed, Hint = "用界面里选好的任务，跑完退出" },
+                new ArgChoice { Value = "", Confidence = ArgConfidence.Documented, Hint = "只打开图形界面，任务要自己点「开始」" },
             },
         },
         new KnownTool
