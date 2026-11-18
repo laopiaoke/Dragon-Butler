@@ -751,21 +751,22 @@ internal static class RenderProbe
                         render?.Invoke(w, null);
                         w.UpdateLayout();
 
-                        // v1.22：「我的工具」格子挪到了右页（设置页），所以要先切到那一页再滚。
+                        // v1.26：格子搬回启动页（中页）那张卡里——它现在就是「睡前队列」那栏，
+                        // 所以截图要落在中页，而不是原来那张设置页。
                         // BringIntoView 在没 Show 过的窗口上不生效（没有滚动宿主测量），只能直接给偏移。
                         var showPage = typeof(MainWindow).GetMethod("ShowPage",
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        showPage?.Invoke(w, new object[] { 2, false });
+                        showPage?.Invoke(w, new object[] { 1, false });
                         w.UpdateLayout();
-                        if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer svGrid)
+                        if (w.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer svGrid)
                         {
-                            svGrid.ScrollToVerticalOffset(40);
+                            svGrid.ScrollToVerticalOffset(0);
                             w.UpdateLayout();
                         }
 
-                        // v1.22：格子从「有用的几格 + 一个＋」变成画满 2×4，
-                        // 420 高的截图只能看到第一行，第二行的虚线空格全被裁掉——看不到等于没验。
-                        bool ok = Save(w, Path.Combine(spot, "grid.png"), 980, 620);
+                        // v1.26：格子横过来之后一格 54 高，2 列 4 行，加上上面的标题行
+                        // 与下面的「一键开跑」，620 高勉强够；再矮就会把按钮裁掉。
+                        bool ok = Save(w, Path.Combine(spot, "grid.png"), 980, 640);
                         Console.WriteLine($"RENDER grid={ok}");
                         w.Close();
                     }

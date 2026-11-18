@@ -2478,8 +2478,10 @@ internal static class Program
         var natural = new List<string> { "bettergi", "march7th", "ok-ww" };
 
         // ---- 1) 常量 ----
-        Check("格子/4 列", ToolGrid.Columns == 4, ToolGrid.Columns.ToString());
-        Check("格子/2 行", ToolGrid.Rows == 2, ToolGrid.Rows.ToString());
+        // v1.26：格子搬进启动页那张卡，只有半屏宽，4 列会把每格压到 60px，
+        // 名字只剩三个字。改成 2 列 4 行，格子横向够宽，纵向四行也放得下。
+        Check("格子/2 列", ToolGrid.Columns == 2, ToolGrid.Columns.ToString());
+        Check("格子/4 行", ToolGrid.Rows == 4, ToolGrid.Rows.ToString());
         Check("格子/一共 8 格", ToolGrid.Capacity == 8, ToolGrid.Capacity.ToString());
 
         // ---- 2) Order：没排过就按自然序 ----
@@ -2569,9 +2571,19 @@ internal static class Program
         string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
         string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
         Check("接线/有 ToolGridHost", mainXaml.Contains("\"ToolGridHost\""));
-        Check("接线/ToolGridHost 是 4 列 Grid", mainXaml.Contains("<Grid x:Name=\"ToolGridHost\""));
-        Check("接线/有添加按钮", mainXaml.Contains("BtnGridAdd"));
+        Check("接线/ToolGridHost 是 Grid", mainXaml.Contains("<Grid x:Name=\"ToolGridHost\""));
+        // v1.26：队列卡标题行那个「＋ 添加」长条按钮删了——格子里本来就有一格「＋ 添加」，
+        // 一上一下两个入口只会让人犹豫点哪个。判「格子里有那个位」而不是「XAML 里有那个按钮」。
+        Check("接线/格子里有添加位", mainCs.Contains("BuildAddTile(") && mainCs.Contains("BtnAddCustomTool_Click("));
         Check("接线/有溢出提示", mainXaml.Contains("TbGridOverflow"));
+        // v1.26：格子搬进启动页那张卡（原来的「睡前队列」），设置页那张「我的工具」整块删掉——
+        // 两张卡摆同一批工具，用户要点一个工具得先想清楚它在哪一页。
+        Check("接线/格子只在启动页出现一次",
+            mainXaml.Split("x:Name=\"ToolGridHost\"").Length == 2);
+        Check("接线/队列卡标题改成我的工具", mainXaml.Contains("Text=\"我的工具\""));
+        // 判「界面上不再叫这个名字」而不是「源码里没有这四个字」：
+        // 注释里保留「原来叫睡前队列、为什么改」是有用的记录，不该被断言逼着删。
+        Check("接线/界面上不再叫睡前队列", !mainXaml.Contains("Text=\"睡前队列\""));
         Check("接线/点格子进启动设置", mainCs.Contains("OpenToolLaunch("));
         Check("接线/右键菜单", mainCs.Contains("ToolTile_RightClick"));
         Check("接线/格子里按宽度设 MaxWidth", mainCs.Contains("nameText.MaxWidth"));
@@ -2581,6 +2593,12 @@ internal static class Program
         Check("接线/长按才拖（350ms）", mainCs.Contains("_dragHold"));
         Check("接线/拖动用 MoveTo", mainCs.Contains("ToolGrid.MoveTo("));
         Check("接线/落点算格子", mainCs.Contains("SlotAt("));
+        // v1.26：格子＝队列顺序。摆什么、按什么顺序摆，答案必须来自队列而不是「装了哪些工具」。
+        Check("接线/格子顺序来自队列", mainCs.Contains("AppState.Settings.Queue"));
+        Check("接线/排序会重排队列", mainCs.Contains("rebuilt"));
+        Check("接线/能切今晚跑不跑", mainCs.Contains("ToggleQueueEnabled("));
+        Check("接线/右键里有那一项", mainCs.Contains("今晚不跑它"));
+        Check("接线/不跑的那格压暗", mainCs.Contains("Opacity = onDuty ? 1.0 : 0.55"));
         // 判「没挂接」而不是「没出现」：注释里仍会提到这个名字（说明为什么改掉），
         // 那是有用的记录，不该被断言逼着删。
         Check("接线/只挂一套 Up（不抢事件）",

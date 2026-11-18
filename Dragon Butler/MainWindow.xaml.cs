@@ -68,7 +68,6 @@ public partial class MainWindow : Window
     private bool _suppressToggle;
     private bool _suppressChips;
     private bool _suppressNotifyChips;
-    private bool _suppressQueueUi;
     private DateTime _lastScheduleRun = DateTime.MinValue;
 
     private readonly DispatcherTimer _scheduleTimer = new() { Interval = TimeSpan.FromSeconds(30) };
@@ -98,7 +97,6 @@ public partial class MainWindow : Window
     private readonly List<GroupPickItem> _groupPicks = new();
     private readonly List<string> _selectedOrder = new();
     private string _groupSignature = "\u0000";
-    private int _dragFrom = -1;
 
     public MainWindow()
     {
@@ -715,173 +713,69 @@ public partial class MainWindow : Window
         }));
     }
 
-    /// <summary>重建队列列表（顺序 = 设置里的顺序）。</summary>
+    /// <summary>
+    /// v1.26：队列不再画成「一行一个工具」的列表——那张表已经换成上面那盘格子了。
+    ///
+    /// <para>
+    /// 这里保留下来是因为它是「队列变了」的唯一收口：勾选、拖动排序、增删工具、
+    /// 按日计划改完，全项目都是调它。现在它做的三件事是：给出网格该摆什么（走
+    /// <see cref="SyncToolGrid"/>）、更新空队列提示、刷新下面那行汇总。
+    /// 原来往 <c>QueueHost</c> 里塞 34 高行的循环删掉了——容器现在藏着，
+    /// 往里面画东西既不显示又要为每个工具解一次图标。
+    /// </para>
+    /// </summary>
     private void RenderQueue()
     {
         try
         {
-            _suppressQueueUi = true;
-            QueueHost.Children.Clear();
-
             var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
-            int interval = Math.Max(0, AppState.Settings.QueueIntervalMinutes);
-
-            for (int i = 0; i < queue.Count; i++)
-            {
-                var entry = queue[i];
-                var profile = ProfileRegistry.Get(entry.ToolId);
-                QueueHost.Children.Add(BuildQueueRow(entry, profile, i));
-                if (i < queue.Count - 1 && interval > 0)
-                {
-                    QueueHost.Children.Add(new TextBlock
-                    {
-                        Text = $"· 间隔 {interval} 分钟 ·",
-                        FontSize = 10,
-                        Margin = new Thickness(24, 2, 0, 2),
-                        Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
-                    });
-                }
-            }
-
             bool anyEnabled = queue.Any(e => e.Enabled);
             QueueEmptyHint.Visibility = anyEnabled ? Visibility.Collapsed : Visibility.Visible;
-            _suppressQueueUi = false;
+
+            SyncToolGrid();
             RefreshPlanSummary();
             UpdateQueueButtons();
         }
         catch (Exception ex)
         {
-            _suppressQueueUi = false;
             LogService.LogEvent("刷新队列失败：" + ex.Message);
         }
     }
 
-    private Border BuildQueueRow(QueueEntry entry, ToolProfile profile, int index)
+    /// <summary>
+    /// v1.26：格子里那个工具的队列项（格子在不在 = 今晚跑不跑）。
+    /// 返回 null 表示这个工具已经不在队列里了——渲染时会把它当作「有档案但没上桌」。
+    /// </summary>
+    private static QueueEntry? QueueEntryOf(string toolId)
+        => (AppState.Settings.Queue ?? new List<QueueEntry>())
+            .FirstOrDefault(e => string.Equals(e.ToolId, toolId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// v1.26：把某个工具从「今晚跑」切到「今晚不跑」，或者反过来。
+    ///
+    /// <para>
+    /// 原来这件事由队列行上的勾选框做。列表换成格子之后勾选框没了，
+    /// 但这个能力必须留着——不然「今天不想跑它」就只能去删工具。
+    /// 收进右键菜单：格子本身要留给「点一下改设置」和「按住拖」，塞不下第三个动作。
+    /// </para>
+    /// </summary>
+    private void ToggleQueueEnabled(string toolId)
     {
-        bool runningThis = QueueService.IsRunning &&
-                           string.Equals(QueueService.CurrentToolId, entry.ToolId, StringComparison.OrdinalIgnoreCase);
-        var result = QueueService.LastResults.FirstOrDefault(r => string.Equals(r.ToolId, entry.ToolId, StringComparison.OrdinalIgnoreCase));
+        var entry = QueueEntryOf(toolId);
+        if (entry == null) return;
 
-        string glyph = "○";
-        Brush color = BrushOf("TextTertiaryBrush") ?? DotGray;
-        if (runningThis) { glyph = "▶"; color = BrushOf("BrandBrush") ?? DotGreen; }
-        else if (result != null)
-        {
-            if (result.Skipped) { glyph = "‖"; color = BrushOf("TextTertiaryBrush") ?? DotGray; }
-            else switch (result.State)
-            {
-                case ToolRunState.Done: glyph = "✓"; color = BrushOf("SuccessBrush") ?? DotGreen; break;
-                case ToolRunState.Failed:
-                case ToolRunState.Timeout: glyph = "✗"; color = BrushOf("DangerBrush") ?? DotRed; break;
-                case ToolRunState.Halted:
-                case ToolRunState.Stalled: glyph = "‖"; color = BrushOf("WarningBrush") ?? DotYellow; break;
-            }
-        }
+        entry.Enabled = !entry.Enabled;
+        AppState.SaveSettings();
 
-        var grid = new Grid { Height = 34 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+        string name = ProfileRegistry.Get(toolId).DisplayName;
+        if (string.IsNullOrWhiteSpace(name)) name = toolId;
+        AppState.PublishLog(entry.Enabled ? $"已加入队列：{name}" : $"已从队列移除：{name}");
+        LogService.LogEvent($"队列勾选：{toolId}={entry.Enabled}");
 
-        var drag = new TextBlock
-        {
-            Text = "⋮⋮",
-            FontSize = 11,
-            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
-            VerticalAlignment = VerticalAlignment.Center,
-            Cursor = Cursors.SizeNS,
-            ToolTip = "拖动排序",
-        };
-        grid.Children.Add(drag);
-
-        var check = new CheckBox
-        {
-            IsChecked = entry.Enabled,
-            Tag = entry.ToolId,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(2, 0, 0, 0),
-        };
-        check.Checked += QueueCheck_Changed;
-        check.Unchecked += QueueCheck_Changed;
-        Grid.SetColumn(check, 1);
-        grid.Children.Add(check);
-
-        var state = new TextBlock
-        {
-            Text = glyph,
-            FontSize = 12,
-            Foreground = color,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
-        Grid.SetColumn(state, 2);
-        grid.Children.Add(state);
-
-        var name = new TextBlock
-        {
-            Text = profile.DisplayName,
-            FontSize = 12.5,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = entry.Enabled ? (BrushOf("TextPrimaryBrush") ?? Brushes.Black) : (BrushOf("TextTertiaryBrush") ?? DotGray),
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        };
-        Grid.SetColumn(name, 3);
-        grid.Children.Add(name);
-
-        // v1.5：这一项每周跑几天（点一下打开按日计划矩阵）
-        int planMask = entry.WeekdayMask & 0x7F;
-        int planDays = 0;
-        for (int d = 0; d < 7; d++) if ((planMask & (1 << d)) != 0) planDays++;
-        var plan = new TextBlock
-        {
-            Text = planDays == 7 ? "每天" : $"{planDays}天",
-            FontSize = 9.5,
-            Tag = "plan",
-            Cursor = Cursors.Hand,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            ToolTip = "按日计划：" + WeeklyPlanWindow.MaskText(planMask) + "（点一下修改）",
-            Foreground = planDays == 0
-                ? (BrushOf("WarningBrush") ?? DotYellow)
-                : (BrushOf("TextTertiaryBrush") ?? DotGray),
-        };
-        plan.MouseLeftButtonUp += (_, _) => OpenWeeklyPlan();
-        Grid.SetColumn(plan, 4);
-        grid.Children.Add(plan);
-
-        var chev = new TextBlock
-        {
-            Text = "☰",
-            FontSize = 10,
-            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
-        };
-        Grid.SetColumn(chev, 5);
-        grid.Children.Add(chev);
-
-        var border = new Border
-        {
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(6, 0, 6, 0),
-            Margin = new Thickness(0, 1, 0, 1),
-            Background = Brushes.Transparent,
-            Child = grid,
-            Tag = index,
-            // v1.9：悬停能看到这一项等谁（没写依赖就是空白，不占视觉）
-            ToolTip = BuildQueueTip(entry, result),
-        };
-        border.MouseLeftButtonDown += QueueRow_MouseDown;
-        border.MouseLeftButtonUp += QueueRow_MouseUp;
-        border.MouseEnter += (_, _) => border.Background = BrushOf("HoverBrush") ?? Brushes.Transparent;
-        border.MouseLeave += (_, _) => border.Background = Brushes.Transparent;
-        return border;
+        RenderQueue();
     }
 
-    /// <summary>行悬停提示：依赖在前，上次结果在后（都没有就返回 null，不留空气泡）。</summary>
+    /// <summary>格子悬停提示：依赖在前，上次结果在后（都没有就返回 null，不留空气泡）。</summary>
     private static string? BuildQueueTip(QueueEntry entry, QueueItemResult? result)
     {
         var parts = new List<string>();
@@ -900,63 +794,6 @@ public partial class MainWindow : Window
         // v1.9：切片设过才提一句，没设就别占地方（默认就是全局勾选）
         if (!GroupSlicing.UsesGlobal(entry.Groups)) parts.Add(GroupSlicing.Describe(entry.Groups));
         return parts.Count == 0 ? null : string.Join("\n", parts);
-    }
-
-    private void QueueCheck_Changed(object sender, RoutedEventArgs e)
-
-    {
-        if (_suppressQueueUi) return;
-        if (sender is not CheckBox cb || cb.Tag is not string toolId) return;
-        var entry = (AppState.Settings.Queue ?? new List<QueueEntry>())
-            .FirstOrDefault(q => string.Equals(q.ToolId, toolId, StringComparison.OrdinalIgnoreCase));
-        if (entry == null) return;
-        entry.Enabled = cb.IsChecked == true;
-        AppState.SaveSettings();
-        RenderQueue();
-        UpdateQueueButtons();
-        AppState.PublishLog(entry.Enabled ? $"已加入队列：{ProfileRegistry.Get(toolId).DisplayName}" : $"已从队列移除：{ProfileRegistry.Get(toolId).DisplayName}");
-        LogService.LogEvent($"队列勾选：{toolId}={entry.Enabled}");
-    }
-
-    private void QueueRow_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.OriginalSource is TextBlock { Tag: "plan" }) return;
-        if (sender is Border b && b.Tag is int idx && e.OriginalSource is not CheckBox)
-        {
-            _dragFrom = idx;
-            b.CaptureMouse();
-        }
-    }
-
-    private void QueueRow_MouseUp(object sender, MouseButtonEventArgs e)
-    {
-        try
-        {
-            if (sender is not Border b) return;
-            b.ReleaseMouseCapture();
-            if (_dragFrom < 0) return;
-
-            var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
-            int target = queue.Count - 1;
-            for (int i = 0; i < QueueHost.Children.Count; i++)
-            {
-                if (QueueHost.Children[i] is not Border row) continue;
-                if (row.Tag is not int rowIndex) continue;
-                var pos = e.GetPosition(row);
-                if (pos.Y < row.ActualHeight) { target = rowIndex; break; }
-            }
-            if (target != _dragFrom && _dragFrom < queue.Count && target < queue.Count)
-            {
-                var item = queue[_dragFrom];
-                queue.RemoveAt(_dragFrom);
-                queue.Insert(target, item);
-                AppState.SaveSettings();
-                LogService.LogEvent($"队列排序：{item.ToolId} {_dragFrom} → {target}");
-                RenderQueue();
-            }
-            _dragFrom = -1;
-        }
-        catch { _dragFrom = -1; }
     }
 
     private void UpdateQueueButtons()
@@ -1537,16 +1374,25 @@ public partial class MainWindow : Window
     /// <summary>上一次画出来的格子签名（ToolId 按顺序拼），用来判断「需不需要重画」。</summary>
     private string _gridSignature = "";
 
-    /// <summary>工具表的自然顺序：内置三个在前，自定义的按加入先后。</summary>
+    /// <summary>
+    /// 工具表的自然顺序 = 队列里的先后。
+    ///
+    /// <para>
+    /// v1.26：原来是「<see cref="ProfileRegistry.All"/> 的顺序」。格子搬进启动页那张卡之后，
+    /// 格子回答的问题变了——它不再只是「这台机器上有哪些工具」，而是「今晚按什么顺序跑」。
+    /// 那个问题的答案只在队列里，所以这里改成读队列；不在队列里的工具不上桌面
+    /// （要加它就去点「＋ 添加一个工具」，或者走第一次使用的引导）。
+    /// </para>
+    /// </summary>
     private static List<string> NaturalToolOrder()
     {
         var ids = new List<string>();
         try
         {
-            foreach (var p in ProfileRegistry.All)
+            foreach (var entry in AppState.Settings.Queue ?? new List<QueueEntry>())
             {
-                if (string.IsNullOrWhiteSpace(p.ToolId)) continue;
-                if (!ids.Contains(p.ToolId, StringComparer.OrdinalIgnoreCase)) ids.Add(p.ToolId);
+                if (string.IsNullOrWhiteSpace(entry.ToolId)) continue;
+                if (!ids.Contains(entry.ToolId, StringComparer.OrdinalIgnoreCase)) ids.Add(entry.ToolId);
             }
         }
         catch { }
@@ -1556,9 +1402,44 @@ public partial class MainWindow : Window
     private static List<string> CurrentToolOrder()
         => ToolGrid.Order(NaturalToolOrder(), AppState.Settings.ToolOrder);
 
+    /// <summary>
+    /// 存下桌面顺序。
+    ///
+    /// <para>
+    /// v1.26：除了写 <see cref="AppSettings.ToolOrder"/>，还要把**队列本身**按这个顺序重排。
+    /// 格子现在是「今晚按什么顺序跑」的那张图，如果只存偏好、不重排队列，
+    /// 用户在格子上拖了半天，实际执行仍是老顺序——那就是骗人。
+    /// 重排时按 ToolId 把原来那一项整个搬过去，勾选状态、按日计划、依赖、配置组都不动。
+    /// </para>
+    /// </summary>
     private static void SaveToolOrder(List<string> order)
     {
         AppState.Settings.ToolOrder = order.ToArray();
+
+        try
+        {
+            var queue = AppState.Settings.Queue;
+            if (queue != null && queue.Count > 1)
+            {
+                var byId = new Dictionary<string, QueueEntry>(StringComparer.OrdinalIgnoreCase);
+                foreach (var e in queue)
+                    if (!string.IsNullOrWhiteSpace(e.ToolId)) byId[e.ToolId] = e;
+
+                var rebuilt = new List<QueueEntry>();
+                foreach (string id in order)
+                    if (byId.TryGetValue(id, out var hit) && !rebuilt.Contains(hit)) rebuilt.Add(hit);
+                // 队列里还有、但这次顺序表里没有的（比如超过 8 格排不进桌面的），原序补在后面
+                foreach (var e in queue)
+                    if (!rebuilt.Contains(e)) rebuilt.Add(e);
+
+                AppState.Settings.Queue = rebuilt;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("重排队列失败：" + ex.Message);
+        }
+
         AppState.SaveSettings();
     }
 
@@ -1661,7 +1542,9 @@ public partial class MainWindow : Window
         int overflow = ToolGrid.OverflowCount(order);
         if (overflow > 0)
         {
-            TbGridOverflow.Text = $"还有 {overflow} 个工具排在桌面之外——桌面只有 8 格。右键点任意工具「移到最后」，把它换上来。";
+            // v1.26：格子搬进启动页之后只剩 8 格，装不下的要明说去哪儿找，
+            // 否则「装了的工具不见了」会被当成丢档案。
+            TbGridOverflow.Text = $"还有 {overflow} 个工具没摆上来——这里只有 8 格。右键点任意一格「移到最后」，把它换上来。";
             TbGridOverflow.Visibility = Visibility.Visible;
         }
         else
@@ -1673,7 +1556,7 @@ public partial class MainWindow : Window
         _gridSignature = string.Join("|", visible);
     }
 
-    /// <summary>第 n 个格子摆在第几行第几列（4 列 2 行）。</summary>
+    /// <summary>第 n 个格子摆在第几行第几列（2 列 4 行）。</summary>
     private static void PlaceInGrid(UIElement element, int slot)
     {
         if (element is not FrameworkElement fe) return;
@@ -1690,11 +1573,17 @@ public partial class MainWindow : Window
         bool runningThis = QueueService.IsRunning
             && string.Equals(QueueService.CurrentToolId, profile.ToolId, StringComparison.OrdinalIgnoreCase);
 
+        // v1.26：格子在不在桌上＝今晚跑不跑。原来这件事由队列行的勾选框表达，
+        // 列表换成格子后勾选框没了，所以状态得直接画在格子上：
+        // 关了的那一格压暗、状态字写「今晚不跑」，一眼能分出「今晚要跑的」和「装着但我先不用」。
+        var queueEntry = QueueEntryOf(profile.ToolId);
+        bool onDuty = queueEntry == null || queueEntry.Enabled;
+
         var icon = new Border
         {
-            Width = 34,
-            Height = 34,
-            CornerRadius = new CornerRadius(10),
+            Width = 32,
+            Height = 32,
+            CornerRadius = new CornerRadius(9),
             Background = BrushOf("InsetBrush") ?? DotGray,
             BorderBrush = BrushOf("BorderBrush") ?? DotGray,
             BorderThickness = new Thickness(1),
@@ -1713,7 +1602,7 @@ public partial class MainWindow : Window
             icon.Child = new TextBlock
             {
                 Text = letter,
-                FontSize = 15,
+                FontSize = 14,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -1721,60 +1610,74 @@ public partial class MainWindow : Window
             };
         }
 
-        string stateText = runningThis ? "运行中" : ready ? "已就绪" : "未配置";
-        var stateBrush = runningThis
-            ? (BrushOf("BrandBrush") ?? DotGreen)
+        string stateText = !onDuty ? "今晚不跑" : runningThis ? "运行中" : ready ? "已就绪" : "未配置";
+        var stateBrush = !onDuty
+            ? (BrushOf("TextTertiaryBrush") ?? DotGray)
+            : runningThis ? (BrushOf("BrandBrush") ?? DotGreen)
             : ready ? (BrushOf("TextTertiaryBrush") ?? DotGray) : (BrushOf("WarningBrush") ?? DotYellow);
 
+        // v1.26：格子从「图标在上、名字在下」改成横排（图标左、名字与状态右）。
+        //
+        // 原因是格子搬进启动页那张卡之后，一列只有半屏宽的一半——竖排里图标居中、
+        // 名字字距被拉得很开，看着像八个大方块而不是八个工具；而且竖排一格要 96 高，
+        // 四行下来 400 多像素，把下面「一键开跑」挤出屏幕。横排一格 54 高，四行刚好放得下。
+        //
         // 用 Grid 而不是 StackPanel：StackPanel 给子元素的可用宽度是无限的，
         // TextBlock 拿到无限宽就不会触发 TextTrimming（v1.21 截了三次才发现）。
-        // Grid 会把列宽约束传给子元素，省略号才有机会出现。
         var stack = new Grid();
+        stack.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         // 默认列是 Auto＝按内容量宽＝无限宽，TextTrimming 永远不会生效。
         // 必须显式给一个星号列，宽度才由格子决定。
         stack.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        Grid.SetRowSpan(icon, 2);
+        Grid.SetColumn(icon, 0);
         stack.Children.Add(icon);
+
         var nameText = new TextBlock
         {
             Text = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.ToolId : profile.DisplayName,
             FontSize = 12.5,
             FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 8, 0, 0),
+            Margin = new Thickness(9, 0, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            TextAlignment = TextAlignment.Center,
+            TextAlignment = TextAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
         };
-        Grid.SetRow(nameText, 1);
+        Grid.SetRow(nameText, 0);
+        Grid.SetColumn(nameText, 1);
         stack.Children.Add(nameText);
 
         var stateText_ = new TextBlock
         {
             Text = stateText,
             FontSize = 10.5,
-            Margin = new Thickness(0, 3, 0, 0),
+            Margin = new Thickness(9, 2, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            TextAlignment = TextAlignment.Center,
+            TextAlignment = TextAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
             Foreground = stateBrush,
         };
-        Grid.SetRow(stateText_, 2);
+        Grid.SetRow(stateText_, 1);
+        Grid.SetColumn(stateText_, 1);
         stack.Children.Add(stateText_);
-
-        Grid.SetRow(icon, 0);
 
         var tile = new Border
         {
-            Margin = new Thickness(5),
-            Padding = new Thickness(6, 12, 6, 10),
-            MinHeight = 96,     // 名字一行与两行的格子要一样高，否则第二行会参差
+            Margin = new Thickness(4),
+            Padding = new Thickness(10, 9, 10, 9),
+            MinHeight = 54,     // 名字一行与两行的格子要一样高，否则第二行会参差
             // 长名字在被裁掉之前会先画到格子外面去（窗口没 Show 过时 UniformGrid 量到的宽度是无限大）。
             // 裁一刀是唯一能保证「长名字不会顶穿格子」的办法，配合 TextTrimming 才有省略号。
             ClipToBounds = true,
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(10),
             Background = BrushOf("CardBg2Brush") ?? BrushOf("ControlBgBrush") ?? DotGray,
             BorderBrush = runningThis ? (BrushOf("BrandBrush") ?? DotGray) : (BrushOf("BorderBrush") ?? DotGray),
             BorderThickness = new Thickness(1),
@@ -1782,6 +1685,9 @@ public partial class MainWindow : Window
             ToolTip = BuildToolTileTip(profile, ready, runningThis),
             Tag = profile.ToolId,
             Cursor = System.Windows.Input.Cursors.Hand,
+            // v1.26：「今晚不跑」的那一格压暗。勾选框没了，这是唯一还能一眼分出
+            // 「今晚要跑」和「装着但先不用」的地方——但别压到看不清字，0.55 是下限。
+            Opacity = onDuty ? 1.0 : 0.55,
         };
         tile.MouseRightButtonUp += ToolTile_RightClick;
         // v1.22：长按拖拽。按下去 350ms 不动才算「抓起」，轻点仍然是打开设置——
@@ -1829,34 +1735,42 @@ public partial class MainWindow : Window
         if (known != null && !string.IsNullOrWhiteSpace(known.GameName)) lines.Add("对应的游戏：" + known.GameName);
         lines.Add(ready ? "程序：" + profile.ExecutablePath : "还没选程序，点进来选一次");
         if (!string.IsNullOrWhiteSpace(profile.LaunchArguments)) lines.Add("启动参数：" + profile.LaunchArguments);
-        lines.Add("左键改启动设置 · 右键排序或删除");
+        var entry = QueueEntryOf(profile.ToolId);
+        if (entry != null && !entry.Enabled) lines.Add("今晚不跑（右键可以改回来）");
+        lines.Add("左键改启动设置 · 右键改顺序、今晚跑不跑");
         return string.Join("\n", lines);
     }
 
     private Border BuildAddTile()
     {
-        var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        var stack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
         stack.Children.Add(new TextBlock
         {
             Text = "＋",
-            FontSize = 20,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            FontSize = 15,
+            VerticalAlignment = VerticalAlignment.Center,
             Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
         });
         stack.Children.Add(new TextBlock
         {
             Text = "添加",
             FontSize = 10.5,
-            Margin = new Thickness(0, 4, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
             Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
         });
 
         var tile = new Border
         {
-            Margin = new Thickness(5),
-            Padding = new Thickness(6, 12, 6, 10),
-            CornerRadius = new CornerRadius(12),
+            Margin = new Thickness(4),
+            Padding = new Thickness(10, 9, 10, 9),
+            MinHeight = 54,
+            CornerRadius = new CornerRadius(10),
             Background = Brushes.Transparent,
             BorderBrush = BrushOf("BorderBrush") ?? DotGray,
             BorderThickness = new Thickness(1),
@@ -1883,8 +1797,8 @@ public partial class MainWindow : Window
             Stroke = BrushOf("BorderBrush") ?? DotGray,
             StrokeThickness = 1,
             StrokeDashArray = new DoubleCollection { 3, 3 },
-            RadiusX = 12,
-            RadiusY = 12,
+            RadiusX = 10,
+            RadiusY = 10,
             Fill = Brushes.Transparent,
             IsHitTestVisible = false,
         };
@@ -1905,10 +1819,10 @@ public partial class MainWindow : Window
 
         return new Border
         {
-            Margin = new Thickness(5),
-            Padding = new Thickness(6, 12, 6, 10),
-            MinHeight = 96,
-            CornerRadius = new CornerRadius(12),
+            Margin = new Thickness(4),
+            Padding = new Thickness(10, 9, 10, 9),
+            MinHeight = 54,
+            CornerRadius = new CornerRadius(10),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Cursor = System.Windows.Input.Cursors.Hand,
@@ -2006,7 +1920,7 @@ public partial class MainWindow : Window
         tile.RenderTransform = Transform.Identity;
         tile.Opacity = 1;
         tile.ClearValue(Panel.ZIndexProperty);
-        TbGridHint.Text = "点一下改启动方式；按住一格拖到别处能换位置。";
+        TbGridHint.Text = "点一下改启动方式；按住一格拖到别处能换顺序；右键能改「今晚跑不跑」。";
 
         // v1.23：抓起时把边框改成了品牌色，这里不论后面走哪条分支都得先还原。
         // 以前只在下一次 MouseLeave 时才改回来，于是「拖到卡片外面松手」会留下一圈亮边。
@@ -2080,9 +1994,23 @@ public partial class MainWindow : Window
             Padding = new Thickness(4),
         };
         menu.Items.Add(MenuItem("改启动设置", () => OpenToolLaunch(toolId)));
-        menu.Items.Add(MenuItem("往左一格", () => MoveTool(toolId, -1)));
-        menu.Items.Add(MenuItem("往右一格", () => MoveTool(toolId, 1)));
+        // v1.26：格子现在表示「今晚按什么顺序跑」，所以菜单说的是队列里的位置，
+        // 不是屏幕上往左往右——2 列 4 行的时候「往右一格」和「下一个跑」是两件事，
+        // 说成左右会让人以为只是挪格子。
+        menu.Items.Add(MenuItem("往前挪一个", () => MoveTool(toolId, -1)));
+        menu.Items.Add(MenuItem("往后挪一个", () => MoveTool(toolId, 1)));
         menu.Items.Add(MenuItem("移到最后", () => MoveToolToEnd(toolId)));
+
+        // v1.26：原来队列行上的勾选框没了，这个开关得有个地方放。
+        var entry = QueueEntryOf(toolId);
+        if (entry != null)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(MenuItem(
+                entry.Enabled ? "今晚不跑它" : "今晚跑它",
+                () => ToggleQueueEnabled(toolId)));
+        }
+
         if (!ProfileRegistry.IsBuiltIn(toolId))
         {
             menu.Items.Add(new Separator());

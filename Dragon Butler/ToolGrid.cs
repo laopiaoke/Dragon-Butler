@@ -18,9 +18,17 @@ namespace DragonButler;
 /// </summary>
 public static class ToolGrid
 {
-    /// <summary>桌面一共 8 格（2 行 4 列）。超出的工具仍存在于工具表里，只是排不进桌面。</summary>
-    public const int Columns = 4;
-    public const int Rows = 2;
+    /// <summary>
+    /// 桌面一共 8 格。
+    /// <para>
+    /// v1.26：从 4 列 2 行改成 **2 列 4 行**。格子从设置页搬进启动页那张卡以后，
+    /// 卡本身只占半屏宽（和定时卡并排），4 列会把每个格子压到 60px 上下——
+    /// 名字只剩三个字、图标和状态字挤成一团。2 列之后每格约 150px，
+    /// 名字能写全，行数多出来的两行反正有滚动条。
+    /// </para>
+    /// </summary>
+    public const int Columns = 2;
+    public const int Rows = 4;
     public const int Capacity = Columns * Rows;
 
     /// <summary>
