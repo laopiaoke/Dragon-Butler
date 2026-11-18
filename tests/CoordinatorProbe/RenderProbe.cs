@@ -722,8 +722,9 @@ internal static class RenderProbe
 
                     // v1.15 / L2：工具设置收成一行之后，得看两件事——
                     // 收起时那一行的摘要说得对不对，展开后原来三张卡还剩没剩。
-                    // v1.21：桌面网格（2×4）。一张就够——格子本身的形态是固定的，
+                    // v1.21：桌面网格。一张就够——格子本身的形态是固定的，
                     // 要看的是「三个内置 + 一个加号格」和长名字会不会把格子撑歪。
+                    // v1.27：桌面能翻页了，所以造两页，顺便看页码点长什么样。
                     if (mode == "grid" || mode == "all")
                     {
                         SeedSampleQueue();
@@ -743,12 +744,20 @@ internal static class RenderProbe
                             };
                             ProfileRegistry.Save(extra);
                             AppState.Settings.ToolOrder = new[] { "bettergi", "march7th", "ok-ww", "demo-long" };
+                            // v1.27：桌面内容以 ToolPages 为准，ToolOrder 只是它的拍平结果。
+                            // 只设 ToolOrder 会渲染出一张空的第一页——页码点也只有一个。
+                            AppState.Settings.ToolPages = new List<List<string>>
+                            {
+                                new() { "bettergi", "march7th", "ok-ww", "demo-long" },
+                                new(),
+                            };
                         }
                         catch (Exception ex) { Console.WriteLine("SEED-GRID-FAIL " + ex.Message); }
 
                         var render = typeof(MainWindow).GetMethod("RenderToolGrid",
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        render?.Invoke(w, null);
+                        // v1.27：签名加了 bool animate，反射要按新签名传参，否则抛 TargetParameterCountException 被吞掉、格子根本没重画。
+                        render?.Invoke(w, new object[] { false });
                         w.UpdateLayout();
 
                         // v1.26：格子搬回启动页（中页）那张卡里——它现在就是「睡前队列」那栏，
@@ -764,10 +773,34 @@ internal static class RenderProbe
                             w.UpdateLayout();
                         }
 
-                        // v1.26：格子横过来之后一格 54 高，2 列 4 行，加上上面的标题行
-                        // 与下面的「一键开跑」，620 高勉强够；再矮就会把按钮裁掉。
+                        // v1.27：一页 2 列 3 行（比 v1.26 少一行，多出页码点那一行），
+                        // 加上标题行与下面的「一键开跑」，620 够用。
                         bool ok = Save(w, Path.Combine(spot, "grid.png"), 980, 640);
                         Console.WriteLine($"RENDER grid={ok}");
+                        w.Close();
+                    }
+
+                    // v1.27：时间选择器的滚筒视图单独出一张。
+                    // 用户报的「数字偏上」只有在真窗口里按真字号画出来才看得见——
+                    // 槽位是 44 高、字号 30，差 3px 就能看出来，探针断言测不到。
+                    if (mode == "timepicker" || mode == "all")
+                    {
+                        var w = new Window
+                        {
+                            Background = (Brush)(Application.Current.TryFindResource("CardBgBrush") ?? Brushes.Black),
+                            Width = 420,
+                            SizeToContent = SizeToContent.Height,
+                        };
+                        var ctrl = new TimePickerControl();
+                        ctrl.InitFrom(10, 2);
+                        // SetMode 是私有的：滚筒视图只能从里面切，外面没有公开入口。
+                        var setMode = typeof(TimePickerControl).GetMethod("SetMode",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        setMode?.Invoke(ctrl, new object[] { Enum.Parse(setMode.GetParameters()[0].ParameterType, "Drum") });
+                        w.Content = ctrl;
+                        w.UpdateLayout();
+                        bool ok = Save(w, Path.Combine(spot, "timepicker.png"), 420, 0);
+                        Console.WriteLine($"RENDER timepicker={ok}");
                         w.Close();
                     }
 

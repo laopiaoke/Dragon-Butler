@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -590,19 +590,31 @@ public partial class TimePickerControl : UserControl
 
         var canvas = new Canvas { Width = 90, Height = Viewport };
         var slots = new List<TextBlock>(9);
+        var cells = new List<Grid>(9);
         for (int i = 0; i < 9; i++)
         {
+            // v1.27：外面套一层固定 44 高的 Grid，文字用 VerticalAlignment=Center 摆进去。
+            // 之前直接把 TextBlock 设成 Height=44 塞进 Canvas——TextBlock 没有
+            // VerticalContentAlignment，文字永远贴着自身顶部画，字号再大也是顶对齐，
+            // 于是「10」「02」看起来整体偏上。垂直居中交给布局系统，不再手算偏移。
+            var cell = new Grid
+            {
+                Width = 90,
+                Height = ItemHeight,
+            };
+            Canvas.SetLeft(cell, 0);
             var tb = new TextBlock
             {
                 FontSize = 13,
-                Width = 90,
-                Height = ItemHeight,
                 TextAlignment = TextAlignment.Center,
                 FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
             };
             tb.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
-            Canvas.SetLeft(tb, 0);
-            canvas.Children.Add(tb);
+            cell.Children.Add(tb);
+            canvas.Children.Add(cell);
+            cells.Add(cell);
             slots.Add(tb);
         }
         host.Children.Add(canvas);
@@ -631,6 +643,7 @@ public partial class TimePickerControl : UserControl
             Host = host,
             Canvas = canvas,
             Slots = slots,
+            Cells = cells,
             FadeTop = fadeTop,
             FadeBottom = fadeBottom,
             Count = count,
@@ -965,6 +978,8 @@ public partial class TimePickerControl : UserControl
         public Grid Host = null!;
         public Canvas Canvas = null!;
         public List<TextBlock> Slots = null!;
+        /// <summary>每个槽位的固定高容器（44 高），文字在它内部垂直居中</summary>
+        public List<Grid> Cells = null!;
         public Rectangle FadeTop = null!;
         public Rectangle FadeBottom = null!;
         public int Count;
@@ -1002,7 +1017,7 @@ public partial class TimePickerControl : UserControl
                 int off = j - 4;
                 string text = Mod(rp + off, Count).ToString("00");
                 if (tb.Text != text) tb.Text = text;
-                Canvas.SetTop(tb, CenterTop + ItemHeight * off - ItemHeight * sub);
+                Canvas.SetTop(Cells[j], CenterTop + ItemHeight * off - ItemHeight * sub);
 
                 double d = Math.Abs(off - sub);
                 int tier = d <= 0.5 ? 0 : d <= 1.5 ? 1 : d <= 2.5 ? 2 : 3;

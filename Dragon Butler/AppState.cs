@@ -178,6 +178,17 @@ public class AppSettings
     public string[] ToolOrder { get; set; } = Array.Empty<string>();
 
     /// <summary>
+    /// v1.27：桌面分页。每页最多 6 个工具（2 列 3 行），页与页之间可以左右滑。
+    /// <para>
+    /// 和 <see cref="ToolOrder"/> 的关系：两者都在时以这里为准，
+    /// 这里为空就由 <see cref="ToolOrder"/> 按每 6 个切一刀迁移上来（见 LoadSettings）。
+    /// 存页面而不是「顺序 + 页码数字」，是因为删掉一整页之后页码必须能重排，
+    /// 而重排一个数组只是 RemoveAt，重排一堆页码数字要逐个改。
+    /// </para>
+    /// </summary>
+    public List<List<string>> ToolPages { get; set; } = new();
+
+    /// <summary>
     /// v1.9 / P2：上一次**跑成功**时的 BetterGI 版本（只存主版本段，如 1.2.3）。
     /// 下次开跑前拿它比对，变了就提醒一句「可能不是你的配置出问题」。空＝还没记录过。
     /// </summary>
@@ -478,6 +489,20 @@ public static class AppState
                                   || string.Equals(Settings.NotifyMode, "Toast", StringComparison.OrdinalIgnoreCase);
                 if (wasDefault) Settings.NotifyMode = "Off";
                 Settings.Version = 15;
+            }
+
+            // v1.27：桌面从「一条顺序表 + 固定 8 格」改成「可翻页的页面」。
+            // 老配置只有 ToolOrder（一维），按每页 6 个切一刀就得到页面——
+            // 切完的页序与原顺序完全一致，用户看不到任何跳变。
+            if (Settings.ToolPages == null || Settings.ToolPages.Count == 0)
+            {
+                var flat = (Settings.ToolOrder ?? Array.Empty<string>())
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .ToList();
+                var migrated = new List<List<string>>();
+                for (int i = 0; i < flat.Count; i += ToolPages.PerPage)
+                    migrated.Add(flat.Skip(i).Take(ToolPages.PerPage).ToList());
+                Settings.ToolPages = migrated;
             }
         }
         catch (Exception ex)

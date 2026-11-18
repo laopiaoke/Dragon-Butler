@@ -2478,11 +2478,12 @@ internal static class Program
         var natural = new List<string> { "bettergi", "march7th", "ok-ww" };
 
         // ---- 1) 常量 ----
-        // v1.26：格子搬进启动页那张卡，只有半屏宽，4 列会把每格压到 60px，
-        // 名字只剩三个字。改成 2 列 4 行，格子横向够宽，纵向四行也放得下。
+        // v1.27：桌面改成可翻页的 2 列 3 行（一页 6 格），多出来的工具翻页放。
+        // 4 行要 216 高，翻页之后没必要为了少翻一页把「一键开跑」挤出屏幕。
         Check("格子/2 列", ToolGrid.Columns == 2, ToolGrid.Columns.ToString());
-        Check("格子/4 行", ToolGrid.Rows == 4, ToolGrid.Rows.ToString());
-        Check("格子/一共 8 格", ToolGrid.Capacity == 8, ToolGrid.Capacity.ToString());
+        Check("格子/3 行", ToolGrid.Rows == 3, ToolGrid.Rows.ToString());
+        Check("格子/一页 6 格", ToolGrid.Capacity == 6, ToolGrid.Capacity.ToString());
+        Check("分页/常量转发到 ToolPages", ToolGrid.Columns == ToolPages.Columns && ToolGrid.Rows == ToolPages.Rows);
 
         // ---- 2) Order：没排过就按自然序 ----
         var o1 = ToolGrid.Order(natural, null);
@@ -2538,12 +2539,12 @@ internal static class Program
         Check("追加/空 id 不加", ToolGrid.Append(order, "").Count == 3);
         Check("追加/null 返回单元素", ToolGrid.Append(null, "bettergi").Count == 1);
 
-        // ---- 10) Visible / OverflowCount ----
+        // ---- 10) Visible / OverflowCount（v1.27：改由分页决定容量） ----
         var nine = Enumerable.Range(0, 9).Select(i => "t" + i).ToList();
-        Check("上桌/只取前 8 个", ToolGrid.Visible(nine).Count == 8, ToolGrid.Visible(nine).Count.ToString());
-        Check("上桌/顺序不变", ToolGrid.Visible(nine)[0] == "t0" && ToolGrid.Visible(nine)[7] == "t7");
-        Check("溢出/9 个里 1 个排不进", ToolGrid.OverflowCount(nine) == 1, ToolGrid.OverflowCount(nine).ToString());
-        Check("溢出/8 个正好不溢出", ToolGrid.OverflowCount(nine.Take(8).ToList()) == 0);
+        Check("上桌/只取前 6 个", ToolGrid.Visible(nine).Count == 6, ToolGrid.Visible(nine).Count.ToString());
+        Check("上桌/顺序不变", ToolGrid.Visible(nine)[0] == "t0" && ToolGrid.Visible(nine)[5] == "t5");
+        Check("溢出/9 个在一页里溢出 3 个", ToolGrid.OverflowCount(nine) == 3, ToolGrid.OverflowCount(nine).ToString());
+        Check("溢出/6 个正好不溢出", ToolGrid.OverflowCount(nine.Take(6).ToList()) == 0);
         Check("溢出/3 个不溢出", ToolGrid.OverflowCount(order) == 0);
         Check("溢出/null 是 0", ToolGrid.OverflowCount(null) == 0);
         Check("上桌/null 空表", ToolGrid.Visible(null).Count == 0);
@@ -2567,6 +2568,74 @@ internal static class Program
         Check("拖到/负数夹到开头", m4 != null && string.Join(",", m4) == "c,a,b,d", string.Join(",", m4 ?? new List<string>()));
         Check("拖到/总数不变", (m1?.Count ?? -1) == abc.Count);
 
+        // ---- 10c) ToolPages：可翻页桌面（v1.27） ----
+        // 桌面从「固定 8 格」变成「2 列 3 行，可以有很多页」。规则全部抽在这个纯函数类里，
+        // 界面上那层只负责画和拖——规则能被断言，界面就不会偷偷变形。
+        Check("分页/一页 2 列 3 行", ToolPages.Columns == 2 && ToolPages.Rows == 3 && ToolPages.PerPage == 6);
+        Check("分页/最多 9 页", ToolPages.MaxPages == 9);
+
+        var knownAll = new List<string> { "a", "b", "c", "d", "e", "f", "g", "h" };
+        var np1 = ToolPages.Normalize(new[] { new[] { "a", "b" }, new[] { "c" } }, knownAll);
+        Check("分页/整理保留页数", np1.Count == 2, np1.Count.ToString());
+        Check("分页/整理保留顺序", string.Join(",", np1[0]) == "a,b" && string.Join(",", np1[1]) == "c",
+            string.Join("|", np1.Select(p => string.Join(",", p))));
+        // 关键一条：不存在的工具不补回来。否则「删掉一整页」删不干净——
+        // 重新渲染时 Normalize 又把它补回去，页面看着又满了。
+        Check("分页/已删工具不补回来", !np1.SelectMany(p => p).Contains("g"),
+            string.Join("|", np1.Select(p => string.Join(",", p))));
+
+        var np2 = ToolPages.Normalize(new[] { new[] { "a", "a", "b" } }, knownAll);
+        Check("分页/同页重复只留一个", string.Join(",", np2[0]) == "a,b", string.Join(",", np2[0]));
+
+        var np3 = ToolPages.Normalize(new[] { new[] { "a", "b", "c", "d", "e", "f", "g" } }, knownAll);
+        Check("分页/超 6 格顺延下一页", np3.Count == 2 && np3[1].Count == 1 && np3[1][0] == "g",
+            string.Join("|", np3.Select(p => string.Join(",", p))));
+
+        Check("分页/空输入也给一页", ToolPages.Normalize(null, knownAll).Count == 1);
+        Check("分页/剔掉已不存在的工具",
+            ToolPages.Normalize(new[] { new[] { "a", "gone" } }, knownAll)[0].Count == 1);
+
+        Check("分页/拍平成一条顺序表",
+            string.Join(",", ToolPages.Flatten(new[] { new[] { "a", "b" }, new[] { "c" } })) == "a,b,c");
+        Check("分页/拍平 null 是空表", ToolPages.Flatten(null).Count == 0);
+
+        var loc = ToolPages.Locate(new[] { new[] { "a", "b" }, new[] { "c" } }, "c");
+        Check("分页/定位到第 2 页第 1 格", loc.Page == 1 && loc.Slot == 0, $"{loc.Page},{loc.Slot}");
+        var loc2 = ToolPages.Locate(new[] { new[] { "a", "b" } }, "zz");
+        Check("分页/找不到返回 -1", loc2.Page == -1 && loc2.Slot == -1, $"{loc2.Page},{loc2.Slot}");
+        Check("分页/空 id 定位不炸", ToolPages.Locate(new[] { new[] { "a" } }, "").Page == -1);
+
+        var ins = ToolPages.Insert(new[] { new[] { "a", "b", "c" } }, "c", 0, 0);
+        Check("分页/拖到开头是插入不是交换", string.Join(",", ins[0]) == "c,a,b", string.Join(",", ins[0]));
+        Check("分页/插入不丢东西", ins[0].Count == 3, ins[0].Count.ToString());
+
+        var fullPage = new List<List<string>> { new() { "a", "b", "c", "d", "e", "f" } };
+        var ins2 = ToolPages.Insert(fullPage, "zz", 0, 6);
+        Check("分页/插满一格就顺延下一页", ins2.Count == 2 && ins2[1][0] == "f",
+            string.Join("|", ins2.Select(p => string.Join(",", p))));
+        Check("分页/插入不改原数组", fullPage.Count == 1 && fullPage[0].Count == 6,
+            fullPage.Count + "/" + fullPage[0].Count);
+
+        var ins3 = ToolPages.Insert(new[] { new[] { "a" }, new[] { "b" } }, "b", 0, 1);
+        Check("分页/跨页拖动只有一份", ins3.SelectMany(p => p).Count(id => id == "b") == 1,
+            string.Join("|", ins3.Select(p => string.Join(",", p))));
+        Check("分页/跨页拖到第 1 页末尾", string.Join(",", ins3[0]) == "a,b", string.Join(",", ins3[0]));
+
+        Check("分页/删掉一页", ToolPages.RemovePageAt(new[] { new[] { "a" }, new[] { "b" } }, 0).Count == 1);
+        Check("分页/只剩一页不许删", ToolPages.RemovePageAt(new[] { new[] { "a" } }, 0).Count == 1);
+        Check("分页/删越界页不动", ToolPages.RemovePageAt(new[] { new[] { "a" }, new[] { "b" } }, 9).Count == 2);
+        Check("分页/加一页", ToolPages.AddPage(new[] { new[] { "a" } }).Count == 2);
+        Check("分页/到 9 页不再加", ToolPages.AddPage(Enumerable.Repeat(new[] { "a" }, 9).ToList()).Count == 9);
+        Check("分页/去掉尾巴空页", ToolPages.TrimEmptyTail(new[] { new[] { "a" }, Array.Empty<string>() }).Count == 1);
+        Check("分页/最后一页空也留着", ToolPages.TrimEmptyTail(new[] { Array.Empty<string>() }).Count == 1);
+
+        // Clone 必须真复制：拖拽时是「在副本上算完再换上去」，
+        // 如果 Clone 返回的是同一批 List 引用，中途一次异常就把用户桌面改坏了。
+        var srcPages = new List<List<string>> { new() { "a" } };
+        var cloned = ToolPages.Clone(srcPages);
+        cloned[0].Add("b");
+        Check("分页/复制是真复制", srcPages[0].Count == 1, srcPages[0].Count.ToString());
+
         // ---- 11) 接线 ----
         string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
         string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
@@ -2580,7 +2649,9 @@ internal static class Program
         // 两张卡摆同一批工具，用户要点一个工具得先想清楚它在哪一页。
         Check("接线/格子只在启动页出现一次",
             mainXaml.Split("x:Name=\"ToolGridHost\"").Length == 2);
-        Check("接线/队列卡标题改成我的工具", mainXaml.Contains("Text=\"我的工具\""));
+        // v1.27：标题从「我的工具」改成「托管配置」——说的是「它替你干什么」而不是「它是你的东西」。
+        Check("接线/队列卡标题改成托管配置", mainXaml.Contains("Text=\"托管配置\""));
+        Check("接线/界面上不再叫我的工具", !mainXaml.Contains("Text=\"我的工具\""));
         // 判「界面上不再叫这个名字」而不是「源码里没有这四个字」：
         // 注释里保留「原来叫睡前队列、为什么改」是有用的记录，不该被断言逼着删。
         Check("接线/界面上不再叫睡前队列", !mainXaml.Contains("Text=\"睡前队列\""));
@@ -2591,8 +2662,10 @@ internal static class Program
         Check("接线/刷新时重画网格", mainCs.Contains("RenderToolGrid()"));
         Check("接线/工具表里有 ToolOrder", ReadRepoSources("Dragon Butler/AppState.cs").Contains("ToolOrder"));
         Check("接线/长按才拖（350ms）", mainCs.Contains("_dragHold"));
-        Check("接线/拖动用 MoveTo", mainCs.Contains("ToolGrid.MoveTo("));
-        Check("接线/落点算格子", mainCs.Contains("SlotAt("));
+        // v1.27：拖拽改成跨页插入。ToolGrid.MoveTo 只管「一维列表里挪位置」，
+        // 表达不了「从第 1 页拖到第 3 页第 4 格」，所以落点走 ToolPages.Insert。
+        Check("接线/拖动用 ToolPages.Insert", mainCs.Contains("ToolPages.Insert("));
+        Check("接线/落点算格子算到页", mainCs.Contains("SlotAtPage("));
         // v1.26：格子＝队列顺序。摆什么、按什么顺序摆，答案必须来自队列而不是「装了哪些工具」。
         Check("接线/格子顺序来自队列", mainCs.Contains("AppState.Settings.Queue"));
         Check("接线/排序会重排队列", mainCs.Contains("rebuilt"));
@@ -2604,6 +2677,25 @@ internal static class Program
         Check("接线/只挂一套 Up（不抢事件）",
             !mainCs.Contains("+= ToolTile_Click") && !mainCs.Contains("void ToolTile_Click"));
         Check("接线/空格子有虚线", mainCs.Contains("StrokeDashArray"));
+
+        // ---- 11b) v1.27 可翻页桌面：翻页、页码点、跨页拖拽 ----
+        Check("翻页/有裁切容器", mainXaml.Contains("x:Name=\"ToolPagerClip\"") && mainXaml.Contains("ClipToBounds=\"True\""));
+        Check("翻页/裁切容器能触摸横滑", mainXaml.Contains("ToolPager_ManipulationCompleted"));
+        Check("翻页/拖拽层在裁切外面", mainXaml.Contains("x:Name=\"ToolDragLayer\""));
+        Check("翻页/有页码点容器", mainXaml.Contains("x:Name=\"PageDotsHost\""));
+        Check("翻页/有加页按钮", mainXaml.Contains("x:Name=\"BtnAddPage\"") && mainXaml.Contains("BtnAddPage_Click"));
+        Check("翻页/切页走 GoToolPage", mainCs.Contains("void GoToolPage("));
+        Check("翻页/摆位走 PlaceToolPages", mainCs.Contains("void PlaceToolPages("));
+        Check("翻页/拖到边缘会翻页", mainCs.Contains("CheckEdgeFlip("));
+        Check("翻页/落点能算出目标页", mainCs.Contains("private (int Page, int Slot) SlotAtPage("));
+        Check("翻页/页码点能点", mainCs.Contains("PageDot_Click("));
+        Check("翻页/页码点长按能删", mainCs.Contains("PageDot_PressDown(") && mainCs.Contains("AskDeletePage("));
+        // 删页要说清撤不回来。这条是产品要求不是文案洁癖：
+        // 「删掉一整页」一次带走最多 6 个工具，没有撤销就得在确认框里说清楚。
+        Check("翻页/删页前说清撤不回来", mainCs.Contains("撤不回来"));
+        Check("翻页/只剩一页时拒绝删", mainCs.Contains("ToolPages.RemovePageAt("));
+        Check("翻页/新工具落到它所在的那页", mainCs.Contains("ToolPages.Locate("));
+        Check("翻页/页面存进设置", ReadRepoSources("Dragon Butler/AppState.cs").Contains("ToolPages"));
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）

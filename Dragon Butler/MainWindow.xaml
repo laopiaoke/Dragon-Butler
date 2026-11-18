@@ -1158,15 +1158,18 @@
                                     <!-- v1.26：这张卡原来叫「睡前队列」，内容是「一行一个工具 + 勾选框」；
                                          设置页那边还有一张「我的工具」格子卡，摆的是同一批东西。
                                          两张卡永远在说同一件事，每次都得来回对照。
-                                         现在合在这里：标题叫「我的工具」，内容就是格子——
-                                         格子在不在＝今晚跑不跑，格子的顺序＝跑的先后。 -->
+                                         现在合在这里：内容就是格子——
+                                         格子在不在＝今晚跑不跑，格子的顺序＝跑的先后。
+                                         v1.27：名字改成「托管配置」。「我的工具」说的是归属（这是我的东西），
+                                         「托管配置」说的是它替你干什么——一张可以翻页、可以拖、可以加页的桌面，
+                                         摆的是「这台机器交给管家托管的那几样」。 -->
                                     <!-- 提示语放在标题行下面单独一行，不塞进左列：
                                          右侧五个 MiniAction 是 Auto 宽，左列只剩一百多像素，
                                          那句话会被压成三行，标题行跟着变高。 -->
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Path Data="M4 5h11M4 10h11M4 15h7" Stroke="{DynamicResource BrandBrush}" StrokeThickness="1.9"
                                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="14" Height="14" Stretch="Uniform"/>
-                                        <TextBlock Text="我的工具" FontSize="13.5" FontWeight="SemiBold" Margin="8,0,0,0"
+                                        <TextBlock Text="托管配置" FontSize="13.5" FontWeight="SemiBold" Margin="8,0,0,0"
                                                    TextTrimming="CharacterEllipsis"
                                                    Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                                         <Border x:Name="VacationBadge" Visibility="Collapsed" Margin="8,0,0,0" Padding="6,1"
@@ -1255,34 +1258,50 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- v1.26：这里原来是一列 34 高的行（⋮⋮ / 勾选框 / 字形 / 名字 / 「每天」/ ☰）。
-                                     改成 2 列 4 行的格子：图标 + 名字 + 状态，点一下改、按住拖。
-                                     行与格说的是同一件事，格子能一眼看完八个，行要滚。
-                                     勾选框没有消失——它变成了「格子在不在」，右键能切。 -->
-                                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" MaxHeight="330" Margin="0,10,0,0">
-                                    <StackPanel>
-                                        <!-- 用 Grid 而不是 UniformGrid：UniformGrid 的列宽会被最宽的子项撑开，
-                                             一个长名字就能把整行推出卡片（v1.21 截图里撞到过）。
-                                             星号列宽与内容无关，格子永远等宽。 -->
-                                        <Grid x:Name="ToolGridHost">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
-                                        </Grid>
-                                        <!-- 格子里那格「＋ 添加」做的是同一件事，这里不再放长条按钮：
-                                             一上一下两个入口只会让人犹豫点哪个。 -->
-                                        <TextBlock x:Name="TbGridOverflow" FontSize="10.5" Margin="5,7,5,0"
-                                                   Visibility="Collapsed" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource WarningBrush}"/>
-                                    </StackPanel>
-                                </ScrollViewer>
+                                <!-- v1.27：桌面从「固定 8 格 + 竖向滚动」改成「可翻页的 2×3 桌面」。
+                                     每页 6 格、左右滑翻页、页码点可点可长按删。
+                                     为什么不再用滚动条：滚动条只回答「还有多少」，不回答「这是第几屏」；
+                                     翻页能回答后者，而且和手机桌面的手感一致。
+                                     拖动中的那一格会被搬到卡片顶层的 DragLayer（不裁切），
+                                     所以放到卡片边缘时会露出半格——那是「还能往那边放」的提示。 -->
+                                <Grid Grid.Row="2" Margin="0,10,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- 裁切只裁「静止的页」，不裁被拖起来的那一格（它在 DragLayer 里） -->
+                                    <Border x:Name="ToolPagerClip" Grid.Row="0" ClipToBounds="True"
+                                            Background="Transparent" IsManipulationEnabled="True"
+                                            SizeChanged="ToolPager_SizeChanged"
+                                            ManipulationStarting="ToolPager_ManipulationStarting"
+                                            ManipulationDelta="ToolPager_ManipulationDelta"
+                                            ManipulationCompleted="ToolPager_ManipulationCompleted">
+                                        <!-- 各页叠在同一个格子里，各自带一个 TranslateTransform 平移——
+                                             和主窗三页滑动同一套做法。不用「并排 + 算列宽」是因为
+                                             窗口没上屏时 ActualWidth 是 0，并排会全部塌成 0 宽（v1.22 踩过）。 -->
+                                        <Grid x:Name="ToolGridHost"/>
+                                    </Border>
+
+                                    <!-- 拖动中的那一格搬到这里：它在裁切外面，所以放到卡片边缘时不会被切掉，
+                                         露出来的半个格子就是「还能往那边放」的提示。 -->
+                                    <Canvas x:Name="ToolDragLayer" Grid.Row="0" IsHitTestVisible="False"/>
+
+
+                                    <!-- 页码指示器：当前页是一个拉长的胶囊，其余是圆点 -->
+                                    <Grid Grid.Row="1" Margin="0,9,0,0">
+                                        <StackPanel x:Name="PageDotsHost" Orientation="Horizontal"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Button x:Name="BtnAddPage" Content="＋ 新页" Style="{StaticResource MiniAction}"
+                                                Height="26" Padding="9,0" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                Click="BtnAddPage_Click"
+                                                ToolTip="加一页空桌面。摆不下的工具可以放到新的一页"/>
+                                    </Grid>
+
+                                    <TextBlock x:Name="TbGridOverflow" Grid.Row="1" FontSize="10.5" Margin="5,32,5,0"
+                                               Visibility="Collapsed" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource WarningBrush}"/>
+                                </Grid>
 
                                 <!-- v1.26：挂一个隐藏的 QueueHost 只为兜住老代码里对它的引用
                                      （RevealCard 的定位锚点）。队列本身的可见表现已经搬到上面的格子里。 -->

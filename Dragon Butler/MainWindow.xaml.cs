@@ -1400,7 +1400,7 @@ public partial class MainWindow : Window
     }
 
     private static List<string> CurrentToolOrder()
-        => ToolGrid.Order(NaturalToolOrder(), AppState.Settings.ToolOrder);
+        => ToolPages.Flatten(AppState.Settings.ToolPages);
 
     /// <summary>
     /// 存下桌面顺序。
@@ -1411,9 +1411,22 @@ public partial class MainWindow : Window
     /// 用户在格子上拖了半天，实际执行仍是老顺序——那就是骗人。
     /// 重排时按 ToolId 把原来那一项整个搬过去，勾选状态、按日计划、依赖、配置组都不动。
     /// </para>
+    /// <para>
+    /// v1.27：入参从「一条顺序表」变成「一条顺序表 + 现有页数」——
+    /// 右键菜单那几项（前挪/后挪/移到最后/移除）都只关心先后，不关心摆在第几页，
+    /// 所以这里按每页 6 个重新切一刀，页数尽量保持原样（多出来的页留空，不悄悄合并）。
+    /// 拖拽走的是 <see cref="ReplacePages"/>，不经过这里，所以页内位置不会被打乱。
+    /// </para>
     /// </summary>
     private static void SaveToolOrder(List<string> order)
     {
+        int keepPages = AppState.Settings.ToolPages?.Count ?? 1;
+        var repaged = new List<List<string>>();
+        for (int i = 0; i < order.Count; i += ToolPages.PerPage)
+            repaged.Add(order.Skip(i).Take(ToolPages.PerPage).ToList());
+        while (repaged.Count < Math.Min(keepPages, ToolPages.MaxPages)) repaged.Add(new List<string>());
+        if (repaged.Count == 0) repaged.Add(new List<string>());
+        AppState.Settings.ToolPages = repaged;
         AppState.Settings.ToolOrder = order.ToArray();
 
         try
@@ -1498,7 +1511,7 @@ public partial class MainWindow : Window
     private void SyncToolGrid()
     {
         if (ToolGridHost == null) return;
-        string signature = string.Join("|", ToolGrid.Visible(CurrentToolOrder()));
+        string signature = string.Join("|", PageList().Select(pg => string.Join(",", pg)));
         if (signature != _gridSignature)
         {
             RenderToolGrid();
@@ -1507,63 +1520,431 @@ public partial class MainWindow : Window
         RefreshToolGridStates();
     }
 
-    private void RenderToolGrid()
+    // ===== 可翻页桌面（v1.27）=====
+
+    /// <summary>当前停在第几页（0 起）。</summary>
+    private int _toolPage;
+
+    /// <summary>每页一个 Grid（2×3），下标＝页码。翻页动画直接改它们的 TranslateTransform。</summary>
+    private readonly Dictionary<int, Grid> _pageViews = new();
+
+    /// <summary>上一次画完之后每个工具在桌面上的绝对位置（页 × 宽 + 列 × 格宽），用于重排动画。</summary>
+    private readonly Dictionary<string, Point> _tilePositions = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 桌面上「还算存在的工具」：档案表 ∪ 队列。
+    /// <para>
+    /// 不能只拿队列当真相：桌面能摆下不在队列里的工具（从没加进队列的），
+    /// 只按队列剔除的话，那些工具会在下一次重画时集体消失。
+    /// </para>
+    /// </summary>
+    private static List<string> KnownToolIds()
+    {
+        var ids = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var p in ProfileRegistry.All)
+                if (!string.IsNullOrWhiteSpace(p.ToolId) && seen.Add(p.ToolId)) ids.Add(p.ToolId);
+        }
+        catch { }
+        foreach (var e in AppState.Settings.Queue ?? new List<QueueEntry>())
+            if (!string.IsNullOrWhiteSpace(e.ToolId) && seen.Add(e.ToolId)) ids.Add(e.ToolId);
+        return ids;
+    }
+
+    /// <summary>当前页面结构（已经过校验：剔除已删工具、每页不超 6 格）。</summary>
+    private List<List<string>> PageList()
+        => ToolPages.Normalize(AppState.Settings.ToolPages, KnownToolIds());
+
+    private void ReplacePages(List<List<string>> pages)
+    {
+        AppState.Settings.ToolPages = pages;
+        // ToolOrder 是 v1.21 留下的字段（导出/备份还有它），同步一份，免得两处说法不一致
+        AppState.Settings.ToolOrder = ToolPages.Flatten(pages).ToArray();
+        AppState.SaveSettings();
+    }
+
+    /// <summary>
+    /// 从头画一遍桌面。所有「工具集合变了」的地方都调它；
+    /// 只是状态字变了走 <see cref="RefreshToolGridStates"/>，不要重画。
+    /// </summary>
+    private void RenderToolGrid(bool animate = false)
     {
         if (ToolGridHost == null) return;
+
         ToolGridHost.Children.Clear();
+        _pageViews.Clear();
         _tileStates.Clear();
         _tileBorders.Clear();
 
-        var order = CurrentToolOrder();
-        var visible = ToolGrid.Visible(order);
+        var before = new Dictionary<string, Point>(_tilePositions, StringComparer.OrdinalIgnoreCase);
+        var pages = PageList();
+        if (_toolPage >= pages.Count) _toolPage = Math.Max(0, pages.Count - 1);
 
-        // v1.22：整块 2×4 一直画满。以前只画「有用的格 + 一个＋」，
-        // 空位是留白，看不出这里其实还有五格；现在空格画虚线框，
-        // 一眼就知道「这台桌面能放八个」。
-        for (int slot = 0; slot < ToolGrid.Capacity; slot++)
+        for (int p = 0; p < pages.Count; p++)
         {
-            UIElement cell;
-            if (slot < visible.Count)
+            var view = new Grid
             {
-                cell = BuildToolTile(ProfileRegistry.Get(visible[slot]));
-            }
-            else if (slot == visible.Count)
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                RenderTransform = new TranslateTransform(0, 0),
+            };
+            // 星号列宽与内容无关，格子永远等宽；Auto 列会被最长的名字撑开（v1.21 撞过）
+            view.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            view.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (int r = 0; r < ToolPages.Rows; r++)
+                view.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var ids = pages[p];
+            for (int slot = 0; slot < ToolPages.PerPage; slot++)
             {
-                cell = BuildAddTile();
+                UIElement cell;
+                if (slot < ids.Count)
+                {
+                    cell = BuildToolTile(ProfileRegistry.Get(ids[slot]));
+                }
+                else if (p == _toolPage && slot == ids.Count)
+                {
+                    // 「＋」只出现在当前页——每页都放一个会让人以为每页都要单独加
+                    cell = BuildAddTile();
+                }
+                else
+                {
+                    cell = BuildEmptyTile();
+                }
+                PlaceInSlot(cell, slot);
+                view.Children.Add(cell);
             }
-            else
-            {
-                cell = BuildEmptyTile();
-            }
-            PlaceInGrid(cell, slot);
-            ToolGridHost.Children.Add(cell);
+
+            view.IsHitTestVisible = p == _toolPage;
+            ToolGridHost.Children.Add(view);
+            _pageViews[p] = view;
         }
 
-        int overflow = ToolGrid.OverflowCount(order);
-        if (overflow > 0)
+        PlaceToolPages(animate: false);
+        RenderPageDots();
+
+        // 记下这一轮的位置，下一次重排时用来算「从哪儿飞过来」
+        _tilePositions.Clear();
+        double w = PageWidth;
+        if (w > 0 && ToolPagerClip.ActualHeight > 0)
         {
-            // v1.26：格子搬进启动页之后只剩 8 格，装不下的要明说去哪儿找，
-            // 否则「装了的工具不见了」会被当成丢档案。
-            TbGridOverflow.Text = $"还有 {overflow} 个工具没摆上来——这里只有 8 格。右键点任意一格「移到最后」，把它换上来。";
+            double cellW = w / ToolPages.Columns;
+            double cellH = ToolPagerClip.ActualHeight / ToolPages.Rows;
+            for (int p = 0; p < pages.Count; p++)
+                for (int s = 0; s < pages[p].Count; s++)
+                    _tilePositions[pages[p][s]] = new Point(p * w + (s % ToolPages.Columns) * cellW,
+                                                            (s / ToolPages.Columns) * cellH);
+        }
+
+        if (animate && before.Count > 0) AnimateTilesFrom(before);
+
+        // 桌面能摆的格数＝所有页加起来
+        int room = pages.Sum(pg => ToolPages.PerPage) - pages.Sum(pg => pg.Count);
+        TbGridOverflow.Visibility = Visibility.Collapsed;
+        if (pages.Count >= ToolPages.MaxPages && room <= 1)
+        {
+            TbGridOverflow.Text = $"桌面已经开满 {ToolPages.MaxPages} 页。想再放工具，先删掉一些不用的。";
             TbGridOverflow.Visibility = Visibility.Visible;
         }
-        else
-        {
-            TbGridOverflow.Visibility = Visibility.Collapsed;
-        }
 
-        // 记住这次画的是哪几个（顺序有意义），下次同步时用来判断「要不要重画」
-        _gridSignature = string.Join("|", visible);
+        _gridSignature = string.Join("|", pages.Select(pg => string.Join(",", pg)));
     }
 
-    /// <summary>第 n 个格子摆在第几行第几列（2 列 4 行）。</summary>
-    private static void PlaceInGrid(UIElement element, int slot)
+    /// <summary>
+    /// 单页宽度（＝可视区宽度）。
+    /// <para>
+    /// 三级退路：裁切容器 → 页容器 → 窗口宽减内边距；都量不出来时给 600 这个保守值。
+    /// **绝不能返回 0**：所有页都靠「第 n 页平移 n 个页宽」来分开，
+    /// 页宽是 0 就等于所有页叠在同一处——两页的格子会在同一格里重合，
+    /// 空格的「空」字会浮在真格子的图标上（v1.27 第一次渲染就是这样，
+    /// 截图里 BetterGI 那格右边多了个淡淡的「空」）。宁可先按 600 摆歪，
+    /// 等 <see cref="ToolPager_SizeChanged"/> 量出来再摆正。
+    /// </para>
+    /// </summary>
+    private double PageWidth
+    {
+        get
+        {
+            double w = ToolPagerClip?.ActualWidth ?? 0;
+            if (w <= 0) w = ToolGridHost?.ActualWidth ?? 0;
+            if (w <= 0) w = ActualWidth - 60;
+            return w > 0 ? w : 600;
+        }
+    }
+
+    /// <summary>把各页摆到「当前页在正中间」的位置；animate=true 时滑过去而不是瞬移。</summary>
+    private void PlaceToolPages(bool animate)
+    {
+        double w = PageWidth;
+        if (w <= 0) return;
+        foreach (var kv in _pageViews)
+        {
+            double target = (kv.Key - _toolPage) * w;
+            if (kv.Value.RenderTransform is not TranslateTransform tt)
+            {
+                tt = new TranslateTransform(target, 0);
+                kv.Value.RenderTransform = tt;
+                continue;
+            }
+            if (!animate)
+            {
+                tt.BeginAnimation(TranslateTransform.XProperty, null);
+                tt.X = target;
+                continue;
+            }
+            var anim = new System.Windows.Media.Animation.DoubleAnimation(target, TimeSpan.FromMilliseconds(260))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase
+                { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut },
+                FillBehavior = System.Windows.Media.Animation.FillBehavior.HoldEnd,
+            };
+            tt.BeginAnimation(TranslateTransform.XProperty, anim);
+        }
+    }
+
+    /// <summary>翻到第 n 页（带滑动动画）。</summary>
+    private void GoToolPage(int index, bool animate = true)
+    {
+        var pages = PageList();
+        int target = Math.Clamp(index, 0, Math.Max(0, pages.Count - 1));
+        if (target == _toolPage && _pageViews.Count > 0) { PlaceToolPages(animate: false); return; }
+        _toolPage = target;
+
+        // 「＋」格只在当前页，翻页要跟着搬，不然新页上一个添加入口都没有
+        RenderToolGrid();
+        PlaceToolPages(animate);
+        foreach (var kv in _pageViews) kv.Value.IsHitTestVisible = kv.Key == _toolPage;
+        UpdatePageDots();
+    }
+
+    /// <summary>重排之后让每一格从旧位置滑到新位置（ColorOS 那种「让开」的手感）。</summary>
+    private void AnimateTilesFrom(Dictionary<string, Point> before)
+    {
+        double w = PageWidth;
+        if (w <= 0 || ToolPagerClip == null) return;
+        double cellW = w / ToolPages.Columns;
+        double cellH = ToolPagerClip.ActualHeight / ToolPages.Rows;
+        if (cellH <= 0) return;
+
+        var pages = PageList();
+        for (int p = 0; p < pages.Count; p++)
+        {
+            if (!_pageViews.TryGetValue(p, out var view)) continue;
+            for (int s = 0; s < pages[p].Count; s++)
+            {
+                string id = pages[p][s];
+                if (!before.TryGetValue(id, out var old)) continue;
+                var now = new Point(p * w + (s % ToolPages.Columns) * cellW, (s / ToolPages.Columns) * cellH);
+                double dx = old.X - now.X, dy = old.Y - now.Y;
+                if (Math.Abs(dx) < 1 && Math.Abs(dy) < 1) continue;
+                if (view.Children.Count <= s) continue;
+                if (view.Children[s] is not FrameworkElement fe) continue;
+
+                var tt = new TranslateTransform(dx, dy);
+                fe.RenderTransform = tt;
+                var ease = new System.Windows.Media.Animation.CubicEase
+                { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
+                var ax = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(240))
+                { EasingFunction = ease, FillBehavior = System.Windows.Media.Animation.FillBehavior.HoldEnd };
+                var ay = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(240))
+                { EasingFunction = ease, FillBehavior = System.Windows.Media.Animation.FillBehavior.HoldEnd };
+                tt.BeginAnimation(TranslateTransform.XProperty, ax);
+                tt.BeginAnimation(TranslateTransform.YProperty, ay);
+            }
+        }
+    }
+
+    /// <summary>第 n 个格子摆在第几行第几列（2 列 3 行）。</summary>
+    private static void PlaceInSlot(UIElement element, int slot)
     {
         if (element is not FrameworkElement fe) return;
-        int col = slot % ToolGrid.Columns;
-        int row = slot / ToolGrid.Columns;
-        Grid.SetRow(fe, Math.Min(row, ToolGrid.Rows - 1));
-        Grid.SetColumn(fe, Math.Min(col, ToolGrid.Columns - 1));
+        int col = slot % ToolPages.Columns;
+        int row = slot / ToolPages.Columns;
+        Grid.SetRow(fe, Math.Min(row, ToolPages.Rows - 1));
+        Grid.SetColumn(fe, Math.Min(col, ToolPages.Columns - 1));
+    }
+
+    // ===== 页码指示器 =====
+
+    /// <summary>每个圆点对应当前第几页（长按弹删除确认时要用）。</summary>
+    private readonly List<Border> _pageDots = new();
+
+    private void RenderPageDots()
+    {
+        if (PageDotsHost == null) return;
+        int count = PageList().Count;
+        if (_pageDots.Count == count)
+        {
+            UpdatePageDots();
+            return;
+        }
+
+        PageDotsHost.Children.Clear();
+        _pageDots.Clear();
+        for (int i = 0; i < count; i++)
+        {
+            int index = i;
+            var dot = new Border
+            {
+                Width = 6,
+                Height = 6,
+                CornerRadius = new CornerRadius(3),
+                Margin = new Thickness(3, 0, 3, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = BrushOf("BorderStrongBrush") ?? DotGray,
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Tag = index,
+                ToolTip = $"第 {index + 1} 页（点一下过去，按住能删掉这一页）",
+            };
+            dot.MouseLeftButtonUp += PageDot_Click;
+            dot.MouseLeftButtonDown += PageDot_PressDown;
+            PageDotsHost.Children.Add(dot);
+            _pageDots.Add(dot);
+        }
+        UpdatePageDots();
+    }
+
+    /// <summary>把当前页那个点拉长成胶囊，其余小圆点——比加个框更安静，也更像手机桌面。</summary>
+    private void UpdatePageDots()
+    {
+        for (int i = 0; i < _pageDots.Count; i++)
+        {
+            bool here = i == _toolPage;
+            var dot = _pageDots[i];
+            var ease = new System.Windows.Media.Animation.CubicEase
+            { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
+            var w = new System.Windows.Media.Animation.DoubleAnimation(here ? 18 : 6, TimeSpan.FromMilliseconds(200))
+            { EasingFunction = ease, FillBehavior = System.Windows.Media.Animation.FillBehavior.HoldEnd };
+            dot.BeginAnimation(FrameworkElement.WidthProperty, w);
+            dot.Background = here
+                ? (BrushOf("BrandBrush") ?? DotGreen)
+                : (BrushOf("BorderStrongBrush") ?? DotGray);
+        }
+    }
+
+    private void PageDot_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not Border dot || dot.Tag is not int index) return;
+        if (_suppressDotClick) { _suppressDotClick = false; return; }
+        e.Handled = true;
+        GoToolPage(index);
+    }
+
+    private bool _suppressDotClick;
+    private System.Windows.Threading.DispatcherTimer? _dotHold;
+
+    /// <summary>按住页码点 600ms ＝ 想删掉这一页。松开时不当作点击。</summary>
+    private void PageDot_PressDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not Border dot || dot.Tag is not int index) return;
+        _suppressDotClick = false;
+        _dotHold?.Stop();
+        _dotHold = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(600),
+        };
+        _dotHold.Tick += (_, _) =>
+        {
+            _dotHold?.Stop();
+            _dotHold = null;
+            _suppressDotClick = true;
+            AskDeletePage(index);
+        };
+        _dotHold.Start();
+        dot.MouseLeave += (_, _) => { _dotHold?.Stop(); _dotHold = null; };
+    }
+
+    /// <summary>
+    /// 删掉一整页。
+    /// <para>
+    /// 这个动作不可撤销——页里的工具会从桌面上消失（档案还在，可以再添回来）。
+    /// 所以对话框要把「哪一页、几个工具、能不能反悔」三件事一次说清，
+    /// 而不是只问一句「确定删除吗」。
+    /// </para>
+    /// </summary>
+    private void AskDeletePage(int index)
+    {
+        var pages = PageList();
+        if (pages.Count <= 1)
+        {
+            AppDialog.Show("这是唯一的一页，删掉就没地方放工具了。",
+                kind: AppDialog.Kind.Info, title: "删除这一页", primary: "知道了", owner: this);
+            return;
+        }
+        if (index < 0 || index >= pages.Count) return;
+
+        var ids = pages[index];
+        var names = ids.Select(id => ProfileRegistry.Get(id).DisplayName).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+        string detail = ids.Count == 0
+            ? "这一页是空的，删掉不影响任何工具。"
+            : $"这一页上有 {ids.Count} 个工具：{string.Join("、", names.Take(6))}{(names.Count > 6 ? " 等" : "")}。\n"
+              + "删掉之后它们不会出现在桌面上，但档案和设置都还在——想放回来，右键任意一格「移到最后」，或者点「＋ 添加」。\n\n"
+              + "这一步撤不回来。";
+
+        bool ok = AppDialog.Show($"删掉第 {index + 1} 页？", detail: detail,
+            kind: AppDialog.Kind.Question, title: "删除整页",
+            primary: "删掉这一页", secondary: "算了", owner: this);
+        if (!ok) return;
+
+        ReplacePages(ToolPages.RemovePageAt(pages, index));
+        if (_toolPage >= index && _toolPage > 0) _toolPage--;
+        _toolPage = Math.Clamp(_toolPage, 0, Math.Max(0, PageList().Count - 1));
+        RenderToolGrid();
+        RenderQueue();
+        AppState.PublishLog($"✓ 已删除第 {index + 1} 页桌面");
+        LogService.LogEvent($"删除桌面页：第 {index + 1} 页，含 {ids.Count} 个工具");
+    }
+
+    private void BtnAddPage_Click(object sender, RoutedEventArgs e)
+    {
+        var pages = PageList();
+        if (pages.Count >= ToolPages.MaxPages)
+        {
+            AppDialog.Show($"最多 {ToolPages.MaxPages} 页。再多的工具，建议先收一收不常用的。",
+                kind: AppDialog.Kind.Info, title: "加一页", primary: "知道了", owner: this);
+            return;
+        }
+        var next = ToolPages.AddPage(pages);
+        ReplacePages(next);
+        _toolPage = next.Count - 1;
+        RenderToolGrid();
+        LogService.LogEvent($"新建桌面页：第 {next.Count} 页");
+    }
+
+    // ===== 触摸横滑翻页 =====
+
+    private void ToolPager_ManipulationStarting(object sender, System.Windows.Input.ManipulationStartingEventArgs e)
+    {
+        e.ManipulationContainer = ToolPagerClip;
+        e.Mode = System.Windows.Input.ManipulationModes.TranslateX;
+    }
+
+    /// <summary>
+    /// 可视区宽度变了就重新摆位。
+    /// <para>
+    /// 第一次量出来之前 <see cref="PageWidth"/> 只能用保守值（600），那时的摆位是错的；
+    /// 这里补一次不动画的重摆，宽窗口下才不会被看成「第一页露了一半、第二页挤进来」。
+    /// 这里不放动画：拖窗口边框时每帧都会触发，放动画会变成一路抖。
+    /// </para>
+    /// </summary>
+    private void ToolPager_SizeChanged(object sender, System.Windows.SizeChangedEventArgs e)
+    {
+        if (_pageViews.Count == 0) return;
+        PlaceToolPages(animate: false);
+    }
+
+    private void ToolPager_ManipulationDelta(object sender, System.Windows.Input.ManipulationDeltaEventArgs e) => e.Handled = true;
+
+    private void ToolPager_ManipulationCompleted(object sender, System.Windows.Input.ManipulationCompletedEventArgs e)
+    {
+        double dx = e.TotalManipulation.Translation.X;
+        double w = PageWidth;
+        if (w <= 0) return;
+        double threshold = Math.Max(60, w * 0.18);
+        if (Math.Abs(dx) < threshold) return;
+        GoToolPage(_toolPage + (dx < 0 ? 1 : -1));
     }
 
     private Border BuildToolTile(ToolProfile profile)
@@ -1831,17 +2212,29 @@ public partial class MainWindow : Window
         };
     }
 
-    // ===== 长按拖拽（v1.22）=====
-    // 状态机很短：按下 → 启动一个 350ms 的计时器；计时器到点时如果鼠标还在这一格、
-    // 且没移动超过 6px，就进入拖拽态；之后 MouseMove 把这一格跟着鼠标挪，
-    // 松手时落回最近的格子位置，并把顺序存下来。
+    // ===== 长按拖拽（v1.22，v1.27 改成跨页）=====
+    // 状态机：按下 → 350ms 计时器；到点且没移出 6px 就进入拖拽态；
+    // 进入拖拽态时把这一格搬进卡片顶层的 ToolDragLayer（Canvas）——
+    // 那一层在裁切外面，所以拖到卡片边缘时不会被切成一半，露出来的半个格子
+    // 正好是「那边还能放」的提示。松手时算出落点（页 + 格），插入，再重排并放动画。
     // 为什么不用 WPF 的 DragDrop：它是给跨程序拖文件用的，会带来一个跟随系统的
     // 半透明幽灵，而且拖回自己身上常常收不到 Drop。这里只要「挪个位置」，自己算更快也更稳。
     private Border? _dragTile;
     private string? _dragToolId;
     private System.Windows.Threading.DispatcherTimer? _dragHold;
     private Point _dragOrigin;
+    private Point _dragGrab;          // 按住那一刻，鼠标在格子内部的相对位置
+    private Size _dragSize;           // 抓起时的尺寸（Canvas 不会替它撑开）
     private bool _dragging;
+
+    /// <summary>拖到边缘停留多久翻页。太快会一路翻过头，太慢又像卡住。</summary>
+    private const int EdgeFlipMs = 420;
+
+    /// <summary>离左右边缘多少像素算「想翻页」。</summary>
+    private const double EdgeFlipZone = 30;
+
+    private System.Windows.Threading.DispatcherTimer? _edgeFlip;
+    private int _edgeDir;
 
     private void ToolTile_PressDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
@@ -1849,7 +2242,8 @@ public partial class MainWindow : Window
         _dragTile = tile;
         _dragToolId = toolId;
         _dragging = false;
-        _dragOrigin = e.GetPosition(ToolGridHost);
+        _dragOrigin = e.GetPosition(ToolDragLayer);
+        _dragGrab = default;
 
         _dragHold?.Stop();
         _dragHold = new System.Windows.Threading.DispatcherTimer
@@ -1860,12 +2254,42 @@ public partial class MainWindow : Window
         {
             _dragHold?.Stop();
             if (_dragTile == null) return;
-            _dragging = true;
-            _dragTile.Opacity = 0.75;
-            _dragTile.BorderBrush = BrushOf("BrandBrush") ?? DotGreen;
-            TbGridHint.Text = "松手放到想放的位置。";
+            BeginTileDrag();
         };
         _dragHold.Start();
+    }
+
+    /// <summary>真正把格子搬进拖拽层：量好尺寸、换算坐标，让它悬在鼠标下面。</summary>
+    private void BeginTileDrag()
+    {
+        var tile = _dragTile;
+        if (tile == null || ToolDragLayer == null) return;
+
+        _dragging = true;
+        _dragSize = new Size(Math.Max(1, tile.ActualWidth), Math.Max(1, tile.ActualHeight));
+
+        // 抓起那一刻的手指位置（相对拖拽层）与格子左上角之间的差，
+        // 后面每一步都保持它不变——否则格子会「跳到」鼠标中心，手感很假。
+        Point corner;
+        try { corner = tile.TranslatePoint(new Point(0, 0), ToolDragLayer); }
+        catch { corner = new Point(0, 0); }
+        _dragGrab = new Point(_dragOrigin.X - corner.X, _dragOrigin.Y - corner.Y);
+
+        if (tile.Parent is Panel parent) parent.Children.Remove(tile);
+        tile.Width = _dragSize.Width;
+        tile.Height = _dragSize.Height;
+        tile.HorizontalAlignment = HorizontalAlignment.Left;
+        tile.VerticalAlignment = VerticalAlignment.Top;
+        tile.Margin = new Thickness(0);
+        tile.RenderTransform = Transform.Identity;
+        tile.Opacity = 0.92;
+        tile.BorderBrush = BrushOf("BrandBrush") ?? DotGreen;
+        tile.IsHitTestVisible = false;   // 让它彻底跟着鼠标，不再接自己的事件
+        Canvas.SetLeft(tile, corner.X);
+        Canvas.SetTop(tile, corner.Y);
+        ToolDragLayer.Children.Add(tile);
+
+        TbGridHint.Text = "松手放到想放的位置。拖到边缘可以翻页。";
     }
 
     private void ToolTile_DragMove(object sender, System.Windows.Input.MouseEventArgs e)
@@ -1875,7 +2299,7 @@ public partial class MainWindow : Window
             // 还没进入拖拽态：手一动就取消长按，免得「想点一下」被当成「抓起」
             if (_dragHold != null && e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
             {
-                var now = e.GetPosition(ToolGridHost);
+                var now = e.GetPosition(ToolDragLayer);
                 if (Math.Abs(now.X - _dragOrigin.X) > 6 || Math.Abs(now.Y - _dragOrigin.Y) > 6)
                 {
                     _dragHold.Stop();
@@ -1885,22 +2309,80 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 拖拽态：把这一格跟着鼠标平移，并在松手时判断落在哪个格子上
-        var p = e.GetPosition(ToolGridHost);
-        var transform = new TranslateTransform(p.X - _dragOrigin.X, p.Y - _dragOrigin.Y);
-        _dragTile.RenderTransform = transform;
-        _dragTile.SetValue(Panel.ZIndexProperty, 50);
+        var p = e.GetPosition(ToolDragLayer);
+        Canvas.SetLeft(_dragTile, p.X - _dragGrab.X);
+        Canvas.SetTop(_dragTile, p.Y - _dragGrab.Y);
+        CheckEdgeFlip(p);
+    }
+
+    /// <summary>
+    /// 拖到左右边缘停一会儿就翻页。
+    /// <para>
+    /// 为什么不「一碰到边缘就翻」：那样从第一页拖到第二页时，手稍微靠边就翻，
+    /// 想放边缘那两格就永远放不进去。停留 420ms 是「我确实想过去」的意思。
+    /// </para>
+    /// </summary>
+    private void CheckEdgeFlip(Point p)
+    {
+        double w = PageWidth;
+        int dir = 0;
+        if (w > 0)
+        {
+            if (p.X < EdgeFlipZone) dir = -1;
+            else if (p.X > w - EdgeFlipZone) dir = 1;
+        }
+        var pages = PageList();
+        if (dir < 0 && _toolPage <= 0) dir = 0;
+        if (dir > 0 && _toolPage >= pages.Count - 1)
+        {
+            // 已经是最后一页：往右拖就当「开一页新的」，不然最后一格永远搬不出去
+            if (pages.Count < ToolPages.MaxPages) dir = 2;
+            else dir = 0;
+        }
+
+        if (dir == _edgeDir && _edgeFlip != null) return;
+        _edgeFlip?.Stop();
+        _edgeFlip = null;
+        _edgeDir = dir;
+        if (dir == 0) return;
+
+        _edgeFlip = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(EdgeFlipMs),
+        };
+        _edgeFlip.Tick += (_, _) =>
+        {
+            _edgeFlip?.Stop();
+            _edgeFlip = null;
+            if (!_dragging) return;
+            if (dir == 2)
+            {
+                var added = ToolPages.AddPage(PageList());
+                ReplacePages(added);
+                GoToolPage(added.Count - 1);
+            }
+            else
+            {
+                GoToolPage(_toolPage + dir);
+            }
+            _edgeDir = 0;
+            SoundService.Play("tick.wav");
+        };
+        _edgeFlip.Start();
     }
 
     private void ToolTile_PressUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         _dragHold?.Stop();
         _dragHold = null;
+        _edgeFlip?.Stop();
+        _edgeFlip = null;
+        _edgeDir = 0;
 
         var tile = _dragTile;
         string? toolId = _dragToolId;
         bool dragging = _dragging;
-        var dropPoint = e.GetPosition(ToolGridHost);
+        var dropPoint = e.GetPosition(ToolDragLayer);
 
         _dragTile = null;
         _dragToolId = null;
@@ -1917,40 +2399,62 @@ public partial class MainWindow : Window
         }
 
         e.Handled = true;
-        tile.RenderTransform = Transform.Identity;
-        tile.Opacity = 1;
-        tile.ClearValue(Panel.ZIndexProperty);
         TbGridHint.Text = "点一下改启动方式；按住一格拖到别处能换顺序；右键能改「今晚跑不跑」。";
 
-        // v1.23：抓起时把边框改成了品牌色，这里不论后面走哪条分支都得先还原。
-        // 以前只在下一次 MouseLeave 时才改回来，于是「拖到卡片外面松手」会留下一圈亮边。
-        bool runningThis = QueueService.IsRunning &&
-                           string.Equals(QueueService.CurrentToolId, toolId, StringComparison.OrdinalIgnoreCase);
-        tile.BorderBrush = runningThis
-            ? (BrushOf("BrandBrush") ?? DotGray)
-            : (BrushOf("BorderBrush") ?? DotGray);
+        var (page, slot) = SlotAtPage(dropPoint);
+        tile.Opacity = 1;
+        tile.IsHitTestVisible = true;
 
-        int target = SlotAt(dropPoint);
-        if (target < 0) return;
+        // 先把抓起来的那个临时壳收掉（重画会造新的，留着只会重复一份）
+        if (tile.Parent is Panel p) p.Children.Remove(tile);
 
-        var moved = ToolGrid.MoveTo(CurrentToolOrder(), toolId, target);
-        if (moved == null) return;
-        SaveToolOrder(moved);
-        RenderToolGrid();
-        LogService.LogEvent($"工具排序：{toolId} → 第 {target + 1} 格");
+        var pages = PageList();
+        if (page < 0 || page >= pages.Count)
+        {
+            RenderToolGrid();
+            return;
+        }
+
+        var next = ToolPages.Insert(pages, toolId, page, slot);
+        string after = string.Join("|", next.Select(pg => string.Join(",", pg)));
+        if (after == string.Join("|", pages.Select(pg => string.Join(",", pg))))
+        {
+            RenderToolGrid();
+            return;
+        }
+
+        ReplacePages(next);
+        _toolPage = page;
+        RenderToolGrid(animate: true);
+        UpdatePageDots();
+        LogService.LogEvent($"工具拖动：{toolId} → 第 {page + 1} 页第 {slot + 1} 格");
     }
 
-    /// <summary>鼠标落点在 2×4 里的第几格；落在卡片外返回 -1。</summary>
-    private int SlotAt(Point p)
+    /// <summary>
+    /// 落点换算成（第几页, 第几格）。
+    /// <para>
+    /// 会把「拖出可视区」也算进来：拖到卡片左边就是上一页的最后一格，
+    /// 拖到右边就是下一页的第一格——用户不用先翻页再拖。
+    /// </para>
+    /// </summary>
+    private (int Page, int Slot) SlotAtPage(Point p)
     {
-        if (ToolGridHost == null || ToolGridHost.ActualWidth <= 0 || ToolGridHost.ActualHeight <= 0) return -1;
-        if (p.X < 0 || p.Y < 0 || p.X > ToolGridHost.ActualWidth || p.Y > ToolGridHost.ActualHeight) return -1;
-        double cellW = ToolGridHost.ActualWidth / ToolGrid.Columns;
-        double cellH = ToolGridHost.ActualHeight / ToolGrid.Rows;
-        if (cellW <= 0 || cellH <= 0) return -1;
-        int col = Math.Clamp((int)(p.X / cellW), 0, ToolGrid.Columns - 1);
-        int row = Math.Clamp((int)(p.Y / cellH), 0, ToolGrid.Rows - 1);
-        return row * ToolGrid.Columns + col;
+        var pages = PageList();
+        if (pages.Count == 0) return (-1, -1);
+        double w = PageWidth;
+        double h = ToolPagerClip?.ActualHeight ?? 0;
+        if (w <= 0 || h <= 0) return (-1, -1);
+
+        int page = _toolPage + (int)Math.Floor(p.X / w);
+        page = Math.Clamp(page, 0, pages.Count - 1);
+
+        double x = p.X - (page - _toolPage) * w;
+        double cellW = w / ToolPages.Columns;
+        double cellH = h / ToolPages.Rows;
+        if (cellW <= 0 || cellH <= 0) return (-1, -1);
+        int col = Math.Clamp((int)(x / cellW), 0, ToolPages.Columns - 1);
+        int row = Math.Clamp((int)(p.Y / cellH), 0, ToolPages.Rows - 1);
+        return (page, row * ToolPages.Columns + col);
     }
 
     /// <summary>点格子 = 打开这个工具的启动设置；改完立刻重画，不重启。</summary>
@@ -1966,6 +2470,7 @@ public partial class MainWindow : Window
                 SaveToolOrder(ToolGrid.Remove(CurrentToolOrder(), toolId));
                 RebuildCustomToolCards();
                 RenderQueue();
+                RenderToolGrid();
             }
             if (w.Changed || w.Deleted)
             {
@@ -2078,7 +2583,7 @@ public partial class MainWindow : Window
         var moved = ToolGrid.Move(CurrentToolOrder(), toolId, delta);
         if (moved == null) return;      // 到边了：不动，也不提示——格子没反应就是最清楚的回答
         SaveToolOrder(moved);
-        RenderToolGrid();
+        RenderToolGrid(animate: true);
     }
 
     private void MoveToolToEnd(string toolId)
@@ -2088,7 +2593,7 @@ public partial class MainWindow : Window
         order.RemoveAll(id => string.Equals(id, toolId, StringComparison.OrdinalIgnoreCase));
         order.Add(toolId);
         SaveToolOrder(order);
-        RenderToolGrid();
+        RenderToolGrid(animate: true);
     }
 
     private void RefreshToolCard(string toolId)
@@ -2157,6 +2662,14 @@ public partial class MainWindow : Window
         SaveToolOrder(ToolGrid.Append(CurrentToolOrder(), dlg.Result.ToolId));
         RebuildCustomToolCards();
         RenderQueue();
+        // v1.27：新工具可能落在最后那一页，翻过去让人看见它，否则「我加了怎么没出现」
+        try
+        {
+            var (page, _) = ToolPages.Locate(PageList(), dlg.Result.ToolId);
+            if (page >= 0) GoToolPage(page);
+        }
+        catch { }
+        RenderToolGrid(animate: true);
         RefreshToolCards();
         AppState.PublishLog($"✓ 已添加自定义工具：{dlg.Result.DisplayName}");
     }

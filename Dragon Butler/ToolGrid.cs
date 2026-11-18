@@ -19,17 +19,20 @@ namespace DragonButler;
 public static class ToolGrid
 {
     /// <summary>
-    /// 桌面一共 8 格。
+    /// 一页几列几行。
     /// <para>
-    /// v1.26：从 4 列 2 行改成 **2 列 4 行**。格子从设置页搬进启动页那张卡以后，
-    /// 卡本身只占半屏宽（和定时卡并排），4 列会把每个格子压到 60px 上下——
-    /// 名字只剩三个字、图标和状态字挤成一团。2 列之后每格约 150px，
-    /// 名字能写全，行数多出来的两行反正有滚动条。
+    /// v1.27：桌面改成可翻页之后，几何定义搬到 <see cref="ToolPages"/>（那里还有页数、翻页、
+    /// 落点插入的规则）。这里保留这三个名字只为不打断既有调用方，
+    /// 值一律转发过去——两处各写一份迟早会对不上。
+    /// </para>
+    /// <para>
+    /// v1.26 的结论仍然成立：2 列而不是 4 列，因为卡只有半屏宽，4 列会把格子压到 60px、
+    /// 名字只剩三个字。行数从 4 降到 3 是因为翻页之后不需要靠滚动装下所有工具。
     /// </para>
     /// </summary>
-    public const int Columns = 2;
-    public const int Rows = 4;
-    public const int Capacity = Columns * Rows;
+    public const int Columns = ToolPages.Columns;
+    public const int Rows = ToolPages.Rows;
+    public const int Capacity = ToolPages.PerPage;
 
     /// <summary>
     /// 算出桌面上该按什么顺序摆哪些工具。
