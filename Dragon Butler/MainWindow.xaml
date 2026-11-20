@@ -485,28 +485,27 @@
             </Setter>
         </Style>
 
-        <!-- v1.29 底部导航项：图标在上、字在下，选中时整格变成品牌色的浅底。
-             为什么不沿用 SegBtn：那个是标题栏里 24 高的小胶囊，放到底部会像一排标签页；
-             手机上认得出「这是导航」靠的是图标+文字竖排、以及选中项明显更亮。 -->
+        <!-- v1.32 悬浮标签栏的单项：只负责「换个颜色」，不自己画底。
+             底是导航栏里那块会滑动的圆角矩形（NavPill），画在三个项下面。
+             以前每项各画各的底，切换时是一块块跳；现在只有一块在滑，才有「同一个东西在移动」的感觉。 -->
         <Style x:Key="NavBtn" TargetType="RadioButton">
-            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Width" Value="78"/>
-            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Width" Value="84"/>
+            <Setter Property="Height" Value="46"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
                         <!-- 内容由使用处自己写（图标 + 文字竖排），Foreground 一路传下去：
                              图标 Path 绑 AncestorType=RadioButton 的 Foreground，所以选中时一起变色。 -->
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="10" Padding="0,6,0,5">
+                        <Grid Background="Transparent">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BrandSoftBrush}"/>
                                 <Setter Property="Foreground" Value="{DynamicResource BrandTextBrush}"/>
                                 <Setter Property="FontWeight" Value="SemiBold"/>
                             </Trigger>
@@ -1711,19 +1710,30 @@
                             <TranslateTransform x:Name="ShiftSettings" X="980"/>
                         </ScrollViewer.RenderTransform>
                         <Grid x:Name="PageSettings" Margin="14,10,14,8">
+                            <!-- v1.32：设置页从「五条等宽长条摞在一起」改成卡片墙。
+                                 原来四块长得一模一样、上下等距，看着像一列抽屉，分不清是四件事；
+                                 现在短的两块（插件、通知）并排放，长的两块（高级设置、系统）各占整行——
+                                 长度不一样，眼睛才认得出这是四张卡而不是一个列表。
+                                 米游社那张也占整行：它有自己的两个按钮和一段说明，切一半会挤成两行字。 -->
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <!-- 不是 1:1：插件卡只需要放个名字和「打开目录」，
+                                     通知卡里有一排渠道胶囊 + 正文模板 + 一个地址框，半宽会把胶囊挤成三行。 -->
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="2*"/>
+                            </Grid.ColumnDefinitions>
 
                             <!-- v1.31：米游社签到。
                                  放最上面是因为它是唯一一张「要先登录才能用」的卡——
                                  藏在折叠列表底下的账号设置，等于没有。
                                  卡本身只说三件事：登没登、上次签到什么结果、现在能不能签。 -->
-                            <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,0" Padding="16,13,16,14">
+                            <Border Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource Card}"
+                                    Margin="0,0,0,0" Padding="16,13,16,14">
                                 <StackPanel>
                                     <Grid>
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -1764,7 +1774,10 @@
                                  但界面上没有一个地方能看见「装了没有、装了什么、为什么没装」。
                                  空着也是信息：先说清 plugins 目录在哪、放进去会长什么样，
                                  再去扫真实目录，把读得懂的和读不懂的分开列。 -->
-                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                            <!-- 两列并排时，短的那张不跟着拉到别人那么高：插件卡空着的时候只有 60 高，
+                                 被拉成和右边通知卡一样高，就是一大片什么都没有的底色。 -->
+                            <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource Card}"
+                                    Margin="0,10,7,0" Padding="0" VerticalAlignment="Top">
                                 <StackPanel>
                                     <Button x:Name="BtnFoldPlugins" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                         <DockPanel LastChildFill="False">
@@ -1798,7 +1811,7 @@
 
                     <!-- 第三层：高级设置（默认折叠） -->
 
-                    <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="2" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldAdvanced" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2012,7 +2025,7 @@
                     </Border>
 
                     <!-- ===== E 系统（折叠，默认收起；6 开关两列网格）===== -->
-                    <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldSystem" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2240,7 +2253,8 @@
                     </Border>
 
                     <!-- ===== F 通知（折叠，默认收起）===== -->
-                    <Border x:Name="NotifyCard" Grid.Row="4" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border x:Name="NotifyCard" Grid.Row="1" Grid.Column="1" Style="{StaticResource Card}"
+                            Margin="7,10,0,0" Padding="0" VerticalAlignment="Top">
                         <StackPanel>
                             <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2475,20 +2489,33 @@
             </Border>
 
 
-            <!-- v1.29：底部导航栏。原来这三个按钮挤在标题栏正中间，和主题切换、消息、窗口按钮
-                 排成一行，全是「小胶囊」——用户得先读完四组文字才找得到「运行」在哪。
-                 搬到窗口底部之后，屏幕最下沿是手指/眼睛默认会到的地方，三个大格子一眼就分得清。
-                 高度 56：图标 20 + 间距 3 + 一行字 14 + 上下留白，刚好不挤。 -->
-            <Border Grid.Row="2" Background="{DynamicResource CardBgBrush}"
-                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
+            <!-- v1.32：悬浮标签栏。
+                 跟 v1.29 那条贴边的导航栏比，这里只改了两件事，但观感完全是另一回事：
+                 ① 栏本身不再横贯整个窗口，而是浮在内容上方的一块圆角胶囊（左右各留 20 的呼吸）；
+                 ② 选中态不再是「每一项自己画一块底」，而是**一整块圆角矩形在三个位置之间滑动**，
+                    滑动带一点回弹。切换时人眼跟的是那块底，于是三个页像是同一本书的三页在翻，
+                    而不是三个互不相干的按钮轮流亮起来。
+                 拖动那块底也能切换（松手吸附到最近的一项），这是视频里最像「真机」的那一下。 -->
+            <Grid Grid.Row="2" Background="Transparent" Margin="0,2,0,10">
+                <Border x:Name="NavShell" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{DynamicResource CardBg2Brush}"
+                        BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1"
+                        CornerRadius="25" Padding="5" Height="58"
+                        PreviewMouseLeftButtonDown="NavShell_PreviewMouseLeftButtonDown"
+                        PreviewMouseMove="NavShell_PreviewMouseMove"
+                        PreviewMouseLeftButtonUp="NavShell_PreviewMouseLeftButtonUp">
+                    <Grid>
+                        <!-- 会滑的那块底。宽高跟单个标签项一致，靠 TranslateTransform 走位。 -->
+                        <Border x:Name="NavPill" Width="84" Height="46" CornerRadius="19"
+                                HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Background="{DynamicResource BrandSoftBrush}" IsHitTestVisible="False"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="NavPillShift" X="0"/>
+                            </Border.RenderTransform>
+                        </Border>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4">
+                        <StackPanel x:Name="NavItemsHost" Orientation="Horizontal">
                         <!-- 运行：一个环形箭头（「刚才跑了什么」） -->
                         <RadioButton x:Name="SegPageRun" Tag="0"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
@@ -2538,9 +2565,10 @@
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                             </StackPanel>
                         </RadioButton>
-                    </StackPanel>
-                </Grid>
-            </Border>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
 
             <!-- 底部状态条：守护盾牌 + 最近一条事件 -->
             <Border Grid.Row="3" x:Name="StatusBarBorder" Background="{DynamicResource InsetBrush}"

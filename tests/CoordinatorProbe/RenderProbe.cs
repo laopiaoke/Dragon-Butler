@@ -1121,18 +1121,13 @@ internal static class RenderProbe
                                 w.UpdateLayout();
                             }
                         }
-                        // 通知卡在最底下，而模板输入框在它中段——滚到底会正好被状态条压住，
-                        // 所以 notify 模式滚到「刚好看得见通知卡」的位置就停。
+                        // v1.32：通知卡跟插件卡并排搬到了设置页第一排，不再在最底下。
+                        // 那时候要 BringIntoView 是因为它藏在长列表末尾；现在滚到顶就整张在眼前，
+                        // 再 BringIntoView 反而会被上边那些卡的边距推偏。
                         if (mode == "notify")
                         {
+                            if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer nsv) nsv.ScrollToTop();
                             w.UpdateLayout();
-                            // 用 BringIntoView 而不是手算偏移：窗口没 Show 过，TransformToAncestor
-                            // 在这棵还没完全成形的视觉树上会报「指定的 Visual 不是此 Visual 的上级」。
-                            if (w.FindName("NotifyCard") is FrameworkElement card)
-                            {
-                                card.BringIntoView();
-                                w.UpdateLayout();
-                            }
                         }
                         // v1.17：备份那一行在系统卡末尾，滚到底会被状态条压住，同样用 BringIntoView。
                         if (mode == "backup")

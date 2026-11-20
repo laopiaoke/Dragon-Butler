@@ -3695,6 +3695,89 @@ public partial class MainWindow : Window
                 btn.IsChecked = false;
             }
         }
+
+        // 那块会滑的底跟着走。放在这里而不是 ShowPage 里，是因为「用户点了哪一项」和
+        // 「代码要求切到哪一页」都会走到这里，两条路都得让底动起来。
+        MoveNavPill(index, animate: true);
+    }
+
+    // ===== 悬浮标签栏（v1.32）=====
+
+    /// <summary>单个标签项的宽度，与 MainWindow.xaml 里 NavBtn 样式的 Width 保持一致。</summary>
+    private const double NavItemWidth = 84;
+
+    private double _navPillX;
+    private bool _navDragging;
+    private Point _navGrabPoint;
+    private double _navGrabOffset;
+
+    /// <summary>
+    /// 把选中底移到第 index 项下面。
+    /// 动画用 BackEase 而不是 CubicEase：滑到位置时会轻微冲过头再回来，
+    /// 这一点点回弹是「有质量的东西被推过去」的全部观感来源，去掉之后就是生硬的平移动画。
+    /// </summary>
+    private void MoveNavPill(int index, bool animate)
+    {
+        if (NavPillShift == null) return;
+        double target = Math.Max(0, index) * NavItemWidth;
+        _navPillX = target;
+
+        if (!animate)
+        {
+            NavPillShift.BeginAnimation(TranslateTransform.XProperty, null);
+            NavPillShift.X = target;
+            return;
+        }
+
+        var spring = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.32 };
+        NavPillShift.BeginAnimation(TranslateTransform.XProperty,
+            new DoubleAnimation(target, TimeSpan.FromMilliseconds(380))
+            {
+                EasingFunction = spring,
+                FillBehavior = FillBehavior.HoldEnd,
+            });
+    }
+
+    /// <summary>按「底当前停在哪」反推该是哪一页，用于拖动后松手吸附。</summary>
+    private int NavIndexAt(double x) => Pager.Clamp((int)Math.Round(x / NavItemWidth));
+
+    private void NavShell_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (NavPillShift == null || NavShell == null) return;
+        _navGrabPoint = e.GetPosition(NavShell);
+        _navGrabOffset = _navGrabPoint.X - _navPillX;
+        _navDragging = false;
+        NavShell.CaptureMouse();
+    }
+
+    private void NavShell_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (NavShell == null || e.LeftButton != MouseButtonState.Pressed) return;
+        if (!NavShell.IsMouseCaptured) return;
+
+        double x = e.GetPosition(NavShell).X - _navGrabOffset;
+
+        // 超过 4px 才算「在拖底」，否则当成普通点击让下面的 RadioButton 自己处理
+        if (!_navDragging && Math.Abs(x - _navPillX) < 4) return;
+        _navDragging = true;
+
+        double max = (Math.Max(0, Pager.Count - 1)) * NavItemWidth;
+        NavPillShift.BeginAnimation(TranslateTransform.XProperty, null);
+        NavPillShift.X = _navPillX = Math.Clamp(x, 0, max);
+    }
+
+    private void NavShell_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (NavShell == null) return;
+        bool wasDragging = _navDragging;
+        _navDragging = false;
+        NavShell.ReleaseMouseCapture();
+        if (!wasDragging) return;
+
+        // 拖完松手：吸附到最近的一项，并真的切过去。拖了等于点了，这是视频里那一下的关键。
+        int want = NavIndexAt(_navPillX);
+        MoveNavPill(want, animate: true);
+        if (want != _page) ShowPage(want);
     }
 
     private void BtnRunToday_Click(object sender, RoutedEventArgs e) => OpenToday();

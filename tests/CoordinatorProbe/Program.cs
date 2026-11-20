@@ -3045,9 +3045,10 @@ internal static class Program
             mainXaml.Split("NavBtn").Length == 5);
         Check("导航/标题栏不再有三页切换",
             !mainXaml.Contains("Style=\"{StaticResource SegBtn}\" Checked=\"SegPage_Checked\"")); 
+        // v1.32 那条横贯的 Border 换成了悬浮的 Grid，判据跟着改：底栏占第 2 行、状态条在第 3 行
         Check("导航/底栏在状态条上面",
-            mainXaml.IndexOf("<Border Grid.Row=\"2\" Background=\"{DynamicResource CardBgBrush}\"", StringComparison.Ordinal) > 0 &&
-            mainXaml.Contains("x:Name=\"StatusBarBorder\""));
+            mainXaml.Contains("x:Name=\"NavShell\"") &&
+            mainXaml.Contains("<Border Grid.Row=\"3\" x:Name=\"StatusBarBorder\""));
         Check("合并/工具设置搬进启动页",
             mainXaml.IndexOf("x:Name=\"ToolButtonHost\"", StringComparison.Ordinal) <
             mainXaml.IndexOf("x:Name=\"PageSettings\"", StringComparison.Ordinal));
@@ -3131,6 +3132,34 @@ internal static class Program
         Check("图标/m9a 是真 PNG",
             System.IO.File.Exists("Dragon Butler/Assets/icons/m9a.png") &&
             new System.IO.FileInfo("Dragon Butler/Assets/icons/m9a.png").Length < 120_000);
+
+        // ---- 11g) v1.32 悬浮标签栏 + 设置页卡片墙 ----
+        // 参考的是 Figma 那套做法：选中底是一整块独立的圆角矩形在滑，
+        // 不是每一项各画各的底轮流亮。这一条改回去，整个动效就没了。
+        Check("标签栏/是浮起来的一块胶囊", mainXaml.Contains("x:Name=\"NavShell\"") && mainXaml.Contains("CornerRadius=\"25\""));
+        Check("标签栏/那块底是独立的一层", mainXaml.Contains("x:Name=\"NavPill\"") && mainXaml.Contains("x:Name=\"NavPillShift\""));
+        Check("标签栏/底不挡点击", mainXaml.Contains("IsHitTestVisible=\"False\""));
+        // 单项自己不再画底：NavBtn 模板里连命名容器都没有了，只剩 ContentPresenter。
+        // 判据要切开来看——全文里别的样式也有叫 Bd 的 Border，整段搜会误判。
+        string navStyle = SliceBetween(mainXaml, "x:Key=\"NavBtn\"", "</Style>");
+        Check("标签栏/单项不再各画各的底", navStyle.Length > 0 && !navStyle.Contains("x:Name=\"Bd\""));
+        Check("标签栏/底会滑", mainCs.Contains("MoveNavPill("));
+        Check("标签栏/滑到底带一点回弹", mainCs.Contains("new BackEase") && mainCs.Contains("Amplitude = 0.32"));
+        Check("标签栏/点按钮也让底动", mainCs.Contains("MoveNavPill(index, animate: true);"));
+        // 拖动：小于 4px 算点击，否则手上抖一下就把页翻走了
+        Check("标签栏/拖起来能换位置", mainCs.Contains("NavShell_PreviewMouseMove"));
+        Check("标签栏/抖一下不算拖", mainCs.Contains("< 4) return;"));
+        Check("标签栏/松手吸附到最近一项", mainCs.Contains("NavIndexAt(") && mainCs.Contains("MoveNavPill(want, animate: true);"));
+        Check("标签栏/拖了就等于点了", mainCs.Contains("if (want != _page) ShowPage(want);"));
+
+        // 设置页卡片墙：米游社那张占整行（有按钮和说明），插件与通知并排，高级与系统各占整行
+        Check("设置页/米游社那张占整行", mainXaml.Contains("<Border Grid.Row=\"0\" Grid.ColumnSpan=\"2\""));
+        Check("设置页/右列比左列宽", mainXaml.Contains("<ColumnDefinition Width=\"2*\"/>"));
+        Check("设置页/并排的两张不被拉高", mainXaml.Contains("VerticalAlignment=\"Top\""));
+        // 位置由 Grid.Row/Column 决定，跟标签在文件里的先后没关系——判标签顺序会自找麻烦
+        Check("设置页/通知在右列第一排",
+            mainXaml.Contains("x:Name=\"NotifyCard\" Grid.Row=\"1\" Grid.Column=\"1\""));
+        Check("设置页/高级设置占第二排", mainXaml.Contains("<Border Grid.Row=\"2\" Grid.ColumnSpan=\"2\" Style=\"{StaticResource Card}\""));
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）
@@ -6117,6 +6146,19 @@ internal static class Program
         string root = Path.GetDirectoryName(typeof(QueueService).Assembly.Location) ?? ".";
         for (int i = 0; i < 5; i++) root = Path.GetDirectoryName(root) ?? root;
         return File.ReadAllText(Path.Combine(root, relative));
+    }
+
+    /// <summary>
+    /// 从文本里切出一段：从 from 开始，到其后第一个 to 结束（含）。
+    /// 用来把「某个样式里到底写了什么」和全文分开——全文里同名容器不止一个，整段搜必误判。
+    /// </summary>
+    private static string SliceBetween(string text, string from, string to)
+    {
+        int start = text.IndexOf(from, StringComparison.Ordinal);
+        if (start < 0) return "";
+        int end = text.IndexOf(to, start + from.Length, StringComparison.Ordinal);
+        if (end < 0) return text.Substring(start);
+        return text.Substring(start, end - start + to.Length);
     }
 
     /// <summary>
