@@ -997,6 +997,66 @@ public partial class MainWindow : Window
     /// <summary>v1.13：打开「今日运行」——今天这一盘跑了什么、各花多久。</summary>
     private void BtnToday_Click(object sender, RoutedEventArgs e) => OpenToday();
 
+    // ===== 消息中心（v1.28）=====
+
+    /// <summary>
+    /// 打开消息中心。**不阻塞**：用 Show 而不是 ShowDialog——它是一张可以随时放下的清单，
+    /// 不是必须处理完才能继续的关卡。开着它的时候队列照跑。
+    /// </summary>
+    private void BtnNotice_Click(object sender, RoutedEventArgs e) => OpenNotices();
+
+    private void OpenNotices()
+    {
+        try
+        {
+            // 已经开着一个就把它提到前面，别开第二份（两张一样的清单会让人以为漏看了什么）
+            foreach (Window w in Application.Current.Windows)
+            {
+                if (w is NoticeWindow existing)
+                {
+                    existing.Activate();
+                    return;
+                }
+            }
+
+            var win = new NoticeWindow { Owner = this };
+            win.Closed += (_, _) => RefreshNoticeBadge();
+            win.Show();
+            RefreshNoticeBadge();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开消息中心失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 刷新标题栏红点。没消息就把整块藏起来——不留一个空圈。
+    /// 这个方法会被 <see cref="NoticeCenter"/> 在各处回调，所以要能容忍主窗还没建好的时刻。
+    /// </summary>
+    internal void RefreshNoticeBadge()
+    {
+        try
+        {
+            if (NoticeBadge == null || TbNoticeBadge == null) return;
+            int unread = NoticeCenter.UnreadCount;
+            if (unread <= 0)
+            {
+                NoticeBadge.Visibility = Visibility.Collapsed;
+                if (BtnNotice != null) BtnNotice.ToolTip = "消息中心";
+                return;
+            }
+
+            NoticeBadge.Visibility = Visibility.Visible;
+            TbNoticeBadge.Text = unread > 99 ? "99+" : unread.ToString();
+            if (BtnNotice != null)
+            {
+                BtnNotice.ToolTip = $"消息中心 · {unread} 条没看";
+            }
+        }
+        catch { }
+    }
+
     private void OpenToday()
     {
         try
@@ -4478,6 +4538,9 @@ public partial class MainWindow : Window
     {
         if (_suppressToggle) return;
         AppState.Settings.StayInTray = TgStayTray.IsChecked == true;
+        // v1.28：这个提示说的是「这个开关打开之后会怎样」。开关重新打开，
+        // 提示也该重新有机会出现一次；否则关掉再开的人，永远看不到那句解释。
+        if (AppState.Settings.StayInTray) NotifyService.ResetTrayNote();
         AppState.SaveSettings();
     }
 
@@ -5881,7 +5944,10 @@ public partial class MainWindow : Window
         if (App.ForceExit || !AppState.Settings.StayInTray) return;
         e.Cancel = true;
         Hide();
-        App.Instance?.ShowBalloon(NotifyLevel.Info, "一条龙管家",
+        // v1.28：以前这里直接 ShowBalloon，绕开了「不推送」的判断——
+        // 在向导里选了不推送的人，一关窗口照样挨一下气泡。改走 ShowTrayNote。
+        // 那里面还有两道闸：选了不推送就一条都不弹；这台机器只提醒一次。
+        NotifyService.ShowTrayNote(NotifyLevel.Info, "一条龙管家",
             "一条龙管家 仍在后台运行，双击托盘图标可打开。");
 
         // v1.21 / 内存方案 B：收进托盘就把整窗销毁，把「已经画到屏幕上」的那 28 MB 还回去。

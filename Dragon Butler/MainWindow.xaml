@@ -721,6 +721,37 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- v1.28：消息中心按钮。一个信封 + 右上角红点（未读数）。
+             以前出错的提示是弹窗，弹完就没了；现在收在同一个地方，
+             红点只回答「有没有新的」，点开才展开。 -->
+        <Style x:Key="NoticeBtn" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+            <Setter Property="Width" Value="34"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlBgBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border x:Name="WindowFrame" CornerRadius="16" Background="{DynamicResource WindowBgBrush}"
@@ -743,6 +774,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
@@ -800,10 +832,38 @@
                     </StackPanel>
                 </Border>
 
-                <Button Grid.Column="3" x:Name="BtnMinWin" Content="—" Style="{StaticResource WinBtn}"
+                <!-- v1.28：消息中心。信封 + 右上角红点。
+                     红点里的数字是「没看过的条数」，不是「总条数」——它说的是「有新东西」，
+                     不是「你一共收到过多少」。点开即清。 -->
+                <Grid Grid.Column="3" VerticalAlignment="Center" Margin="0,0,4,0">
+                    <Button x:Name="BtnNotice" Style="{StaticResource NoticeBtn}"
+                            Click="BtnNotice_Click" ToolTip="消息中心">
+                        <Grid Width="18" Height="18">
+                            <!-- 信封：一个矩形 + 两道折线，16×16 的网格里画，缩放交给 Viewbox 语义 -->
+                            <Path Data="M1.5,4 L14.5,4 L14.5,12.5 L1.5,12.5 Z"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.3" StrokeLineJoin="Round"/>
+                            <Path Data="M1.5,4.4 L8,9 L14.5,4.4"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.3" StrokeLineJoin="Round" StrokeStartLineCap="Round"/>
+                        </Grid>
+                    </Button>
+                    <!-- 红点：没消息时整块隐藏（不留一个空圈） -->
+                    <Border x:Name="NoticeBadge" Visibility="Collapsed"
+                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="0,-2,-2,0" MinWidth="14" Height="14" CornerRadius="7"
+                            Background="{DynamicResource DangerBrush}" Padding="3,0,3,0"
+                            IsHitTestVisible="False">
+                        <TextBlock x:Name="TbNoticeBadge" Text="1" FontSize="9" FontWeight="SemiBold"
+                                   Foreground="White" HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+                </Grid>
+
+                <Button Grid.Column="4" x:Name="BtnMinWin" Content="—" Style="{StaticResource WinBtn}"
                         Margin="0,0,2,0" VerticalAlignment="Center" Click="BtnMinWin_Click"
                         ToolTip="最小化"/>
-                <Button Grid.Column="4" x:Name="BtnCloseWin" Content="✕" Style="{StaticResource WinBtn}"
+                <Button Grid.Column="5" x:Name="BtnCloseWin" Content="✕" Style="{StaticResource WinBtn}"
                         Margin="0,0,6,0" VerticalAlignment="Center" Click="BtnCloseWin_Click"
                         ToolTip="关闭（可在托盘继续运行）"/>
             </Grid>

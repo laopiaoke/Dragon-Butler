@@ -179,6 +179,9 @@ public static class QueueService
         catch (Exception ex)
         {
             LogService.LogEvent("队列异常：" + ex);
+            // v1.28：整条队列炸掉以前只落在日志里，用户第二天只会觉得「今晚没跑」。
+            // 这条必须进消息中心——它是「今晚白等了」最直接的原因。
+            NoticeCenter.AddCrash("队列没能跑完", ex.ToString(), title: "队列整个中断了");
             return false;
         }
         finally
@@ -715,7 +718,21 @@ public static class QueueService
         }
 
         if (last.State is ToolRunState.Failed or ToolRunState.Timeout)
+        {
             NotifyService.Show(NotifyLevel.Warning, "龙管家", $"{profile.DisplayName} 未完成：{last.Reason}");
+            // v1.28：跑失败这件事以前只有一句气泡，飘过去就没了。留在消息中心，
+            // 第二天早上打开就能看见是哪一项没成、为什么。
+            string whyBody = last.State switch
+            {
+                ToolRunState.Timeout => "等它跑完的时间超过了档案里写的上限，管家中途收手了。"
+                                        + "如果是第一次这样，多半是那一局比平时长；连着这样就要调一下上限。",
+                _ => "它自己退出了，但没有给出「我跑完了」的信号——可能是崩了，也可能是被别的程序关掉了。",
+            };
+            NoticeCenter.AddError(
+                $"{profile.DisplayName} 没跑成",
+                (string.IsNullOrWhiteSpace(last.Reason) ? whyBody : last.Reason + "\n" + whyBody),
+                $"state={last.State} attempts={last.Attempts} elapsed={last.Elapsed:mm\\:ss} reason={last.Reason}");
+        }
 
         // v1.6 / F2：把终态记进台账，「接着跑」靠它判断今天哪些项还没成
         RunJournal.Record(last);

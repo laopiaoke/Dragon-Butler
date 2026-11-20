@@ -74,6 +74,9 @@ public partial class App : Application
 
         _win = new MainWindow();
         _win.Show();
+        // v1.28：主窗建好之后才刷红点——之前 CrashGuard 记的「上次没收好尾」
+        // 就是这时候才亮起来的，早于这一刻控件还不存在。
+        RefreshNoticeBadge();
 
         // v1.5 晨报：每天首次启动播报一句（默认关）
         MorningReportService.MaybeShow();
@@ -233,6 +236,20 @@ public partial class App : Application
                 item.BackColor = back;
                 item.ForeColor = fore;
             }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 刷新消息中心红点（v1.28）。消息中心在各处写消息时会回调这里；
+    /// 主窗可能还没建好、也可能已经被收进托盘销毁了，两种情况都要安静地跳过。
+    /// </summary>
+    public void RefreshNoticeBadge()
+    {
+        try
+        {
+            if (_win == null) return;
+            _win.RefreshNoticeBadge();
         }
         catch { }
     }

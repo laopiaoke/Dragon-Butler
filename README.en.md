@@ -44,10 +44,13 @@ It does exactly four things: start processes, read the public logs those tools w
 - **You can't tell what it decided for you** — every skip, defer, restart and abort leaves one sentence of *why*, listed by time under "Today".
 - **No sense of "how does today compare"** — it compares against your own 14-day median, not a hard-coded threshold, and stays quiet when samples are thin.
 - **No idea how much time it saved you** — one number: hours it ran for you this month.
+- **A crash prompt ate the whole night** — no more dialogs. Crashes, tools that failed to launch and interrupted queues go into the message centre in the title bar, each translated into plain language (what happened / why / what you can do). The dot stays lit until you look, and never blocks startup.
 
 ## One self-imposed rule
 
-**This program's success metric is: you open it less often.** No daily-active chasing, no message centre, no "come back and check". A good night means you glance once the next day and read "done". If you haven't opened it in a month, it did its job.
+**This program's success metric is: you open it less often.** No daily-active chasing, no "come back and check", no streak counters. A good night means you glance once the next day and read "done". If you haven't opened it in a month, it did its job.
+
+The one exception is **when something goes wrong**: a crash, a tool that wouldn't start, a queue that broke off. Those land in the message centre (envelope icon in the title bar, red dot when unread) and wait there. It would rather stay quiet than block an unattended night behind a dialog box.
 
 ## Quick start
 
@@ -65,6 +68,7 @@ Everything sits next to the exe; deleting the folder uninstalls it (turn off aut
 ```
 config\settings.json        all settings, hand-editable
 config\group_archive.json   which config groups ran each day
+config\notices.json         message centre (capped at 100)
 tools\*.json                tool profiles
 全部日志\                    runtime log — check here first
 全部日志\incidents\          failure bundles
@@ -123,7 +127,7 @@ Requires .NET 8 SDK. Zero NuGet dependencies:
 dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
 ```
 
-Tests run through a hand-written probe: 84 modes, several hundred assertions.
+Tests run through a hand-written probe: 85 modes, over a thousand assertions.
 
 ```
 dotnet build tests\CoordinatorProbe\CoordinatorProbe.csproj -c Release
@@ -155,4 +159,4 @@ Released under [GNU AGPL-3.0](LICENSE). You may use, modify and redistribute it 
 
 ## Version
 
-Latest release **v1.27** (in-app `1.27.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).
+Latest release **v1.28** (in-app `1.28.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).

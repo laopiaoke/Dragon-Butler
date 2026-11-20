@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace DragonButler;
@@ -53,6 +54,26 @@ public static class LogService
         {
             // 崩溃落盘失败也不能再抛
         }
+    }
+
+    /// <summary>
+    /// 读最近一份崩溃转储的内容（给消息中心当「上次为什么没收好尾」的证据）。
+    /// 没有崩溃文件时返回 null——那种情况通常是断电、被任务管理器结束、或者蓝屏，
+    /// 本来就没有堆栈可看，不该编一个出来。
+    /// </summary>
+    public static string? LastCrashSummary()
+    {
+        try
+        {
+            if (!Directory.Exists(Dir)) return null;
+            var files = Directory.GetFiles(Dir, "*_崩溃.txt");
+            if (files.Length == 0) return null;
+            var newest = files.OrderByDescending(f => File.GetLastWriteTime(f)).First();
+            string text = File.ReadAllText(newest);
+            // 文件很小（时间/场景/堆栈），原样带过去；太长的话截断，消息中心不是日志查看器
+            return text.Length > 6000 ? text.Substring(0, 6000) + "\n…（后面还有，见日志目录）" : text;
+        }
+        catch { return null; }
     }
 
     /// <summary>清理 30 天前的日志文件（含 screenshots 子目录）</summary>

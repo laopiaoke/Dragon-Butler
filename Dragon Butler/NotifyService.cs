@@ -177,6 +177,42 @@ Write-Output 'TOAST_OK'
         catch { return false; }
     }
 
+    /// <summary>
+    /// 收进托盘时的一句话（v1.28）。
+    ///
+    /// 这条以前是在 <c>MainWindow.Window_Closing</c> 里直接调 <c>App.Instance.ShowBalloon</c>
+    /// 硬弹的，绕开了 <see cref="Show"/> 里「选了不推送就一条都别弹」的判断——
+    /// 于是用户在向导里选了「不推送」，一关窗口照样挨一下系统气泡。
+    ///
+    /// 它本身不是「推送」：推送是把结果送到人不在的地方，这条只是告诉坐在屏幕前的人
+    /// 「窗口没了但程序还在」。所以它只走本地气泡，不走远程渠道；但「不推送」是一个
+    /// 更强的意愿，说了不弹就一条都不弹——托盘图标还在，双击能开回来。
+    /// </summary>
+    public static void ShowTrayNote(NotifyLevel level, string title, string message)
+    {
+        try
+        {
+            if (ParseChannel(AppState.Settings.NotifyMode) == PushChannel.Off) return;
+
+            // 这台机器上只说一次。第一次关窗口要告诉人「不是退出了」；
+            // 第二次还说，就是在提醒一个已经知道的人——那正是「一堆通知」的来源。
+            // 存进设置而不是只放内存：「第一次」按机器算，不按进程算，
+            // 否则每次重开程序都算第一次，这提示就永远弹不完。
+            if (AppState.Settings.TrayNoticeShown) return;
+            AppState.Settings.TrayNoticeShown = true;
+            AppState.SaveSettings();
+
+            App.Instance?.ShowBalloon(level, title, message);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 重新给一次机会（v1.28）：关掉「关窗口到托盘」再打开，或者换台机器装，
+    /// 这个提示都该重新有机会出现一次——它说的是当前这个开关的效果。
+    /// </summary>
+    public static void ResetTrayNote() => AppState.Settings.TrayNoticeShown = false;
+
     /// <summary>发送测试消息（默认当前渠道，也可指定渠道）</summary>
     public static async Task<(bool ok, string err)> SendTestAsync(PushChannel? channel = null)
     {

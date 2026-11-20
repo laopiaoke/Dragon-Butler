@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -28,23 +28,30 @@ public static class CrashGuard
             if (LogService.CheckLastExit())
             {
                 LogService.LogEvent("检测到上次为异常退出");
-                // 统一的应用内弹窗（替代系统 MessageBox）：标题/配色/字体/图标与主界面一致
-                AppDialog.Show(
-                    "检测到上次为异常退出，程序未能正常收尾。\n崩溃信息与运行日志已保存，可打开日志目录查看。",
-                    detail: LogService.Dir,
-                    kind: AppDialog.Kind.Warning,
-                    title: "一条龙管家",
-                    primary: "知道了",
-                    secondary: "打开日志目录",
-                    secondaryAction: OpenLogDir);
+
+                // v1.28：这里原来调 AppDialog.Show（模态）。它在 OnStartup 里排在
+                // 「软件启动后自动开跑」前面，于是人不在电脑前的时候，整晚卡在一个
+                // 没人点的「知道了」上——用户第二天看到的正是「只弹了个崩溃提示，
+                // 一条龙没跑」。不阻塞比「让人看见」重要：改成记一条，红点亮着等人来看。
+                string? lastCrash = LogService.LastCrashSummary();
+                NoticeCenter.AddCrash(
+                    "上次没有正常收尾",
+                    lastCrash,
+                    title: "上次没有正常收尾，程序是被硬关掉或崩掉的");
             }
         }
         catch { }
 
-        // 钩子一：非 UI 线程未处理异常 → 先写盘
+        // 钩子一：非 UI 线程未处理异常 → 先写盘，再记进消息中心
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
             try { LogService.WriteCrash("AppDomain.UnhandledException", e.ExceptionObject as Exception); }
+            catch { }
+            try
+            {
+                NoticeCenter.AddCrash("后台线程崩了（AppDomain）",
+                    (e.ExceptionObject as Exception)?.ToString());
+            }
             catch { }
         };
 
@@ -52,6 +59,11 @@ public static class CrashGuard
         Application.Current.DispatcherUnhandledException += (s, e) =>
         {
             try { LogService.WriteCrash("DispatcherUnhandledException", e.Exception); }
+            catch { }
+            try
+            {
+                NoticeCenter.AddCrash("界面线程出错（Dispatcher）", e.Exception?.ToString());
+            }
             catch { }
         };
 
@@ -61,6 +73,9 @@ public static class CrashGuard
             try
             {
                 LogService.WriteCrash("TaskScheduler.UnobservedTaskException", e.Exception);
+                // 后台任务抛了没人接，进程不会死，但这一轮的事情确实没做完——
+                // 以前它只落在日志里，用户永远不知道；现在留一条在消息中心。
+                NoticeCenter.AddCrash("后台任务出错（Task）", e.Exception?.ToString());
                 e.SetObserved();
             }
             catch { }
@@ -78,8 +93,8 @@ public static class CrashGuard
         catch { }
     }
 
-    /// <summary>打开日志目录（异常退出提示的次按钮）</summary>
-    private static void OpenLogDir()
+    /// <summary>打开日志目录（消息中心里也有同一个入口，这里留着给托盘菜单复用）</summary>
+    public static void OpenLogDir()
     {
         try
         {

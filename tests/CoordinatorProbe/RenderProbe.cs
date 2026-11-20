@@ -804,6 +804,36 @@ internal static class RenderProbe
                         w.Close();
                     }
 
+                    // v1.28：消息中心。这一张要证明的是「崩溃也能翻成人话」——
+                    // 种三条假消息（一条程序自己踩空、一条权限、一条普通提醒），
+                    // 落盘换到临时文件，绝不碰用户真实的 notices.json。
+                    if (mode == "notice" || mode == "all")
+                    {
+                        string sandbox = Path.Combine(Path.GetTempPath(), "dragon-notice-render.json");
+                        NoticeCenter.PathOverride = sandbox;
+                        NoticeCenter.Reload();
+                        try { if (File.Exists(sandbox)) File.Delete(sandbox); } catch { }
+
+                        NoticeCenter.AddCrash("上次没有正常收尾",
+                            "System.NullReferenceException: 未将对象引用设置到对象的实例。\n   在 DragonButler.QueueService.StartAsync()",
+                            "上次没有正常收尾，程序是被硬关掉或崩掉的");
+                        NoticeCenter.AddCrash("工具没能启动",
+                            "System.UnauthorizedAccessException: 对路径\"C:\\Program Files\\BetterGI\\BetterGI.exe\"的访问被拒绝。\n   在 System.Diagnostics.Process.StartWithCreateProcess()",
+                            "BetterGI 没能启动");
+                        NoticeCenter.AddError("ok-ww 没跑成",
+                            "它自己退出了，但没有给出「我跑完了」的信号——可能是崩了，也可能是被别的程序关掉了。",
+                            "state=Failed attempts=2 elapsed=03:41 reason=退出码 1");
+
+                        var w = new NoticeWindow();
+                        bool ok = Save(w, Path.Combine(spot, "notice.png"), 720, 560);
+                        Console.WriteLine($"RENDER notice={ok}");
+                        w.Close();
+
+                        NoticeCenter.PathOverride = null;
+                        NoticeCenter.Reload();
+                        try { if (File.Exists(sandbox)) File.Delete(sandbox); } catch { }
+                    }
+
                     // v1.21：点开一个格子之后的启动设置窗，四张分别是
                     // BetterGI（文档写过参数）/ ok-ww（实战见过）/ 绝区零（全要自己填）/ 自定义工具（什么都没有）
                     if (mode == "launch" || mode == "all")
