@@ -117,8 +117,7 @@ internal static class Program
         "toolcatalog" => RunToolCatalog(),
         "pager" => RunPager(),
             "notice" => RunNotice(),
-            "miyoushe" => RunMiyoushe(),
-            _ => Help(),
+                _ => Help(),
         };
     }
 
@@ -2251,26 +2250,29 @@ internal static class Program
         }
 
         // ---- 1) 基本常量 ----
-        Check("常量/共三页", Pager.Count == 3, Pager.Count.ToString());
-        Check("常量/打开落在启动页", Pager.Home == 1, Pager.Home.ToString());
+        Check("常量/共四页", Pager.Count == 4, Pager.Count.ToString());
+        Check("常量/打开落在主页", Pager.Home == 1, Pager.Home.ToString());
 
         // ---- 2) 夹取：不环绕 ----
         Check("夹取/负数变 0", Pager.Clamp(-3) == 0);
-        Check("夹取/超界变 2", Pager.Clamp(9) == 2);
+        Check("夹取/超界变 3", Pager.Clamp(9) == 3);
         Check("夹取/合法值不动", Pager.Clamp(1) == 1);
 
         // ---- 3) 每页摆位 ----
         var atHome = Pager.Offsets(1);
-        Check("摆位/启动页时自己为 0", atHome[1] == 0, atHome[1].ToString());
-        Check("摆位/启动页时左页为 -1", atHome[0] == -1, atHome[0].ToString());
-        Check("摆位/启动页时右页为 +1", atHome[2] == 1, atHome[2].ToString());
+        Check("摆位/主页时自己为 0", atHome[1] == 0, atHome[1].ToString());
+        Check("摆位/主页时日志页为 -1", atHome[0] == -1, atHome[0].ToString());
+        Check("摆位/主页时设置页为 +1", atHome[2] == 1, atHome[2].ToString());
+        Check("摆位/主页时插件页为 +2", atHome[3] == 2, atHome[3].ToString());
         var atRun = Pager.Offsets(0);
-        Check("摆位/运行页时启动页在 +1", atRun[1] == 1, atRun[1].ToString());
-        Check("摆位/运行页时设置页在 +2", atRun[2] == 2, atRun[2].ToString());
+        Check("摆位/日志页时主页在 +1", atRun[1] == 1, atRun[1].ToString());
+        Check("摆位/日志页时设置页在 +2", atRun[2] == 2, atRun[2].ToString());
+        Check("摆位/日志页时插件页在 +3", atRun[3] == 3, atRun[3].ToString());
         var atSettings = Pager.Offsets(2);
-        Check("摆位/设置页时启动页在 -1", atSettings[1] == -1, atSettings[1].ToString());
-        Check("摆位/设置页时运行页在 -2", atSettings[0] == -2, atSettings[0].ToString());
-        Check("摆位/越界按夹取算", Pager.Offsets(99)[2] == 0, Pager.Offsets(99)[2].ToString());
+        Check("摆位/设置页时主页在 -1", atSettings[1] == -1, atSettings[1].ToString());
+        Check("摆位/设置页时日志页在 -2", atSettings[0] == -2, atSettings[0].ToString());
+        Check("摆位/设置页时插件页在 +1", atSettings[3] == 1, atSettings[3].ToString());
+        Check("摆位/越界按夹取算", Pager.Offsets(99)[3] == 0, Pager.Offsets(99)[3].ToString());
 
         // ---- 4) 横滑 ----
         const double W = 1000;   // 阈值 = max(80, 120) = 120
@@ -2280,7 +2282,8 @@ internal static class Program
         Check("滑/刚好到阈值算翻页", Pager.Swipe(1, -120, W) == 2, Pager.Swipe(1, -120, W).ToString());
         Check("滑/差一点点不算", Pager.Swipe(1, -119, W) == 1, Pager.Swipe(1, -119, W).ToString());
         Check("滑/第一页往右滑停住", Pager.Swipe(0, 500, W) == 0, Pager.Swipe(0, 500, W).ToString());
-        Check("滑/最后一页往左滑停住", Pager.Swipe(2, -500, W) == 2, Pager.Swipe(2, -500, W).ToString());
+        Check("滑/最后一页往左滑停住", Pager.Swipe(3, -500, W) == 3, Pager.Swipe(3, -500, W).ToString());
+        Check("滑/设置页往左到插件页", Pager.Swipe(2, -300, W) == 3, Pager.Swipe(2, -300, W).ToString());
         Check("滑/窄窗口阈值地板 80", Pager.Swipe(1, -100, 400) == 2, Pager.Swipe(1, -100, 400).ToString());
         Check("滑/窄窗口 79 不算", Pager.Swipe(1, -79, 400) == 1, Pager.Swipe(1, -79, 400).ToString());
         Check("滑/宽度为 0 不崩", Pager.Swipe(1, -200, 0) == 2, Pager.Swipe(1, -200, 0).ToString());
@@ -2291,16 +2294,19 @@ internal static class Program
         Check("阈值/宽度 0 也不小于 80", Pager.SwipeThreshold(0) >= 80, Pager.SwipeThreshold(0).ToString());
 
         // ---- 6) 页码名字 ----
-        Check("名字/0 是运行", Pager.Name(0) == "运行", Pager.Name(0));
-        Check("名字/1 是启动", Pager.Name(1) == "启动", Pager.Name(1));
+        Check("名字/0 是日志", Pager.Name(0) == "日志", Pager.Name(0));
+        Check("名字/1 是主页", Pager.Name(1) == "主页", Pager.Name(1));
         Check("名字/2 是设置", Pager.Name(2) == "设置", Pager.Name(2));
-        Check("名字/越界也认", Pager.Name(99) == "设置", Pager.Name(99));
+        Check("名字/3 是插件", Pager.Name(3) == "插件", Pager.Name(3));
+        Check("名字/越界也认", Pager.Name(99) == "插件", Pager.Name(99));
 
-        // ---- 7) 接线：窗口必须真的用这三样东西 ----
+        // ---- 7) 接线：窗口必须真的用这几样东西 ----
         string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
         string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
-        Check("接线/标题栏有三个页面按钮", mainXaml.Contains("SegPageRun") && mainXaml.Contains("SegPageHome") && mainXaml.Contains("SegPageSettings"));
-        Check("接线/三页各有一个平移量", mainXaml.Contains("ShiftRun") && mainXaml.Contains("ShiftHome") && mainXaml.Contains("ShiftSettings"));
+        Check("接线/底栏有四个页面按钮", mainXaml.Contains("SegPageRun") && mainXaml.Contains("SegPageHome")
+                                          && mainXaml.Contains("SegPageSettings") && mainXaml.Contains("SegPagePlugins"));
+        Check("接线/四页各有一个平移量", mainXaml.Contains("ShiftRun") && mainXaml.Contains("ShiftHome")
+                                         && mainXaml.Contains("ShiftSettings") && mainXaml.Contains("ShiftPlugins"));
         Check("接线/切页走 Pager.Clamp", mainCs.Contains("Pager.Clamp("));
         Check("接线/摆位走 Pager.Offsets", mainCs.Contains("Pager.Offsets("));
         Check("接线/横滑走 Pager.Swipe", mainCs.Contains("Pager.Swipe("));
@@ -2308,144 +2314,6 @@ internal static class Program
         Check("接线/命令面板能跨页定位", mainCs.Contains("ShowPage(2)") && mainCs.Contains("ShowPage(0)"));
 
         Console.WriteLine($"RESULT pager fails={fails.Count}");
-        return fails.Count == 0 ? 0 : 1;
-    }
-
-    /// <summary>
-    /// v1.31：米游社签到。
-    ///
-    /// 这块最要紧的不是「能不能签上」（那得联网、还得有账号），而是三件以前做错过的事：
-    /// 一、扫码请求的 app_id 必须是米游社 App 那个；二、二维码得自己画、且画得对；
-    /// 三、凭证四件套缺一样时给出的提示是给用户看的，不是给人看堆栈的。
-    /// 二维码用「与标准实现逐格一致」当判据——本机没有能用的解码库，见路线图 v1.31。
-    /// </summary>
-    private static int RunMiyoushe()
-    {
-        var fails = new List<string>();
-        void Check(string name, bool ok, string detail = "")
-        {
-            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
-            if (!ok) fails.Add(name);
-        }
-
-        // ---- 1) cookie 认得出来 ----
-        string raw = "cookie_token=abc123; account_id=10001; ltoken=xyz; lmid=88";
-        var (cookie, stoken, stuid, mid, reason) =
-            MiyousheSession.FromCookieString(raw, "10001", "88");
-        Check("cookie/能认出 cookie_token", cookie.Contains("cookie_token=abc123"), cookie);
-        Check("cookie/能认出 uid", stuid == "10001", stuid);
-        // ltoken 要留着（浏览器那条路只给 ltoken/ltmid 时也能换 token），
-        // 但跟登录无关的项（设备指纹、设备 id 之类）不该被当成凭证存下来。
-        Check("cookie/跟登录无关的项不存", !cookie.Contains("_MHYUUID"), cookie);
-        Check("cookie/没意见时 reason 是空的", reason.Length == 0, reason);
-
-        var bad = MiyousheSession.FromCookieString("hello=1; world=2");
-        Check("cookie/缺 cookie_token 要说人话", bad.Reason.Contains("cookie_token"), bad.Reason);
-
-        Check("cookie/空输入不炸", MiyousheSession.FromCookieString(null).Reason.Length > 0);
-
-        // ---- 2) stoken 要不要 mid ----
-        Check("stoken/v2_ 开头要 mid", MiyousheSession.NeedsMid("v2_abcdef"));
-        Check("stoken/普通 stoken 不要 mid", !MiyousheSession.NeedsMid("abcdef"));
-        Check("stoken/空的不炸", !MiyousheSession.NeedsMid(null));
-
-        // ---- 3) 签名格式 ----
-        string ds = MiyousheSign.Ds(web: false);
-        var parts = ds.Split(',');
-        Check("签名/三段", parts.Length == 3, ds);
-        // 第一段是时间戳，不是盐；盐藏在第三段的 md5 里，验不了。
-        // 这里只验「第一段确实是秒级时间戳」，盐的归属靠下面那条 ds2 的断言和源码里的常量名。
-        long stamp = long.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
-        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        Check("签名/第一段是秒级时间戳", Math.Abs(now - stamp) < 120, parts[0]);
-        Check("签名/第三段是 32 位 md5", parts[2].Length == 32, parts[2]);
-        Check("签名/网页版的 r 是六位数", MiyousheSign.Ds(web: true).Split(',')[1].Length == 6);
-        Check("签名/两个盐不是同一个", MiyousheSign.SaltApp != MiyousheSign.SaltBbs);
-
-        // ---- 4) 接口说人话 ----
-        Check("解释/-100 是登录态过期", MiyousheSign.Explain(-100).Contains("登录"), MiyousheSign.Explain(-100));
-        Check("解释/1034 是风控", MiyousheSign.Explain(1034).Contains("频") || MiyousheSign.Explain(1034).Contains("风控"));
-        Check("解释/5003 是没绑角色", MiyousheSign.Explain(5003).Length > 0);
-        Check("解释/没见过的码也不留空", MiyousheSign.Explain(-99999).Length > 0);
-
-        // ---- 5) 二维码：尺寸、留白、定位图形 ----
-        var m = QrCode.Encode("HELLO");
-        Check("二维码/能编出来", m != null);
-        if (m != null)
-        {
-            Check("二维码/HELLO 是 21×21", m.GetLength(0) == 21, m.GetLength(0).ToString());
-            Check("二维码/左上角有定位图形", m[0, 0] && m[6, 6] && m[0, 6]);
-            // 7×7 定位图形：外圈黑、第二圈白、正中 3×3 黑。
-            Check("二维码/定位图形有白环", !m[1, 1] && !m[1, 5] && !m[5, 1]);
-            Check("二维码/定位图形正中是黑的", m[3, 3] && m[2, 2] && m[4, 4]);
-            Check("二维码/右下角有固定黑点", m[21 - 8, 8]);
-        }
-        Check("二维码/空串也给一个", QrCode.Encode("") != null);
-        Check("二维码/长内容换大版本", QrCode.Encode(new string('A', 150))!.GetLength(0) == 45);
-        Check("二维码/太长就放弃", QrCode.Encode(new string('A', 4000)) == null);
-        Check("二维码/中文也能编", QrCode.Encode("你好") != null);
-
-        // 与标准实现逐格一致（mask 也一致）——这几个数字是用 python qrcode 库比对出来的，
-        // 见 docs/路线图.md v1.31。改了编码器这几个数就该变。
-        Check("二维码/HELLO 用 mask7", QrCode.DebugEncode("HELLO").Mask == 7);
-        Check("二维码/你好 用 mask4", QrCode.DebugEncode("你好").Mask == 4);
-
-        // ---- 6) 二维码画成图 ----
-        var bmp = QrBitmap.Render("HELLO", scale: 4, quiet: 2);
-        Check("位图/画得出来", bmp != null);
-        if (bmp != null)
-        {
-            int expected = (21 + 2 * 2) * 4;
-            Check("位图/尺寸含留白", (int)bmp.PixelWidth == expected, $"{bmp.PixelWidth} vs {expected}");
-            Check("位图/是冻结的（能跨线程画）", bmp.IsFrozen);
-        }
-        Check("位图/编不出来就返回空", QrBitmap.Render(new string('A', 4000)) == null);
-
-        // ---- 7) 接线：扫码入口必须在，而且不该是「用浏览器」当主按钮 ----
-        string loginXaml = ReadRepoSources("Dragon Butler/MiyousheLoginWindow.xaml");
-        string loginCs = ReadRepoSources("Dragon Butler/MiyousheLoginWindow.xaml.cs");
-        string qrCs = ReadRepoSources("Dragon Butler/MiyousheQr.cs");
-        string bbsCs = ReadRepoSources("Dragon Butler/MiyousheBbs.cs");
-        string svcCs = ReadRepoSources("Dragon Butler/MiyousheService.cs");
-        string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
-        string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
-
-        Check("接线/登录窗有扫码按钮", loginXaml.Contains("x:Name=\"BtnQr\"") && loginXaml.Contains("Click=\"BtnQr_Click\""));
-        Check("接线/扫码是主按钮（Primary 样式）",
-            loginXaml.Contains("BtnQr") && loginXaml.IndexOf("BtnQr", StringComparison.Ordinal)
-                < loginXaml.IndexOf("BtnBrowser", StringComparison.Ordinal));
-        Check("接线/有二维码面板", loginXaml.Contains("QrPanel") && loginXaml.Contains("QrImage"));
-        Check("接线/二维码有白底（暗色主题下也能扫）", loginXaml.Contains("Background=\"White\""));
-        Check("接线/实现里有 BtnQr_Click", loginCs.Contains("private async void BtnQr_Click"));
-        Check("接线/轮询扫没扫", loginCs.Contains("MiyousheQr.PollAsync("));
-        Check("接线/扫完就关窗", loginCs.Contains("DialogResult = true; Close();"));
-        Check("接线/换不出 cookie_token 时说清下一步", loginCs.Contains("cookie_token"));
-        Check("接线/关窗要停掉轮询", loginCs.Contains("StopQr();"));
-
-        Check("接线/app_id 是米游社那个", qrCs.Contains("ddxf5qt290cg"), "用错就是 -3005");
-        Check("接线/轮询复用同一个 device_id", qrCs.Contains("session.DeviceId"));
-        Check("接线/-3503 有单独的人话", qrCs.Contains("-3503"));
-        Check("接线/轮询前先看本地过期", qrCs.Contains("session.Expired"));
-
-        Check("接线/签到用对域名", bbsCs.Contains("bbs-api.miyoushe.com"));
-        Check("接线/403 不当 JSON 解析", bbsCs.Contains("IsSuccessStatusCode"));
-        Check("接线/有续期调用", bbsCs.Contains("getCookieAccountInfoBySToken"));
-        Check("接线/有区服 id 列表", svcCs.Contains("DefaultGids"));
-        Check("接线/签完写回设置", svcCs.Contains("MiyousheLastAt"));
-        Check("接线/失败进消息中心", svcCs.Contains("NoticeCenter.AddError("));
-
-        Check("接线/设置页有米游社卡", mainXaml.Contains("BtnMiyousheLogin") && mainXaml.Contains("BtnMiyousheSign"));
-        Check("接线/默认不自动签到", (!mainXaml.Contains("<ToggleButton x:Name=\"TgMiyousheAuto\" IsChecked=\"True\"")));
-        Check("接线/跑完会顺手签", mainCs.Contains("MiyousheService.SignNowAsync"));
-
-        // 自动签到默认关：不该偷偷插进「跑一条龙」的流程里。
-        Check("接线/自动签到开关默认关", AppState.Settings.MiyousheAutoSign == false);
-
-        // ---- 8) 零依赖底线 ----
-        string csproj = ReadRepoSources("Dragon Butler/Dragon Butler.csproj");
-        Check("底线/没有 PackageReference", !csproj.Contains("<PackageReference"));
-
-        Console.WriteLine($"RESULT miyoushe fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
     }
 
@@ -3040,9 +2908,10 @@ internal static class Program
             !ReadRepoSources("Dragon Butler/AppState.cs").Contains("ToolPageIndex"));
 
         // ---- 11c) v1.29 底部导航栏 + 两卡合并 + 插件卡 ----
-        Check("导航/三页按钮搬到底部",
+        // v1.34：三项变四项，NavBtn 的出现次数从 5（1 处定义 + 3 处引用 + 1）变成 6。
+        Check("导航/四个按钮搬到底部",
             mainXaml.Contains("Style=\"{StaticResource NavBtn}\"") &&
-            mainXaml.Split("NavBtn").Length == 5);
+            mainXaml.Split("NavBtn").Length == 6);
         Check("导航/标题栏不再有三页切换",
             !mainXaml.Contains("Style=\"{StaticResource SegBtn}\" Checked=\"SegPage_Checked\"")); 
         // v1.32 那条横贯的 Border 换成了悬浮的 Grid，判据跟着改：底栏占第 2 行、状态条在第 3 行
@@ -3057,8 +2926,9 @@ internal static class Program
             mainXaml.IndexOf("x:Name=\"ToolButtonHost\"", StringComparison.Ordinal) <
             mainXaml.IndexOf("x:Name=\"PageSettings\"", StringComparison.Ordinal));
         Check("合并/设置页不再有工具设置壳", !mainXaml.Contains("第二层：工具设置"));
-        Check("插件/有插件卡", mainXaml.Contains("x:Name=\"BtnFoldPlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
-        Check("插件/折叠头认它", mainCs.Contains("\"BtnFoldPlugins\" => PluginsBody"));
+        // v1.34：插件从折叠卡变成独立一页，折叠头没了，但它那一整套「读得懂/读不懂」都还在。
+        Check("插件/有自己的一页", mainXaml.Contains("x:Name=\"PagePlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
+        Check("插件/不再挂在折叠头下面", !mainXaml.Contains("x:Name=\"BtnFoldPlugins\"") && !mainCs.Contains("=> PluginsBody"));
         Check("插件/读得懂的与读不懂的都列出来", mainCs.Contains("PluginLoader.Scan()") && mainCs.Contains("没加载"));
         Check("插件/空着也说清不影响功能", mainCs.Contains("这不影响任何功能"));
 
@@ -3099,7 +2969,7 @@ internal static class Program
         Check("目录/设置走新根", appStateCs.Contains("Paths.Config(\"settings.json\")"));
         Check("目录/日志走新根", logCs.Contains("public static readonly string Dir = Paths.LogRoot;"));
         Check("目录/工具档案走新根", profileCs.Contains("public static string ToolsDir => Paths.ToolsDir;"));
-        Check("目录/插件走新根", pluginCs.Contains("public static string Root => Paths.PluginsDir;"));
+        Check("目录/插件走新根", pluginCs.Contains("public static string Root => RootOverride ?? Paths.PluginsDir;"));
         Check("目录/备份走新根", backupCs.Contains("public static string Dir => Paths.BackupDir;"));
         Check("目录/图标缓存走新根", iconCs.Contains("public static string CacheDir => Paths.CacheDir;"));
         Check("目录/音效走新根", soundCs.Contains("Paths.SoundsDir"));
@@ -3140,7 +3010,8 @@ internal static class Program
         // ---- 11g) v1.32 悬浮标签栏 + 设置页卡片墙 ----
         // 参考的是 Figma 那套做法：选中底是一整块独立的圆角矩形在滑，
         // 不是每一项各画各的底轮流亮。这一条改回去，整个动效就没了。
-        Check("标签栏/是浮起来的一块胶囊", mainXaml.Contains("x:Name=\"NavShell\"") && mainXaml.Contains("CornerRadius=\"25\""));
+        // v1.34：外壳从「实色 + 细边」换成液态玻璃（渐变底 + 投影），圆角 25 -> 27。
+        Check("标签栏/是浮起来的一块胶囊", mainXaml.Contains("x:Name=\"NavShell\"") && mainXaml.Contains("CornerRadius=\"27\""));
         Check("标签栏/那块底是独立的一层", mainXaml.Contains("x:Name=\"NavPill\"") && mainXaml.Contains("x:Name=\"NavPillShift\""));
         Check("标签栏/底不挡点击", mainXaml.Contains("IsHitTestVisible=\"False\""));
         // 单项自己不再画底：NavBtn 模板里连命名容器都没有了，只剩 ContentPresenter。
@@ -3156,17 +3027,16 @@ internal static class Program
         Check("标签栏/松手吸附到最近一项", mainCs.Contains("NavIndexAt(") && mainCs.Contains("MoveNavPill(want, animate: true);"));
         Check("标签栏/拖了就等于点了", mainCs.Contains("if (want != _page) ShowPage(want);"));
 
-        // 设置页卡片墙：米游社那张占整行（有按钮和说明），插件与通知并排，高级与系统各占整行
-        Check("设置页/米游社那张占整行", mainXaml.Contains("<Border Grid.Row=\"0\" Grid.ColumnSpan=\"2\""));
-        Check("设置页/右列比左列宽", mainXaml.Contains("<ColumnDefinition Width=\"2*\"/>"));
-        Check("设置页/并排的两张不被拉高", mainXaml.Contains("VerticalAlignment=\"Top\""));
-        // 位置由 Grid.Row/Column 决定，跟标签在文件里的先后没关系——判标签顺序会自找麻烦
-        Check("设置页/通知在右列第一排",
-            mainXaml.Contains("x:Name=\"NotifyCard\" Grid.Row=\"1\" Grid.Column=\"1\""));
-        // v1.33：外观卡插在「高级设置」前面占了一排，高级设置从 2 挪到 3。
-        Check("设置页/高级设置占第三排", mainXaml.Contains("<Border Grid.Row=\"3\" Grid.ColumnSpan=\"2\" Style=\"{StaticResource Card}\""));
+        // 设置页：v1.34 起四块全占整行（米游社搬成插件、插件搬去独立一页，没有并排的了）。
+        // 位置由 Grid.Row/Column 决定，跟标签在文件里的先后没关系——判标签顺序会自找麻烦。
+        Check("设置页/单列不再分左右", !mainXaml.Contains("<ColumnDefinition Width=\"2*\"/>"));
+        Check("设置页/四块都不再跨列", !mainXaml.Contains("Grid.ColumnSpan=\"2\" Style=\"{StaticResource Card}\""));
+        Check("设置页/通知排在第一排", mainXaml.Contains("x:Name=\"NotifyCard\" Grid.Row=\"0\""));
+        Check("设置页/高级设置占到第三排", mainXaml.Contains("<Border Grid.Row=\"2\" Style=\"{StaticResource Card}\""));
+        Check("设置页/系统在最后一排", mainXaml.Contains("<Border Grid.Row=\"3\" Style=\"{StaticResource Card}\""));
+        Check("设置页/米游社那张已经搬走", !mainXaml.Contains("BtnMiyousheLogin") && !mainXaml.Contains("BtnMiyousheSign"));
 
-        // ---- 11h) v1.33 导航栏点得动了 + 三段式玻璃主题开关 + 引导页不塞满 ----
+        // ---- 11h) v1.33 导航栏点得动了 + 主题开关 + 引导页不塞满 ----
 
         // ① 导航栏点不动的病根：按下就抢鼠标，RadioButton 收不到完整的按下/松开。
         // 判「没有那一句调用」而不是「没有这个词」——注释里正在解释这件事，会被自己绊倒。
@@ -3175,16 +3045,21 @@ internal static class Program
         Check("导航/松手才放开", mainCs.Contains("if (NavShell.IsMouseCaptured) NavShell.ReleaseMouseCapture();"));
         Check("导航/拖完别让按钮再补一次", SliceBetween(mainCs, "int want = NavIndexAt(_navPillX);", "}").Contains("e.Handled = true;"));
 
-        // ② 主题开关：三段、玻璃、可拖、有视差、自定义搬走
-        Check("主题/是三段不是四段", mainCs.Contains("private static readonly string[] ThemeModes = { \"Dark\", \"System\", \"Light\" };"));
-        Check("主题/默认停在中间那格", SliceBetween(mainCs, "private int ThemeModeIndex()", "\n    }").Contains("_ => 1,"));
+        // ② 主题开关：v1.34 收成两档、缩小、点得动
+        Check("主题/只剩深色和浅色两档", mainCs.Contains("private static readonly string[] ThemeModes = { \"Dark\", \"Light\" };"));
+        Check("主题/没有跟随系统那一档了", !mainXaml.Contains("x:Name=\"IconSystem\""));
+        Check("主题/旧配置按实际深浅落到一格", mainCs.Contains("if (i < 0) i = Theme.LastSchemeLight ? 1 : 0;"));
         Check("主题/有那块会滑的玻璃", mainXaml.Contains("x:Name=\"ThemeThumb\"") && mainXaml.Contains("x:Name=\"ThemeThumbShift\""));
-        Check("主题/玻璃比轨道高（探出去才看得出玻璃）", mainXaml.Contains("Width=\"58\" Height=\"42\" CornerRadius=\"21\""));
+        Check("主题/玻璃比轨道高（探出去才看得出玻璃）", mainXaml.Contains("Width=\"52\" Height=\"32\" CornerRadius=\"16\""));
+        Check("主题/整体缩小了", mainXaml.Contains("x:Name=\"ThemeSwitchRoot\" Width=\"112\" Height=\"38\""));
         Check("主题/边缘有色散", mainXaml.Contains("#66FF8FA3") && mainXaml.Contains("#668FD8FF"));
         Check("主题/投影用蓝色不用黑", mainXaml.Contains("Color=\"#FF1B3A6B\""));
         Check("主题/点图标能切", mainCs.Contains("Array.FindIndex(ThemeModes"));
         Check("主题/拖动也能切", mainCs.Contains("ThemeSlotAt(_themeThumbX)"));
         Check("主题/切的时候图标分两层走", mainCs.Contains("private void PlayThemeParallax") && mainCs.Contains("Push(SunRays, -12, 0, ms, 20);"));
+        // 「点了没反应」的根治：标题栏那层挂着 DragMove，按下必须在这一层吃掉，否则窗口跟着手跑
+        Check("主题/按下不把窗口拖走", SliceBetween(mainCs, "private void ThemeSwitch_MouseLeftButtonDown", "\n    }").Contains("e.Handled = true;"));
+        Check("主题/松开也不把窗口拖走", SliceBetween(mainCs, "private void ThemeSwitch_MouseLeftButtonUp", "\n    }").Contains("e.Handled = true;"));
         Check("主题/自定义搬去设置页", !mainXaml.Contains("Content=\"自定义\"") && mainXaml.Contains("x:Name=\"BtnCustomTheme\""));
         Check("主题/外观卡说清现在用的是哪套", mainCs.Contains("private void RefreshAppearanceSummary") && mainCs.Contains("现在用的就是自定义配色"));
         Check("主题/自定义状态下点那格真能切走", mainCs.Contains("bool sameAsNow = to == from"));
@@ -3192,6 +3067,33 @@ internal static class Program
         // ③ 引导页：没勾的不进队列
         Check("引导/只勾了的才进队列", wizardCs.Contains("if (on) queue.Add(new QueueEntry { ToolId = kv.Key, Enabled = true });"));
         Check("引导/没勾的不再无条件写一行", !wizardCs.Contains("foreach (var kv in _picks) Set(kv.Key, kv.Value.IsChecked == true);"));
+
+        // ---- 11i) v1.34 四页导航 + 插件独立成页 + 米游社搬出本体 ----
+        Check("导航/四项", mainXaml.Contains("SegPageRun") && mainXaml.Contains("SegPageHome")
+                          && mainXaml.Contains("SegPageSettings") && mainXaml.Contains("SegPagePlugins"));
+        Check("导航/第四页有自己的平移量", mainXaml.Contains("x:Name=\"ShiftPlugins\""));
+        Check("导航/摆位认得第四页", mainCs.Contains("(ShiftPlugins, offsets[3])"));
+        Check("导航/同步认得第四页", mainCs.Contains("(SegPagePlugins, 3)"));
+        Check("导航/「运行」改叫「日志」", mainXaml.Contains("Text=\"日志\"") && !mainXaml.Contains("Text=\"运行\""));
+        Check("导航/「启动」改叫「主页」", mainXaml.Contains("Text=\"主页\"") && !mainXaml.Contains("Text=\"启动\""));
+        Check("导航/日志用的是翻开的书", mainXaml.Contains("M2,4.2 L8.4,3 L8.4,15 L2,16.2 Z"));
+        Check("导航/插件用的是拼图", mainXaml.Contains("A1.6,1.6 0 0 1 11,3"));
+        Check("导航/外壳是玻璃不是实色块", mainXaml.Contains("#D9181C22") && mainXaml.Contains("BlurRadius=\"22\""));
+        Check("分页/一共四页", Pager.Count == 4);
+        Check("分页/第四页叫插件", Pager.Name(3) == "插件");
+        Check("分页/第一页叫日志", Pager.Name(0) == "日志");
+        Check("分页/第二页叫主页", Pager.Name(1) == "主页");
+        Check("分页/翻到第四页就到头", Pager.Clamp(9) == 3);
+        Check("插件页/有自己的一页", mainXaml.Contains("x:Name=\"PagePlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
+        Check("插件页/从设置页撤走了", !mainXaml.Contains("x:Name=\"BtnFoldPlugins\""));
+        Check("插件页/说清能做什么不能做什么", mainXaml.Contains("插件能做什么、不能做什么"));
+        Check("插件页/装坏了也不拖垮主程序", mainXaml.Contains("装坏了也不会让主程序起不来"));
+        bool archived;
+        try { archived = ReadRepoSources("docs/plugin-samples/miyoushe/MiyousheBbs.cs").Length > 1000; }
+        catch { archived = false; }
+        Check("米游社/源码留档在插件样例里", archived);
+        Check("米游社/本体里没有那段签到了", !mainCs.Contains("MiyousheService.SignNowAsync"));
+        Check("米游社/设置里不再有那八个字段", !appStateCs.Contains("MiyousheAutoSign"));
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
 

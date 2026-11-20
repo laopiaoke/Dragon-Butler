@@ -831,13 +831,18 @@
                                VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <!-- v1.33：主题开关改成三段式液态玻璃滑块（照 BV15dVd6JEns 那期的做法）。
-                     以前是三个并排的文字按钮，选中靠「白底 + 加粗」——那是按钮，不是开关。
-                     现在是：一条轨道、一块玻璃滑块、三个图标；点图标或者直接拖滑块都能切，
-                     切的时候图标分层错位再归位（视差），文字放大淡入。
-                     只留深/浅/跟随系统三段；「自定义」搬进设置页（它不是「模式」，是一套配色方案）。 -->
+                <!-- v1.33：主题开关改成液态玻璃滑块（照 BV15dVd6JEns 那期的做法）。
+                     v1.34 三处按用户反馈改：
+                     ① 只留两档（深色 / 浅色）。「跟随系统」拿掉——它是一个「替我做决定」的档位，
+                        而这块开关本身只有两个可见结果，第三档在中间既说不出自己在做什么，
+                        又让「点左边到底切没切」变得难以确认。
+                     ② 滑块和轨道都缩小。原来 58×42 的滑块压在 174×36 的轨道上，
+                        一米外看就是一大块糊白——玻璃质感在这么大的面积上只会显得脏。
+                     ③ 点击不起作用：根因是标题栏 Grid 挂着 MouseLeftButtonDown -> DragMove()，
+                        鼠标按下会冒泡到那里，窗口开始拖动，我们自己的 MouseUp 永远收不到。
+                        现在在这一层把事件吃掉（e.Handled = true），只有这一小块不拖窗口。 -->
                 <Border Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0" Background="Transparent">
-                    <Grid x:Name="ThemeSwitchRoot" Width="174" Height="46"
+                    <Grid x:Name="ThemeSwitchRoot" Width="112" Height="38"
                           Background="Transparent" ClipToBounds="False"
                           Cursor="Hand"
                           MouseLeftButtonDown="ThemeSwitch_MouseLeftButtonDown"
@@ -845,11 +850,11 @@
                           MouseLeftButtonUp="ThemeSwitch_MouseLeftButtonUp">
 
                         <!-- 轨道：一条内凹的槽。内阴影用两层叠出来（上暗下亮 => 凹） -->
-                        <Border x:Name="ThemeTrack" Width="174" Height="36" CornerRadius="18"
+                        <Border x:Name="ThemeTrack" Width="112" Height="30" CornerRadius="15"
                                 VerticalAlignment="Center"
                                 Background="{DynamicResource InsetBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
-                        <Border Width="172" Height="34" CornerRadius="17" VerticalAlignment="Center"
+                        <Border Width="110" Height="28" CornerRadius="14" VerticalAlignment="Center"
                                 IsHitTestVisible="False"
                                 BorderThickness="1,1,1,0">
                             <Border.BorderBrush>
@@ -860,41 +865,31 @@
                             </Border.BorderBrush>
                         </Border>
 
-                        <!-- 三个图标：位置固定，选中时前景色变化；切换时由代码推视差 -->
-                        <Grid x:Name="ThemeIconHost" Width="174" Height="36" VerticalAlignment="Center" IsHitTestVisible="False">
+                        <!-- 两个图标：位置固定，选中时前景色变化；切换时由代码推视差 -->
+                        <Grid x:Name="ThemeIconHost" Width="112" Height="30" VerticalAlignment="Center" IsHitTestVisible="False">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
                             <!-- 深色：月亮 + 两颗星（分层，视差时星和月错开） -->
-                            <Canvas x:Name="IconDark" Grid.Column="0" Width="18" Height="18"
+                            <Canvas x:Name="IconDark" Grid.Column="0" Width="16" Height="16"
                                     HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <Path x:Name="MoonPath" Data="M12.4,2.6 A6.6,6.6 0 1 0 15.4,11.6 A5.2,5.2 0 0 1 12.4,2.6 Z"
                                       Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"
-                                      StrokeLineJoin="Round" Width="18" Height="18" Stretch="Uniform"/>
-                                <Ellipse x:Name="Star1" Canvas.Left="14.2" Canvas.Top="1.4" Width="2.4" Height="2.4"
+                                      StrokeLineJoin="Round" Width="16" Height="16" Stretch="Uniform"/>
+                                <Ellipse x:Name="Star1" Canvas.Left="12.6" Canvas.Top="1.2" Width="2.2" Height="2.2"
                                          Fill="{DynamicResource TextTertiaryBrush}"/>
-                                <Ellipse x:Name="Star2" Canvas.Left="12.6" Canvas.Top="5.6" Width="1.6" Height="1.6"
+                                <Ellipse x:Name="Star2" Canvas.Left="11.2" Canvas.Top="4.9" Width="1.4" Height="1.4"
                                          Fill="{DynamicResource TextTertiaryBrush}"/>
-                            </Canvas>
-
-                            <!-- 跟随系统：半明半暗的一个圆（左半白右半黑），最中性的那个「自动」 -->
-                            <Canvas x:Name="IconSystem" Grid.Column="1" Width="18" Height="18"
-                                    HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Ellipse x:Name="SysRing" Canvas.Left="1" Canvas.Top="1" Width="16" Height="16"
-                                         Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5"/>
-                                <Path x:Name="SysHalf" Data="M9,1 A8,8 0 0 1 9,17 Z"
-                                      Fill="{DynamicResource TextSecondaryBrush}"/>
                             </Canvas>
 
                             <!-- 浅色：太阳 + 光晕 -->
-                            <Canvas x:Name="IconLight" Grid.Column="2" Width="18" Height="18"
+                            <Canvas x:Name="IconLight" Grid.Column="1" Width="16" Height="16"
                                     HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Ellipse x:Name="SunCore" Canvas.Left="4.6" Canvas.Top="4.6" Width="8.8" Height="8.8"
+                                <Ellipse x:Name="SunCore" Canvas.Left="4.1" Canvas.Top="4.1" Width="7.8" Height="7.8"
                                          Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"/>
-                                <Path x:Name="SunRays" Data="M9,0.6 L9,3 M9,15 L9,17.4 M0.6,9 L3,9 M15,9 L17.4,9 M3.2,3.2 L4.9,4.9 M13.1,13.1 L14.8,14.8 M14.8,3.2 L13.1,4.9 M4.9,13.1 L3.2,14.8"
+                                <Path x:Name="SunRays" Data="M8,0.5 L8,2.7 M8,13.3 L8,15.5 M0.5,8 L2.7,8 M13.3,8 L15.5,8 M2.9,2.9 L4.5,4.5 M11.5,11.5 L13.1,13.1 M13.1,2.9 L11.5,4.5 M4.5,11.5 L2.9,13.1"
                                       Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                             </Canvas>
@@ -905,21 +900,21 @@
                              ② 边缘：一圈更亮的描边（折射时边缘比中间亮）
                              ③ 色散：沿边缘一圈彩虹色薄环，只有最外面 1px 看得见
                              阴影用蓝色而不是黑色——纯黑投在浅色卡面上会发脏（那期视频专门提过这一点）。 -->
-                        <Canvas x:Name="ThemeThumbLayer" Width="174" Height="46" VerticalAlignment="Center" IsHitTestVisible="False">
-                            <Border x:Name="ThemeThumb" Canvas.Left="0" Canvas.Top="2"
-                                    Width="58" Height="42" CornerRadius="21"
+                        <Canvas x:Name="ThemeThumbLayer" Width="112" Height="38" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <Border x:Name="ThemeThumb" Canvas.Left="0" Canvas.Top="3"
+                                    Width="52" Height="32" CornerRadius="16"
                                     RenderTransformOrigin="0.5,0.5">
                                 <Border.RenderTransform>
                                     <TranslateTransform x:Name="ThemeThumbShift" X="0"/>
                                 </Border.RenderTransform>
                                 <Border.Effect>
-                                    <DropShadowEffect x:Name="ThemeThumbShadow" BlurRadius="14" ShadowDepth="3"
-                                                      Direction="270" Opacity="0.45"
+                                    <DropShadowEffect x:Name="ThemeThumbShadow" BlurRadius="10" ShadowDepth="2"
+                                                      Direction="270" Opacity="0.4"
                                                       Color="#FF1B3A6B"/>
                                 </Border.Effect>
                                 <Grid>
                                     <!-- ① 玻璃主体 -->
-                                    <Border CornerRadius="21">
+                                    <Border CornerRadius="16">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                                                 <GradientStop Color="#3AFFFFFF" Offset="0"/>
@@ -929,7 +924,7 @@
                                         </Border.Background>
                                     </Border>
                                     <!-- ② 顶部高光（玻璃的「镜面」那一条） -->
-                                    <Border CornerRadius="21" VerticalAlignment="Top" Height="20" Margin="3,2,3,0">
+                                    <Border CornerRadius="16" VerticalAlignment="Top" Height="15" Margin="3,2,3,0">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                                                 <GradientStop Color="#4CFFFFFF" Offset="0"/>
@@ -938,7 +933,7 @@
                                         </Border.Background>
                                     </Border>
                                     <!-- ③ 边缘色散：一圈彩虹薄环 -->
-                                    <Border CornerRadius="21" BorderThickness="1.4">
+                                    <Border CornerRadius="16" BorderThickness="1.2">
                                         <Border.BorderBrush>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                                 <GradientStop Color="#66FF8FA3" Offset="0"/>
@@ -1813,111 +1808,26 @@
                         </ScrollViewer.RenderTransform>
                         <Grid x:Name="PageSettings" Margin="14,10,14,88">
                             <!-- v1.32：设置页从「五条等宽长条摞在一起」改成卡片墙。
-                                 原来四块长得一模一样、上下等距，看着像一列抽屉，分不清是四件事；
-                                 现在短的两块（插件、通知）并排放，长的两块（高级设置、系统）各占整行——
-                                 长度不一样，眼睛才认得出这是四张卡而不是一个列表。
-                                 米游社那张也占整行：它有自己的两个按钮和一段说明，切一半会挤成两行字。 -->
+                                 v1.34：米游社搬成插件、插件搬去独立一页，这里只剩通知 / 外观 / 高级 / 系统四块。
+                                 四块现在都占整行——没有并排的了，再把其中一块切成半宽只会显得它比别的矮。 -->
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
-                                <!-- 不是 1:1：插件卡只需要放个名字和「打开目录」，
-                                     通知卡里有一排渠道胶囊 + 正文模板 + 一个地址框，半宽会把胶囊挤成三行。 -->
+                                <!-- 单列。原来那个 1:2 是为了让插件卡和通知卡并排，插件卡走了就用不上了。 -->
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="2*"/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- v1.31：米游社签到。
-                                 放最上面是因为它是唯一一张「要先登录才能用」的卡——
-                                 藏在折叠列表底下的账号设置，等于没有。
-                                 卡本身只说三件事：登没登、上次签到什么结果、现在能不能签。 -->
-                            <Border Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource Card}"
-                                    Margin="0,0,0,0" Padding="16,13,16,14">
-                                <StackPanel>
-                                    <Grid>
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Path Data="M3,16 L3,7 L10,2.5 L17,7 L17,16 Z M7.6,16 L7.6,10.4 L12.4,10.4 L12.4,16"
-                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"
-                                                  StrokeLineJoin="Round" Width="14" Height="14" Stretch="Uniform"
-                                                  VerticalAlignment="Center"/>
-                                            <TextBlock Text="米游社签到" FontSize="13.5" FontWeight="SemiBold"
-                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock x:Name="TbMiyousheState" Text="还没登录" FontSize="10.5"
-                                                       Margin="10,2,0,0" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                            <Button x:Name="BtnMiyousheLogin" Content="登录" Style="{StaticResource MiniAction}"
-                                                    Height="26" Padding="10,0" Margin="0,0,6,0"
-                                                    Click="BtnMiyousheLogin_Click"/>
-                                            <Button x:Name="BtnMiyousheSign" Content="现在签到" Style="{StaticResource MiniAction}"
-                                                    Height="26" Padding="10,0" Click="BtnMiyousheSign_Click"/>
-                                        </StackPanel>
-                                    </Grid>
-                                    <TextBlock x:Name="TbMiyousheHint" FontSize="11" TextWrapping="Wrap"
-                                               Margin="0,8,0,0" LineHeight="18"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"
-                                               Text="在米游社按日签到能攒米游币。这里不碰你的密码——点「登录」会开一个小浏览器窗口，你在里面登录一次，凭证就存下来了。"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
-                                        <ToggleButton x:Name="TgMiyousheAuto" Style="{StaticResource SwitchStyle}"
-                                                      Click="TgMiyousheAuto_Click"/>
-                                        <TextBlock Text="每次跑完一条龙顺手签一下" FontSize="11.5" Margin="10,0,0,0"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-
-
-                            <!-- v1.29：插件卡。这里一直是空的——插件加载器（PluginLoader）在 v1.20 就写好了，
-                                 但界面上没有一个地方能看见「装了没有、装了什么、为什么没装」。
-                                 空着也是信息：先说清 plugins 目录在哪、放进去会长什么样，
-                                 再去扫真实目录，把读得懂的和读不懂的分开列。 -->
-                            <!-- 两列并排时，短的那张不跟着拉到别人那么高：插件卡空着的时候只有 60 高，
-                                 被拉成和右边通知卡一样高，就是一大片什么都没有的底色。 -->
-                            <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource Card}"
-                                    Margin="0,10,7,0" Padding="0" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Button x:Name="BtnFoldPlugins" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
-                                        <DockPanel LastChildFill="False">
-                                            <Path DockPanel.Dock="Right" x:Name="ChevPlugins" Data="M4 6l4 4 4-4"
-                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
-                                                  Width="10" Height="10" Stretch="Uniform" VerticalAlignment="Center"/>
-                                            <Path DockPanel.Dock="Left" Data="M10,3 L10,10 M10,13.5 L10,14.5 M3,3 L17,3 L17,17 L3,17 Z"
-                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
-                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                                  Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
-                                            <TextBlock DockPanel.Dock="Left" Text="插件" FontSize="13.5" FontWeight="SemiBold"
-                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"
-                                                       VerticalAlignment="Center"/>
-                                            <TextBlock x:Name="TbPluginsSummary" DockPanel.Dock="Left" Text="" FontSize="10.5"
-                                                       Margin="10,0,0,0" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                       VerticalAlignment="Center"/>
-                                        </DockPanel>
-                                    </Button>
-                                    <StackPanel x:Name="PluginsBody" Margin="16,0,16,14" Visibility="Collapsed">
-                                        <TextBlock Text="把一个插件文件夹放进 plugins\ 目录，重启管家就会出现在这里。每个插件要说清它要访问哪些域名、需要什么权限——写不明白的不加载。"
-                                                   FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,8"
-                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        <StackPanel x:Name="PluginsHost"/>
-                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                            <Button x:Name="BtnPluginsOpen" Content="打开插件目录" Style="{StaticResource MiniAction}"
-                                                    Height="26" Padding="10,0" Click="BtnPluginsOpen_Click"/>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-
+                            <!-- v1.34：插件卡搬去独立的一页了（导航第四项）。这里只剩通知、外观、高级、系统四块。 -->
                             <!-- 第三层：高级设置（默认折叠） -->
 
                     <!-- v1.33：外观。主题开关从标题栏搬走「自定义」之后，它需要一个落脚处。
                          单独一张卡而不是塞进系统里：它不是开关，是一套配色方案（底色/图/叠色/明暗），
                          点开是一个窗口——放在「系统」里会让人以为又是一项开关。 -->
-                    <Border Grid.Row="2" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <Grid Margin="16,12,16,12">
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="外观" FontSize="13.5" FontWeight="SemiBold"
@@ -1932,7 +1842,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldAdvanced" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2146,7 +2056,7 @@
                     </Border>
 
                     <!-- ===== E 系统（折叠，默认收起；6 开关两列网格）===== -->
-                    <Border Grid.Row="4" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                            <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldSystem" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2373,9 +2283,11 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ===== F 通知（折叠，默认收起）===== -->
-                    <Border x:Name="NotifyCard" Grid.Row="1" Grid.Column="1" Style="{StaticResource Card}"
-                            Margin="7,10,0,0" Padding="0" VerticalAlignment="Top">
+                    <!-- ===== F 通知（折叠，默认收起）=====
+                         v1.34：单列排第一排了。原来它和插件卡并排（Row 0 / Column 1），
+                         插件搬走后左边空着，它就该回到左边缘。 -->
+                            <Border x:Name="NotifyCard" Grid.Row="0" Style="{StaticResource Card}"
+                            Margin="0,0,0,0" Padding="0" VerticalAlignment="Top">
                         <StackPanel>
                             <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2606,27 +2518,98 @@
                     </Border>
                         </Grid>
                     </ScrollViewer>
+
+                    <!-- ===== 第四页：插件（v1.34）=====
+                         以前它是设置页里一张折叠卡，默认收起、还和通知卡挤同一排。
+                         可插件是「要往里放东西」的地方——折叠着的入口等于让人自己猜它存在。
+                         现在给它一整页：进来就看得见装了什么、装在哪、为什么没加载。 -->
+                    <ScrollViewer x:Name="ScrollPlugins" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="ShiftPlugins" X="1960"/>
+                        </ScrollViewer.RenderTransform>
+                        <Grid x:Name="PagePlugins" Margin="14,10,14,88">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16,18,16">
+                                <StackPanel>
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Path Data="M10,3 L10,10 M10,13.5 L10,14.5 M3,3 L17,3 L17,17 L3,17 Z"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                  Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <TextBlock Text="插件" FontSize="13.5" FontWeight="SemiBold"
+                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                            <TextBlock x:Name="TbPluginsSummary" Text="" FontSize="10.5"
+                                                       Margin="10,2,0,0" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        </StackPanel>
+                                        <Button x:Name="BtnPluginsOpen" Content="打开插件目录"
+                                                Style="{StaticResource MiniAction}" Height="26" Padding="10,0"
+                                                HorizontalAlignment="Right" Click="BtnPluginsOpen_Click"/>
+                                    </Grid>
+                                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0" LineHeight="18"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="把一个插件文件夹放进插件目录，重启管家就会出现在下面。每个插件要在 metadata.json 里说清它要访问哪些域名、需要什么——写不明白的不加载。装坏了也不会让主程序起不来，只会在下面列成一条「没加载」并写明原因。"/>
+                                    <StackPanel x:Name="PluginsHost" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                                <StackPanel>
+                                    <TextBlock Text="插件能做什么、不能做什么" FontSize="13.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock FontSize="11.5" TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="19"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="能做：看当前跑没跑、跑的是哪个工具、今天还剩几个；借你配好的渠道发通知；记自己的日志和设置；要求开跑一次；读今天的日志尾巴。"/>
+                                    <TextBlock FontSize="11.5" TextWrapping="Wrap" Margin="0,6,0,0" LineHeight="19"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="不能做：改界面、停队列、动设置、读文件、访问任意网址。插件出问题时最坏的结果是它自己坏了。"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
                 </Grid>
             </Border>
 
 
-            <!-- v1.32/v1.33：悬浮标签栏。
+            <!-- v1.32/v1.33/v1.34：悬浮标签栏。
                  v1.33 修了两处：
                  ① 它原来占自己一行（Grid.Row="2"），于是窗口为了它多长出一截，卡片区被顶短。
                     现在它坐在内容区里（Row 1）浮在最上层，卡片从它底下滚过去——这才是「悬浮」。
                  ② 点击没反应。原因是按下就 CaptureMouse()，鼠标被这块 Border 抢走，
                     底下的 RadioButton 收不到完整的按下/松开序列，Checked 永远不会触发。
-                    现在只有真的拖出 4px 才捕获，纯点击一律让给按钮自己。 -->
+                    现在只有真的拖出 4px 才捕获，纯点击一律让给按钮自己。
+
+                 v1.34 三处：
+                 ① 四项（日志 / 主页 / 设置 / 插件）。原来三项里「运行」这名字说的是「状态」，
+                    但那一页放的全是已经发生过的事——叫「日志」才对得上里面的内容，图标换成翻开的书。
+                 ② 外壳改成真正的液态玻璃：不再是「一块实心 CardBg2 + 一根描边」，
+                    而是一层半透明白、顶部一道高光、底边一道冷色反光——见下面的三层叠法。
+                    同时也要能看见底下的卡片在动，所以外面不能再铺不透明底色。
+                 ③ 插件单独一页，不再挤在设置里当一张折叠卡。 -->
             <Grid Grid.Row="1" Panel.ZIndex="20" Background="Transparent"
                   VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14">
                 <Border x:Name="NavShell" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Background="{DynamicResource CardBg2Brush}"
-                        BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1"
-                        CornerRadius="25" Padding="5" Height="58"
-                        Opacity="0.97"
+                        CornerRadius="27" Padding="5" Height="58"
                         PreviewMouseLeftButtonDown="NavShell_PreviewMouseLeftButtonDown"
                         PreviewMouseMove="NavShell_PreviewMouseMove"
                         PreviewMouseLeftButtonUp="NavShell_PreviewMouseLeftButtonUp">
+                    <!-- 液态玻璃外壳：三层。外面不写 Background，让底下的卡片透上来一点。 -->
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#D9181C22" Offset="0"/>
+                            <GradientStop Color="#CC12151A" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="22" ShadowDepth="6" Direction="270"
+                                          Opacity="0.5" Color="#FF05070A"/>
+                    </Border.Effect>
                     <Grid>
                         <!-- 会滑的那块底。宽高跟单个标签项一致，靠 TranslateTransform 走位。 -->
                         <Border x:Name="NavPill" Width="84" Height="46" CornerRadius="19"
@@ -2639,21 +2622,29 @@
                         </Border>
 
                         <StackPanel x:Name="NavItemsHost" Orientation="Horizontal">
-                        <!-- 运行：一个环形箭头（「刚才跑了什么」） -->
+                        <!-- 日志：一本翻开的书。
+                             v1.34 之前叫「运行」——那说的是「状态」，可这一页放的全是已经发生过的事：
+                             刚才跑了什么、时间账、决定清单。「日志」才对得上里面的内容。 -->
                         <RadioButton x:Name="SegPageRun" Tag="0"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
-                                     ToolTip="看刚才/今天跑了什么">
+                                     ToolTip="刚才跑了什么、今天的时间账">
                             <StackPanel>
-                                <Path Data="M13.5,3.2 A6.4,6.4 0 1 0 16,8" Width="18" Height="18"
-                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                                      StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                      Stretch="Uniform" HorizontalAlignment="Center"/>
-                                <TextBlock Text="运行" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                <Grid Width="18" Height="18" HorizontalAlignment="Center">
+                                    <!-- 左半页 + 右半页，中间留一道书脊 -->
+                                    <Path Data="M2,4.2 L8.4,3 L8.4,15 L2,16.2 Z"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                          StrokeThickness="1.4" StrokeLineJoin="Round" Stretch="Uniform"/>
+                                    <Path Data="M18,4.2 L11.6,3 L11.6,15 L18,16.2 Z"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                          StrokeThickness="1.4" StrokeLineJoin="Round" Stretch="Uniform"/>
+                                </Grid>
+                                <TextBlock Text="日志" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                             </StackPanel>
                         </RadioButton>
 
-                        <!-- 启动：房子（「接下来几点跑」，每天回来的那一页） -->
+                        <!-- 主页：房子（「接下来几点跑」，每天回来的那一页）。
+                             v1.34 之前叫「启动」——但进门的那一页不只是「启动」，它是整个软件的正门。 -->
                         <RadioButton x:Name="SegPageHome" Tag="1" IsChecked="True"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="定时、托管配置、一键开跑">
@@ -2662,7 +2653,7 @@
                                       Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                                       StrokeThickness="1.6" StrokeLineJoin="Round"
                                       Stretch="Uniform" HorizontalAlignment="Center"/>
-                                <TextBlock Text="启动" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                <TextBlock Text="主页" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                             </StackPanel>
                         </RadioButton>
@@ -2685,6 +2676,23 @@
                                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                                 </Grid>
                                 <TextBlock Text="设置" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                            </StackPanel>
+                        </RadioButton>
+
+                        <!-- 插件：一块拼图 + 插口。
+                             v1.34 新增。它以前是设置页里一张默认收起的折叠卡——要往里放东西的入口，
+                             折叠着等于让人自己猜它存在。 -->
+                        <RadioButton x:Name="SegPagePlugins" Tag="3"
+                                     Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
+                                     ToolTip="装了哪些、装在哪、为什么没加载">
+                            <StackPanel>
+                                <Grid Width="18" Height="18" HorizontalAlignment="Center">
+                                    <Path Data="M3,3 L8,3 A1.6,1.6 0 0 1 11,3 L15,3 L15,7.5 A1.6,1.6 0 0 0 15,11 L15,15 L10,15 A1.6,1.6 0 0 0 7,15 L3,15 Z"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                          StrokeThickness="1.4" StrokeLineJoin="Round" Stretch="Uniform"/>
+                                </Grid>
+                                <TextBlock Text="插件" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                             </StackPanel>
                         </RadioButton>

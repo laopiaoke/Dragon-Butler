@@ -32,7 +32,13 @@ public sealed class PluginMeta
 public static class PluginLoader
 {
     /// <summary>插件根目录：<c>plugins\</c>（exe 旁边）。</summary>
-    public static string Root => Paths.PluginsDir;
+    public static string Root => RootOverride ?? Paths.PluginsDir;
+
+    /// <summary>
+    /// 探针 / 渲染截图用：把插件目录临时指到别处，别拿用户真实的 plugins 做实验。
+    /// 与 GroupArchive / RunJournal / NoticeCenter 那几个 PathOverride 是同一套路。
+    /// </summary>
+    public static string? RootOverride { get; set; }
 
     /// <summary>单个插件目录里默认的入口文件名。</summary>
     public const string DefaultAssembly = "Plugin.dll";

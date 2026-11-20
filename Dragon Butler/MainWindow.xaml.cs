@@ -134,7 +134,6 @@ public partial class MainWindow : Window
         LoadSettingsToUi();
         RebuildCustomToolCards();
         RefreshPlugins();
-        RefreshMiyoushe();
         RenderQueue();
         RefreshToolCards();
         RefreshShield();
@@ -231,19 +230,21 @@ public partial class MainWindow : Window
         finally { _suppressThemeSeg = false; }
     }
 
-    // ===== 三段式主题开关（v1.33）=====
+    // ===== 两段式主题开关（v1.33 起，v1.34 收成两档）=====
     //
-    // 做法照 BV15dVd6JEns 那期：一条轨道 + 一块玻璃滑块 + 三个图标。
+    // 做法照 BV15dVd6JEns 那期：一条轨道 + 一块玻璃滑块 + 两个图标。
     // 三个要点：
-    //   ① 滑块比轨道高（42 vs 36）、上下各探出去 3px —— 视频里专门说过，
+    //   ① 滑块比轨道高（32 vs 30）、上下各探出去 —— 视频里专门说过，
     //      缩在轨道里面玻璃效果根本看不出来，探出来才有「一块东西贴在玻璃上」的感觉。
+    //      v1.34 把整体尺寸缩小了（174×36 -> 112×30）：原来那块压在标题栏里，
+    //      面积一大，玻璃就只剩一片糊白，质感全变成脏。
     //   ② 切换时图标要分层错位再归位。视频里的说法是「位移距离不同 -> 速度不同 -> 视差」，
     //      到位时间一样（我们取 520ms），所以只要给不同元素不同距离，就有了速度差。
-    //   ③ 图标超出轨道范围要裁掉。视频里是加一层蒙版；我们让 ClipToBounds 交给外层轨道 Grid，
-    //      但滑块本身要能露出轨道，所以蒙版只包图标那一层。
-    private const double ThemeThumbWidth = 58;
-    private const double ThemeTrackWidth = 174;
-    private static readonly string[] ThemeModes = { "Dark", "System", "Light" };
+    //   ③ 只留深色和浅色两档。原来中间那一档是「跟随系统」——一个「替我做决定」的选项，
+    //      可这块开关只有两个可见结果；第三档夹在中间，人点左边一下根本说不清到底切没切。
+    private const double ThemeThumbWidth = 52;
+    private const double ThemeTrackWidth = 112;
+    private static readonly string[] ThemeModes = { "Dark", "Light" };
 
     private bool _themeDragging;
     private double _themeGrabOffset;
@@ -254,32 +255,24 @@ public partial class MainWindow : Window
         string m = Theme.Mode;
         int i = Array.FindIndex(ThemeModes, x => string.Equals(x, m, StringComparison.OrdinalIgnoreCase));
 
-        // 自定义配色不在这三段里，但开关总得停在某一格上。
-        // 让它停在这套配色实际偏的那一端（深色底停左、浅色底停右、说不准就中间），
-        // 同时把外观卡里的那句话点亮——第二处解释，免得人以为开关失灵。
-        if (i < 0)
-        {
-            i = AppState.Settings.CustomScheme switch
-            {
-                "Dark" => 0,
-                "Light" => 2,
-                _ => 1,
-            };
-        }
+        // 「跟随系统」和「自定义」都不在这两档里，但开关总得停在某一格上。
+        // 判据用「现在这套配色实际是深还是浅」（Theme.LastSchemeLight），而不是去猜设置字符串——
+        // 人看到的是屏幕上的深色，就让它停在深色那一格。
+        if (i < 0) i = Theme.LastSchemeLight ? 1 : 0;
         return i;
     }
 
-    /// <summary>三个位置：左 / 中 / 右。滑块宽 58，轨道宽 174，所以两端各贴边、中间正好居中。</summary>
+    /// <summary>两个位置：左 / 右。滑块宽 52，轨道宽 112，两端各贴边。</summary>
     private static double ThemeSlotX(int index) =>
-        index <= 0 ? 0 : index >= 2 ? ThemeTrackWidth - ThemeThumbWidth : (ThemeTrackWidth - ThemeThumbWidth) / 2.0;
+        index <= 0 ? 0 : ThemeTrackWidth - ThemeThumbWidth;
 
     private int ThemeSlotAt(double x)
     {
-        // 按滑块中心落在哪三分之一来判断，而不是按左上角——手是按在滑块中间拖的。
+        // 按滑块中心落在哪一半来判断，而不是按左上角——手是按在滑块中间拖的。
         double center = x + ThemeThumbWidth / 2.0;
-        double slice = ThemeTrackWidth / 3.0;
+        double slice = ThemeTrackWidth / 2.0;
         int i = (int)Math.Floor(center / slice);
-        return Math.Clamp(i, 0, 2);
+        return Math.Clamp(i, 0, 1);
     }
 
     private void PlaceThemeThumb(int index, bool animate)
@@ -308,7 +301,7 @@ public partial class MainWindow : Window
         PaintThemeIcons(index);
     }
 
-    /// <summary>把三个图标按「当前模式」上色：选中的用主文字色，其余退成三级灰。</summary>
+    /// <summary>把两个图标按「当前模式」上色：选中的用主文字色，另一个退成三级灰。</summary>
     private void PaintThemeIcons(int index)
     {
         var on = BrushOf("TextPrimaryBrush") ?? DotGray;
@@ -320,11 +313,8 @@ public partial class MainWindow : Window
             Star1.Fill = index == 0 ? on : off;
             Star2.Fill = index == 0 ? on : off;
 
-            SysRing.Stroke = index == 1 ? on : off;
-            SysHalf.Fill = index == 1 ? on : off;
-
-            SunCore.Stroke = index == 2 ? on : off;
-            SunRays.Stroke = index == 2 ? on : off;
+            SunCore.Stroke = index == 1 ? on : off;
+            SunRays.Stroke = index == 1 ? on : off;
         }
         catch { }
     }
@@ -360,10 +350,6 @@ public partial class MainWindow : Window
         Push(Star1, -11, -2, ms, 20);
         Push(Star2, -9, 2, ms, 40);
 
-        Push(IconSystem, -7, 0, ms, 10);
-        Push(SysRing, -7, 0, ms, 10);
-        Push(SysHalf, -7, 0, ms, 10);
-
         Push(IconLight, -7, 0, ms);
         Push(SunCore, -7, 0, ms);
         Push(SunRays, -12, 0, ms, 20);
@@ -372,6 +358,11 @@ public partial class MainWindow : Window
     private void ThemeSwitch_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (ThemeSwitchRoot == null || ThemeThumbShift == null) return;
+        // v1.34：这一句是「点了没反应」的根治。
+        // 标题栏那一层挂着 MouseLeftButtonDown -> DragMove()，按下会一路冒泡上去，
+        // 窗口开始拖动，我们的 MouseUp 就再也收不到了（鼠标被 DragMove 接管）。
+        // 所以在这一层吃掉事件：只有这一小块区域不拖窗口。
+        e.Handled = true;
         _themeGrabOffset = e.GetPosition(ThemeSwitchRoot).X - _themeThumbX;
         _themeDragging = false;
         // 和导航栏同一个道理：按下先不抢鼠标，等真的拖起来才抢，
@@ -400,6 +391,8 @@ public partial class MainWindow : Window
     private void ThemeSwitch_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (ThemeSwitchRoot == null) return;
+        // 按下和松开都要吃掉，否则事件冒泡到标题栏那一层，窗口跟着鼠标跑。
+        e.Handled = true;
         bool wasDragging = _themeDragging;
         _themeDragging = false;
         if (ThemeSwitchRoot.IsMouseCaptured) ThemeSwitchRoot.ReleaseMouseCapture();
@@ -407,10 +400,8 @@ public partial class MainWindow : Window
         int from = ThemeModeIndex();
         int to = wasDragging ? ThemeSlotAt(_themeThumbX) : ThemeSlotAt(e.GetPosition(ThemeSwitchRoot).X - ThemeThumbWidth / 2.0);
 
-        if (wasDragging) e.Handled = true;
-
         // 注意判据是「这次点的模式跟现在真的模式一样吗」，不是「跟滑块所在那格一样吗」。
-        // 自定义配色下开关会停在最近的三段之一（见 ThemeModeIndex），这时候点那一格
+        // 跟随系统/自定义配色下开关会停在最近的两档之一（见 ThemeModeIndex），这时候点那一格
         // 必须真的切过去，否则人会发现「点了一下没反应」——和标签栏那个 bug 是同一种失望。
         bool sameAsNow = to == from
                          && string.Equals(Theme.Mode, ThemeModes[to], StringComparison.OrdinalIgnoreCase);
@@ -3820,7 +3811,8 @@ public partial class MainWindow : Window
         var offsets = Pager.Offsets(index);
         var transforms = new (TranslateTransform? T, int Offset)[]
         {
-            (ShiftRun, offsets[0]), (ShiftHome, offsets[1]), (ShiftSettings, offsets[2]),
+            (ShiftRun, offsets[0]), (ShiftHome, offsets[1]),
+            (ShiftSettings, offsets[2]), (ShiftPlugins, offsets[3]),
         };
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         var dur = TimeSpan.FromMilliseconds(260);
@@ -3844,7 +3836,7 @@ public partial class MainWindow : Window
     private void SegPage_Checked(object sender, RoutedEventArgs e)
     {
         // 构造期间 XAML 里的 IsChecked="True" 就会触发一次，那时三个平移量还没建好
-        if (ShiftRun == null || ShiftHome == null || ShiftSettings == null) return;
+        if (ShiftRun == null || ShiftHome == null || ShiftSettings == null || ShiftPlugins == null) return;
         if (sender is RadioButton rb && int.TryParse(rb.Tag as string, out int want)) ShowPage(want);
     }
 
@@ -3901,7 +3893,7 @@ public partial class MainWindow : Window
     {
         var pairs = new (RadioButton? Btn, int Index)[]
         {
-            (SegPageRun, 0), (SegPageHome, 1), (SegPageSettings, 2),
+            (SegPageRun, 0), (SegPageHome, 1), (SegPageSettings, 2), (SegPagePlugins, 3),
         };
         foreach (var (btn, i) in pairs)
         {
@@ -6436,100 +6428,13 @@ public partial class MainWindow : Window
         }
     }
 
-    // ===== 米游社签到（v1.31）=====
-
-    /// <summary>
-    /// 把「登没登、上次签到什么结果、现在能不能签」摆到卡上。
-    /// 三个状态对应三种语气：没登录是陈述，签成功是成绩，签失败才是要人动手的。
-    /// </summary>
-    private void RefreshMiyoushe()
-    {
-        var s = AppState.Settings;
-        bool logged = MiyousheService.HasCredential;
-
-        BtnMiyousheLogin.Content = logged ? "换账号" : "登录";
-        BtnMiyousheSign.IsEnabled = logged;
-        TgMiyousheAuto.IsChecked = s.MiyousheAutoSign;
-
-        if (!logged)
-        {
-            TbMiyousheState.Text = "还没登录";
-            TbMiyousheState.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
-            TbMiyousheHint.Text = "在米游社按日签到能攒米游币。这里不碰你的密码——点「登录」会开一个小浏览器窗口，"
-                                + "你在里面登录一次，凭证就存下来了。";
-            return;
-        }
-
-        string who = string.IsNullOrWhiteSpace(s.MiyousheNickname) ? "已登录" : "已登录 · " + s.MiyousheNickname;
-        TbMiyousheState.Text = who + (string.IsNullOrWhiteSpace(s.MiyousheStoken) ? "（无 stoken）" : "");
-        TbMiyousheState.Foreground = BrushOf("BrandBrush") ?? DotGray;
-
-        string when = s.MiyousheLastAt.HasValue
-            ? s.MiyousheLastAt.Value.ToString("M月d日 HH:mm") + "　"
-            : "";
-        string last = string.IsNullOrWhiteSpace(s.MiyousheLastResult) ? "还没签过。" : s.MiyousheLastResult;
-        TbMiyousheHint.Text = when + last
-            + (string.IsNullOrWhiteSpace(s.MiyousheStoken)
-                ? "\n没有 stoken 时，cookie 过期后要重新登录一次。用浏览器登录会自动带上。"
-                : "");
-    }
-
-    private void BtnMiyousheLogin_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var dlg = new MiyousheLoginWindow { Owner = this };
-            bool ok = dlg.ShowDialog() == true;
-            if (ok || dlg.Saved) RefreshMiyoushe();
-        }
-        catch (Exception ex)
-        {
-            AppDialog.Show("打不开米游社登录窗口，详情见日志。", detail: ex.Message,
-                kind: AppDialog.Kind.Warning, title: "米游社", primary: "知道了", owner: this);
-        }
-    }
-
-    private async void BtnMiyousheSign_Click(object sender, RoutedEventArgs e)
-    {
-        if (!MiyousheService.HasCredential)
-        {
-            AppDialog.Show("先登录一次。点旁边的「登录」，在里面登录完，凭证会自己存下来。",
-                kind: AppDialog.Kind.Info, title: "米游社", primary: "知道了", owner: this);
-            return;
-        }
-
-        BtnMiyousheSign.IsEnabled = false;
-        BtnMiyousheSign.Content = "签到中…";
-        TbMiyousheHint.Text = "正在签到…";
-        try
-        {
-            string result = await MiyousheService.SignNowAsync(CancellationToken.None);
-            RefreshMiyoushe();
-            bool bad = result.Contains("没成", StringComparison.Ordinal)
-                    || result.Contains("过期", StringComparison.Ordinal)
-                    || result.Contains("连不上", StringComparison.Ordinal);
-            TbMiyousheHint.Foreground = bad ? (BrushOf("WarningBrush") ?? DotGray) : (BrushOf("TextSecondaryBrush") ?? DotGray);
-            TbMiyousheHint.Text = result;
-        }
-        catch (Exception ex)
-        {
-            LogService.LogEvent("米游社签到异常：" + ex.Message);
-            TbMiyousheHint.Text = "签到的时候出了点岔子：" + ex.Message;
-            TbMiyousheHint.Foreground = BrushOf("WarningBrush") ?? DotGray;
-        }
-        finally
-        {
-            BtnMiyousheSign.Content = "现在签到";
-            BtnMiyousheSign.IsEnabled = MiyousheService.HasCredential;
-        }
-    }
-
-    private void TgMiyousheAuto_Click(object sender, RoutedEventArgs e)
-    {
-        AppState.Settings.MiyousheAutoSign = TgMiyousheAuto.IsChecked == true;
-        AppState.SaveSettings();
-        LogService.LogEvent("米游社：跑完顺手签到=" + AppState.Settings.MiyousheAutoSign);
-    }
+    // ===== 米游社签到：v1.34 起搬出本体 =====
+    //
+    // 为什么删：米游社这段时间连着加强校验，扫码拿到的凭证经常当天就失效，
+    // 留着它等于在「设置页最上面」摆一张永远登不上的卡——那不是功能，那是一个每天都要看一遍的失败。
+    // 原来那套源码（EdgeCdp / MiyousheQr / MiyousheBbs / QrCode / QrBitmap / 登录窗）整份留在
+    // docs/plugin-samples/miyoushe/ 下，谁想接着搓可以拿去做成插件。
+    // 本体只保留一句话：这里不碰米游社。
 
     // ===== 折叠卡通用 =====
 
@@ -6541,14 +6446,13 @@ public partial class MainWindow : Window
             "BtnFoldSystem" => SystemBody,
             "BtnFoldNotify" => NotifyBody,
             "BtnFoldAdvanced" => AdvancedBody,
-            "BtnFoldPlugins" => PluginsBody,
             _ => null,
         };
         if (body == null) return;
         body.Visibility = body.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    // ===== 主题（v1.33 起是三段式玻璃开关，见上面的「三段式主题开关」段）=====
+    // ===== 主题（v1.33 起是玻璃开关；v1.34 收成深/浅两档，见上面的「两段式主题开关」段）=====
 
     private void OpenCustomThemeEditor()
     {

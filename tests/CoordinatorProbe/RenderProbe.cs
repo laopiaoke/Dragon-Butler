@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DragonButler;
+using DragonButler.Plugins;
 
 namespace CoordinatorProbe;
 
@@ -97,6 +98,26 @@ internal static class RenderProbe
             var m = typeof(MainWindow).GetMethod("ShowPage",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             m?.Invoke(w, new object[] { 2, false });
+            w.UpdateLayout();
+        }
+        catch (Exception ex) { Console.WriteLine("SWITCH-PAGE-FAIL " + ex.Message); }
+    }
+
+    /// <summary>
+    /// v1.34：插件有了自己的一页（导航第四项）。截那一页同样要先把页面切过去。
+    /// </summary>
+    private static void SwitchToPluginsPage(MainWindow w)
+    {
+        try
+        {
+            var m = typeof(MainWindow).GetMethod("ShowPage",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            m?.Invoke(w, new object[] { 3, false });
+            // ShowPage 里的标签块会走 380ms 回弹动画，截图若在这之前拍，
+            // 拍到的就是「底还停在上一格」。渲染要的是稳定画面，直接让它一步到位。
+            var pill = typeof(MainWindow).GetMethod("MoveNavPill",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            pill?.Invoke(w, new object[] { 3, false });
             w.UpdateLayout();
         }
         catch (Exception ex) { Console.WriteLine("SWITCH-PAGE-FAIL " + ex.Message); }
@@ -838,31 +859,6 @@ internal static class RenderProbe
                     // ① 横三竖二摆得开、不挤（主窗那张卡只有半屏宽，这里翻了一倍）；
                     // ② 格子是「图标在上、名字在下」的桌面感，不是列表行。
                     // 种多于一页的工具（7 个），顺带看一眼页码点与溢出提示。
-                    //
-                    // v1.31：米游社登录窗。这一张要证明的是「扫码这条路看起来是能走通的」——
-                    // 二维码是真的画出来的（不是占位图），白底、留白、能扫；
-                    // 而且「用浏览器登录」退到了一个次要位置，不再是主按钮。
-                    // 二维码内容用一段假 ticket，绝不真去要码（那会往服务端打请求）。
-                    if (mode == "miyoushe" || mode == "all")
-                    {
-                        var w = new MiyousheLoginWindow();
-                        if (w.FindName("QrPanel") is FrameworkElement panel)
-                            panel.Visibility = Visibility.Visible;
-                        if (w.FindName("QrImage") is System.Windows.Controls.Image img)
-                            img.Source = QrBitmap.Render(
-                                "https://user.mihoyo.com/login-platform/mobile.html"
-                                + "?expire=1735689600&tk=0123456789abcdef0123456789abcdef"
-                                + "&token_types=1#/login/qr", scale: 5, quiet: 3);
-                        if (w.FindName("TbQrHint") is TextBlock hint)
-                            hint.Text = "手机上的米游社 → 右上角扫一扫。";
-                        if (w.FindName("TbState") is TextBlock state)
-                            state.Text = "还没登录";
-                        w.UpdateLayout();
-                        bool ok = Save(w, Path.Combine(spot, "miyoushe.png"), 560, 740);
-                        Console.WriteLine($"RENDER miyoushe={ok}");
-                        w.Close();
-                    }
-
                     if (mode == "tray" || mode == "all")
                     {
                         SeedSampleQueue();
@@ -886,6 +882,46 @@ internal static class RenderProbe
                         bool ok = Save(w, Path.Combine(spot, "tray.png"), 720, 560);
                         Console.WriteLine($"RENDER tray={ok}");
                         w.Close();
+                    }
+
+                    // v1.34：插件变成导航第四项，独立一页。
+                    // 这一张要证明的是「它不再是一张默认收起的折叠卡」——
+                    // 进来就看得见目录在哪、装了什么（这里种两条：一条能读、一条读不懂），
+                    // 以及下面那两条「能做什么/不能做什么」。
+                    if (mode == "plugins" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        var sandbox = Path.Combine(Path.GetTempPath(), "dragon-plugins-render");
+                        try { if (Directory.Exists(sandbox)) Directory.Delete(sandbox, true); } catch { }
+                        PluginLoader.RootOverride = sandbox;
+                        try
+                        {
+                            var okDir = Path.Combine(sandbox, "daily-report");
+                            Directory.CreateDirectory(okDir);
+                            File.WriteAllText(Path.Combine(okDir, "metadata.json"),
+                                "{\"id\":\"daily-report\",\"name\":\"每天一份小结\",\"version\":\"1.2.0\"," +
+                                "\"author\":\"社区\",\"needs\":\"需要 Python 3.10+\",\"hosts\":[\"api.example.com\"]}",
+                                new System.Text.UTF8Encoding(false));
+                            File.WriteAllText(Path.Combine(okDir, "Plugin.dll"), "", new System.Text.UTF8Encoding(false));
+
+                            var badDir = Path.Combine(sandbox, "half-done");
+                            Directory.CreateDirectory(badDir);
+                            File.WriteAllText(Path.Combine(badDir, "metadata.json"),
+                                "{\"id\":\"half-done\"}", new System.Text.UTF8Encoding(false));
+                        }
+                        catch (Exception ex) { Console.WriteLine("SEED-PLUGINS-FAIL " + ex.Message); }
+
+                        var w = new MainWindow();
+                        w.ShowActivated = false;
+                        w.Show();
+                        SwitchToPluginsPage(w);
+                        w.UpdateLayout();
+                        bool ok = Save(w, Path.Combine(spot, "plugins.png"), 980, 0);
+                        Console.WriteLine($"RENDER plugins={ok}");
+                        w.Close();
+
+                        PluginLoader.RootOverride = null;
+                        try { if (Directory.Exists(sandbox)) Directory.Delete(sandbox, true); } catch { }
                     }
 
                     // v1.21：点开一个格子之后的启动设置窗，四张分别是
