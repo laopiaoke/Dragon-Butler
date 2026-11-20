@@ -3059,19 +3059,24 @@ internal static class Program
         Check("主题/投影用蓝色不用黑", mainXaml.Contains("Color=\"#FF1B3A6B\""));
         Check("主题/点图标能切", mainCs.Contains("Array.FindIndex(ThemeModes"));
         Check("主题/拖动也能切", mainCs.Contains("ThemeSlotAt(_themeThumbX)"));
-        // v1.35：原来连图标本体一起推（IconDark/MoonPath 各 -7，嵌套叠加成 14px），
-        // 人看到的是「整组图标跟着气泡飞」。现在只推星星与光芒，距离 2~4px。
-        Check("主题/切的时候只有附件轻微错开",
-            mainCs.Contains("private void PlayThemeParallax") &&
-            mainCs.Contains("Push(SunRays, -4, 0, ms, 30);") &&
-            mainCs.Contains("Push(Star1, -4, -1.5, ms, 30);"));
-        // 本体一步都不许动：这两行只要回来，图标就又会被气泡拖着走。
-        Check("主题/本体不跟着气泡跑",
-            !mainCs.Contains("Push(IconDark,") &&
+        // v1.36：图标里的每一条笔画都是「画上去的图案」，不是分层素材。
+        // 让星星、光芒单独位移，屏幕上读起来就是「图标自己在抖」——比原来整组飘更难懂。
+        // 所以切换只做两件事：滑块滑过去、两条笔画换上不同的灰度。位移一律不碰。
+        Check("主题/切换时图标一动不动",
+            !mainCs.Contains("PlayThemeParallax") &&
+            !mainCs.Contains("Push(Star1,") &&
+            !mainCs.Contains("Push(Star2,") &&
+            !mainCs.Contains("Push(SunRays,") &&
             !mainCs.Contains("Push(MoonPath,") &&
-            !mainCs.Contains("Push(IconLight,") &&
-            !mainCs.Contains("Push(SunCore,"));
-        // 「点了没反应」的根治：标题栏那层挂着 DragMove，按下必须在这一层吃掉，否则窗口跟着手跑
+            !mainCs.Contains("Push(IconDark,"));
+        // 这些元素上也不该留位移层 —— 留着就是「以后有人顺手往里推一下」的口子。
+        Check("主题/图标上没有挂位移层",
+            !SliceBetween(mainXaml, "x:Name=\"MoonPath\"", "/>").Contains("RenderTransform") &&
+            !SliceBetween(mainXaml, "x:Name=\"SunRays\"", "/>").Contains("RenderTransform"));
+        // 换档靠上色：选中的那档用主文字色，另一档退成三级灰。
+        Check("主题/换档靠上色",
+            SliceBetween(mainCs, "private void PaintThemeIcons", "catch").Contains("index == 0 ? on : off") &&
+            SliceBetween(mainCs, "private void PaintThemeIcons", "catch").Contains("index == 1 ? on : off"));// 「点了没反应」的根治：标题栏那层挂着 DragMove，按下必须在这一层吃掉，否则窗口跟着手跑
         Check("主题/按下不把窗口拖走", SliceBetween(mainCs, "private void ThemeSwitch_MouseLeftButtonDown", "\n    }").Contains("e.Handled = true;"));
         Check("主题/松开也不把窗口拖走", SliceBetween(mainCs, "private void ThemeSwitch_MouseLeftButtonUp", "\n    }").Contains("e.Handled = true;"));
         Check("主题/自定义搬去设置页", !mainXaml.Contains("Content=\"自定义\"") && mainXaml.Contains("x:Name=\"BtnCustomTheme\""));

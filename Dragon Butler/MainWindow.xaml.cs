@@ -301,66 +301,70 @@ public partial class MainWindow : Window
             ThemeThumbShift.BeginAnimation(TranslateTransform.XProperty, anim);
         }
 
-        PaintThemeIcons(index);
-    }
-
-    /// <summary>把两个图标按「当前模式」上色：选中的用主文字色，另一个退成三级灰。</summary>
-    private void PaintThemeIcons(int index)
-    {
-        var on = BrushOf("TextPrimaryBrush") ?? DotGray;
-        var off = BrushOf("TextTertiaryBrush") ?? DotGray;
-
-        try
-        {
-            MoonPath.Stroke = index == 0 ? on : off;
-            Star1.Fill = index == 0 ? on : off;
-            Star2.Fill = index == 0 ? on : off;
-
-            SunCore.Stroke = index == 1 ? on : off;
-            SunRays.Stroke = index == 1 ? on : off;
-        }
-        catch { }
+        PaintThemeIcons(index, animate);
     }
 
     /// <summary>
-    /// 切换时的视差：滑块往哪边去，图标里那几个「附件」就往反方向轻推一点再弹回。
+    /// 把两个图标按「当前模式」上色：选中的那档用主文字色，另一档退成三级灰。
     ///
-    /// v1.35：这里原来连图标本体一起推（IconDark / MoonPath 各 -7），而 MoonPath 是 IconDark
-    /// 的子元素 —— 两层位移会叠加，月亮实际走了 14px。人看到的是「整组图标跟着气泡一起飞」，
-    /// 那正是用户报的那个 bug。
+    /// v1.36：这里只改颜色，不动位置。图标里每一条笔画（月亮、星星、太阳、光芒）
+    /// 都是画在同一张画布上的图案，不是分层素材 —— 让其中几笔单独位移，
+    /// 屏幕上读出来就是「图标自己在抖」，比整组飘更难懂。要做出「切换」的体感，
+    /// 靠的是滑块滑过去 + 这一行的颜色淡变，而不是让图案动。
     ///
-    /// 现在只推附件（星星、光芒），并且把距离压到 2~4px：本体不动，附件微动，
-    /// 阅读起来才是「前后有层次」，而不是「图标被气泡拖走了」。
+    /// 淡变 200ms 而不是瞬切：灰色变主色时如果是硬跳，眼睛会先注意到「亮了」，
+    /// 再注意到「滑过去了」，两件事被打断成两拍；淡进去才是同一次动作的两个面。
     /// </summary>
-    private void PlayThemeParallax(int from, int to)
+    private void PaintThemeIcons(int index, bool animate = false)
     {
-        if (from == to) return;
-        double dir = to > from ? 1 : -1;
-        double ms = 520;
+        var on = BrushOf("TextPrimaryBrush") ?? DotGray;
+        var off = BrushOf("TextTertiaryBrush") ?? DotGray;
+        var fade = new Duration(TimeSpan.FromMilliseconds(200));
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
 
-        void Push(FrameworkElement? el, double dx, double dy, double ms2, double delayMs = 0)
+        // 必须用「自己的一份」画刷。XAML 里这些笔画绑的是 DynamicResource 指向的共享画刷，
+        // 直接对它 BeginAnimation 会把全界面的三级灰文字一起改色 —— 那是另一个级别的 bug。
+        // ReadLocalValue 能分清「还是 XAML 绑的」和「代码已经接手了」。
+        void Tint(System.Windows.Shapes.Shape? shape, Brush target, bool isStroke)
         {
-            if (el == null) return;
-            var tt = el.RenderTransform as TranslateTransform;
-            if (tt == null) { tt = new TranslateTransform(); el.RenderTransform = tt; }
-            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            var ax = new DoubleAnimation(dx * dir, TimeSpan.FromMilliseconds(ms2))
-            { EasingFunction = ease, FillBehavior = FillBehavior.Stop };
-            var ay = new DoubleAnimation(dy, TimeSpan.FromMilliseconds(ms2))
-            { EasingFunction = ease, FillBehavior = FillBehavior.Stop };
-            if (delayMs > 0) { ax.BeginTime = TimeSpan.FromMilliseconds(delayMs); ay.BeginTime = TimeSpan.FromMilliseconds(delayMs); }
-            tt.BeginAnimation(TranslateTransform.XProperty, ax);
-            tt.BeginAnimation(TranslateTransform.YProperty, ay);
+            if (shape == null || target is not SolidColorBrush to) return;
+            DependencyProperty dp = isStroke
+                ? System.Windows.Shapes.Shape.StrokeProperty
+                : System.Windows.Shapes.Shape.FillProperty;
+
+            SolidColorBrush brush;
+            if (shape.ReadLocalValue(dp) is SolidColorBrush own)
+            {
+                brush = own;
+            }
+            else
+            {
+                var now = (isStroke ? shape.Stroke : shape.Fill) as SolidColorBrush;
+                brush = new SolidColorBrush(now?.Color ?? to.Color);
+                shape.SetValue(dp, brush);
+            }
+
+            if (!animate)
+            {
+                brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+                brush.Color = to.Color;
+                return;
+            }
+            brush.BeginAnimation(SolidColorBrush.ColorProperty,
+                new ColorAnimation(to.Color, fade) { EasingFunction = ease });
         }
 
-        // 本体（月亮、太阳圆盘）一步都不动：它们必须钉在原来的位置，
-        // 否则「图标」和「气泡」看起来是一起被推走的，人眼立刻读成错位。
-        // 只有星星和光芒走 2~4px，这些本来就是点缀，轻微错开才像有厚度。
-        Push(Star1, -4, -1.5, ms, 30);
-        Push(Star2, -3, 1.5, ms, 60);
-        Push(SunRays, -4, 0, ms, 30);
-    }
+        try
+        {
+            Tint(MoonPath, index == 0 ? on : off, isStroke: true);
+            Tint(Star1, index == 0 ? on : off, isStroke: false);
+            Tint(Star2, index == 0 ? on : off, isStroke: false);
 
+            Tint(SunCore, index == 1 ? on : off, isStroke: true);
+            Tint(SunRays, index == 1 ? on : off, isStroke: true);
+        }
+        catch { }
+    }
     private void ThemeSwitch_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (ThemeSwitchRoot == null || ThemeThumbShift == null) return;
@@ -431,7 +435,6 @@ public partial class MainWindow : Window
         Theme.Set(mode);
 
         PlaceThemeThumb(to, animate: true);
-        PlayThemeParallax(from, to);
     }
 
     // ===== 初始化 =====
