@@ -47,6 +47,7 @@ public partial class TrayConfigWindow : Window
     private Border? _dragTile;
     private string _dragId = "";
     private DispatcherTimer? _hold;
+    private DispatcherTimer? _click;
     private Point _origin;
     private Point _grab;
     private bool _dragging;
@@ -431,6 +432,25 @@ public partial class TrayConfigWindow : Window
     private void Tile_PressDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not Border tile || tile.Tag is not string toolId) return;
+        // 上一格还在等「会不会有第二下」的话，这一按说明他已经换目标了。
+        _click?.Stop();
+
+        // v1.32：双击直接启动。
+        // 这里没有用 MouseDoubleClick——那是 Control 上才有的路由事件，方格是 Border。
+        // 用 ClickCount 自己判，顺带把「单击」的处理推迟一个双击间隔：
+        // 不推迟的话，双击的第一下会先把配置窗口弹出来，第二下才启动，等于点一次开了两样东西。
+        if (e.ClickCount >= 2)
+        {
+            _hold?.Stop();
+            _click?.Stop();
+            _dragTile = null;
+            _dragId = "";
+            _dragging = false;
+            e.Handled = true;
+            LaunchNow(toolId);
+            return;
+        }
+
         _dragTile = tile;
         _dragId = toolId;
         _origin = e.GetPosition(TileHost);
@@ -513,7 +533,19 @@ public partial class TrayConfigWindow : Window
         if (!wasDragging)
         {
             tile.BorderBrush = Res("BorderBrush") ?? Brushes.Gray;
-            OpenConfig(toolId);
+            // 等一个双击间隔再决定：这期间来了第二下就说明他要的是「启动」，不是「改设置」。
+            _click?.Stop();
+            _click = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(
+                    System.Windows.Forms.SystemInformation.DoubleClickTime),
+            };
+            _click.Tick += (_, _) =>
+            {
+                _click?.Stop();
+                OpenConfig(toolId);
+            };
+            _click.Start();
             return;
         }
 

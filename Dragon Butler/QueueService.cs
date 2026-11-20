@@ -1205,6 +1205,23 @@ public static class QueueService
             LogService.LogEvent("收拾失败：" + ex.Message);
         }
 
+        // v1.31：顺手签一下米游社（默认关）。
+        // 必须在跑完动作之前——那条链最后可能是关机，关机之后才签到等于没签。
+        // 有界等待：签到是「顺手」的事，不该因为它没回信就把关机拖到天亮。
+        try
+        {
+            if (AppState.Settings.MiyousheAutoSign && MiyousheService.HasCredential)
+            {
+                var task = Task.Run(() => MiyousheService.SignNowAsync());
+                if (!task.Wait(TimeSpan.FromSeconds(12)))
+                    LogService.LogEvent("米游社签到超过 12 秒没回信，不等了");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("米游社签到失败：" + ex.Message);
+        }
+
         AfterRunActionService.Execute(new AfterRunContext
         {
             Total = total,

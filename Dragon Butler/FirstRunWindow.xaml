@@ -173,6 +173,38 @@
             </Setter>
         </Style>
 
+        <!-- v1.31：勾选框搬到图标左上角（像 Windows 桌面选中图标那样）。
+             16×16 的小方块单独画一份：WizCheck 那个是「方块 + 右侧文字」的整行样式，
+             塞进图标角落会把名字也一起挪位置。 -->
+        <Style x:Key="WizTileCheck" TargetType="CheckBox">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="Box" Width="17" Height="17" CornerRadius="5"
+                                Background="{DynamicResource InsetBrush}"
+                                BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1.2">
+                            <Path x:Name="Tick" Data="M 3.6 8.4 L 6.6 11.4 L 12.6 5.2"
+                                  Stroke="{DynamicResource BrandOnBrush}" StrokeThickness="1.9"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Visibility="Collapsed"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource BrandBrush}"/>
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                                <Setter TargetName="Tick" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="WizCheck" TargetType="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             <Setter Property="FontSize" Value="13"/>
@@ -235,12 +267,14 @@
                 <TextBlock Text="打开你在用的那几个（可多选，之后也能改）" FontSize="12.5"
                            Foreground="{DynamicResource TextSecondaryBrush}"/>
                 <!-- 列表是滚动区：以后再加工具不会把窗口越撑越高 -->
-                <ScrollViewer MaxHeight="312" VerticalScrollBarVisibility="Auto" Margin="0,10,0,0"
-                              Padding="0,0,6,0">
+                <ScrollViewer MaxHeight="392" VerticalScrollBarVisibility="Auto" Margin="0,10,0,0"
+                              Padding="0,4,8,0">
                     <ScrollViewer.Resources>
                         <Style TargetType="ScrollBar" BasedOn="{StaticResource WizScrollBar}"/>
                     </ScrollViewer.Resources>
-                    <StackPanel x:Name="ToolPickHost"/>
+                    <!-- 图标一格一格摆（每行五个），不是一行一个——十六个一行一个要滚半天，
+                         而且一眼看不出「一共能选哪些」。 -->
+                    <WrapPanel x:Name="ToolPickHost"/>
                 </ScrollViewer>
                 <TextBlock x:Name="TbPickSummary" FontSize="11" Margin="0,8,0,0"
                            Foreground="{DynamicResource TextTertiaryBrush}"/>

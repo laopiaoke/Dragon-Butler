@@ -838,6 +838,31 @@ internal static class RenderProbe
                     // ① 横三竖二摆得开、不挤（主窗那张卡只有半屏宽，这里翻了一倍）；
                     // ② 格子是「图标在上、名字在下」的桌面感，不是列表行。
                     // 种多于一页的工具（7 个），顺带看一眼页码点与溢出提示。
+                    //
+                    // v1.31：米游社登录窗。这一张要证明的是「扫码这条路看起来是能走通的」——
+                    // 二维码是真的画出来的（不是占位图），白底、留白、能扫；
+                    // 而且「用浏览器登录」退到了一个次要位置，不再是主按钮。
+                    // 二维码内容用一段假 ticket，绝不真去要码（那会往服务端打请求）。
+                    if (mode == "miyoushe" || mode == "all")
+                    {
+                        var w = new MiyousheLoginWindow();
+                        if (w.FindName("QrPanel") is FrameworkElement panel)
+                            panel.Visibility = Visibility.Visible;
+                        if (w.FindName("QrImage") is System.Windows.Controls.Image img)
+                            img.Source = QrBitmap.Render(
+                                "https://user.mihoyo.com/login-platform/mobile.html"
+                                + "?expire=1735689600&tk=0123456789abcdef0123456789abcdef"
+                                + "&token_types=1#/login/qr", scale: 5, quiet: 3);
+                        if (w.FindName("TbQrHint") is TextBlock hint)
+                            hint.Text = "手机上的米游社 → 右上角扫一扫。";
+                        if (w.FindName("TbState") is TextBlock state)
+                            state.Text = "还没登录";
+                        w.UpdateLayout();
+                        bool ok = Save(w, Path.Combine(spot, "miyoushe.png"), 560, 740);
+                        Console.WriteLine($"RENDER miyoushe={ok}");
+                        w.Close();
+                    }
+
                     if (mode == "tray" || mode == "all")
                     {
                         SeedSampleQueue();
@@ -901,29 +926,21 @@ internal static class RenderProbe
                         SeedHeroState("ready");
                         var w = new MainWindow();
                         w.UpdateLayout();
-                        if (w.FindName("ToolCardsHost") is FrameworkElement host)
-                        {
-                            host.Visibility = Visibility.Visible;
-                            if (w.FindName("ChevTools") is FrameworkElement chev)
-                                chev.RenderTransform = new RotateTransform(180);
-                        }
-                        // BetterGI 那张卡本身也是折叠的；配置组勾选区在它的展开体里。
-                        if (w.FindName("Body_bettergi") is FrameworkElement bgiBody)
-                            bgiBody.Visibility = Visibility.Visible;
-                        // 配置组是构造窗口那一刻扫的，那时还没铺假 BGI 目录——重扫一次再刷。
+                        // v1.32：那一层「工具设置」折叠区已经撤掉，换成一排「每个工具怎么跑」的小按键，
+                        // 所以这里不再强行把 ToolCardsHost 掰成可见——掰开看到的是没人会看到的界面。
+                        // 要看的就是「一排小按键」本身。
+                        // 配置组是构造窗口那一刻扫的，那时还没铺假 BGI 目录——重扫一次再刷，
+                        // 这样点开任意一个工具都能看到真实的分组。
                         BgiDiscovery.Scan(force: true);
                         AppState.Settings.FavoriteGroups = new[] { "收尾" };
                         var picker = typeof(MainWindow).GetMethod("RefreshGroupPicker",
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                         picker?.Invoke(w, null);
                         w.UpdateLayout();
-                        // v1.29：工具设置整块搬进了启动页的「托管配置」卡，所以这里要切到启动页
-                        // （Home=1）而不是设置页——设置页上已经没有 ToolCardsHost 了。
+                        // 工具按键在启动页（Home=1）的「托管配置」卡里。
                         if (w.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer sv2)
                         {
-                            // v1.15 / L4：滚到 BetterGI 那张卡本身。430 只到折叠头，
-                            // 配置组勾选区在卡片下半部分，看不到就等于没验。
-                            sv2.ScrollToVerticalOffset(560);
+                            sv2.ScrollToVerticalOffset(430);
                             w.UpdateLayout();
                         }
                         bool ok = Save(w, Path.Combine(spot, "tools_open.png"), 980, 560);
@@ -1018,8 +1035,9 @@ internal static class RenderProbe
                         SeedHeroState("ready");
                         var w = new MainWindow();
                         w.UpdateLayout();
-                        if (w.FindName("ToolCardsHost") is FrameworkElement host3)
-                            host3.Visibility = Visibility.Visible;
+                        // v1.32：跑完动作那一行在 BetterGI 的旧折叠卡里（代码还在、界面不再显示）。
+                        // 这里仍然要把它掰开才能截到——它是「配置项长什么样」的证据图，
+                        // 不是为了展示用户会看到这一屏。
                         if (w.FindName("Body_bettergi") is FrameworkElement bgiBody3)
                             bgiBody3.Visibility = Visibility.Visible;
                         BgiDiscovery.Scan(force: true);
@@ -1030,10 +1048,9 @@ internal static class RenderProbe
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                         refresh?.Invoke(w, new object[] { true });
                         w.UpdateLayout();
-                        SwitchToSettingsPage(w);
-                        if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer sv3)
+                        if (w.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer sv3)
                         {
-                            sv3.ScrollToVerticalOffset(500);
+                            sv3.ScrollToVerticalOffset(560);
                             w.UpdateLayout();
                         }
                         bool ok = Save(w, Path.Combine(spot, "completion.png"), 980, 620);

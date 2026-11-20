@@ -115,89 +115,107 @@ public partial class FirstRunWindow : Window
     {
         var known = ToolCatalog.Find(profile.ToolId);
 
-        var row = new Border
+        // v1.31：从「一行一个」改成「一格一个」，按 Windows 桌面图标的尺寸与手感做。
+        // 两个理由：十六行要滚三屏才看得完；一行一个的列表里图标小得只算装饰，
+        // 而这一页恰恰要人做「认出自己在用的那个」这件事。
+        var tile = new Border
         {
-            Margin = new Thickness(0, 0, 0, 6),
-            Padding = new Thickness(12, 9, 12, 9),
-            CornerRadius = new CornerRadius(9),
-            Background = (Brush?)TryFindResource("InsetBrush") ?? Brushes.Transparent,
+            Width = 92,
+            Margin = new Thickness(0, 0, 6, 6),
+            Padding = new Thickness(4, 8, 4, 7),
+            CornerRadius = new CornerRadius(10),
+            Background = Brushes.Transparent,
             BorderBrush = (Brush?)TryFindResource("BorderBrush") ?? Brushes.Gray,
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(1.4),
             Cursor = Cursors.Hand,
+            ToolTip = known != null && !string.IsNullOrWhiteSpace(known.Blurb)
+                ? profile.DisplayName + "\n" + known.Blurb
+                : profile.DisplayName,
         };
 
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
+        // 图标 44×44：和托管配置窗口里那格一个量级，两处看起来是同一套东西。
         var icon = new Border
         {
-            Width = 26,
-            Height = 26,
-            CornerRadius = new CornerRadius(8),
+            Width = 44,
+            Height = 44,
+            CornerRadius = new CornerRadius(11),
             Background = (Brush?)TryFindResource("ControlBgBrush") ?? Brushes.Transparent,
-            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
         };
         var bitmap = ToolIconService.GetBitmap(profile);
         if (bitmap != null)
         {
-            icon.Child = new Image { Source = bitmap, Stretch = Stretch.Uniform };
+            icon.Child = new Image
+            {
+                Source = bitmap,
+                Stretch = Stretch.Uniform,
+                Margin = new Thickness(5),
+            };
         }
         else
         {
             icon.Child = new TextBlock
             {
                 Text = profile.DisplayName.Length > 0 ? profile.DisplayName[..1] : "?",
-                FontSize = 12,
+                FontSize = 19,
+                FontWeight = FontWeights.SemiBold,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = (Brush?)TryFindResource("TextSecondaryBrush") ?? Brushes.Gray,
             };
         }
-        grid.Children.Add(icon);
 
-        var text = new StackPanel { Margin = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock
+        // 勾选框压在图标左上角——桌面图标选中时那个角标的位置。
+        var check = new CheckBox
+        {
+            Style = TryFindResource("WizTileCheck") as Style,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(-3, -5, 0, 0),
+        };
+
+        var iconBox = new Grid();
+        iconBox.Children.Add(icon);
+        iconBox.Children.Add(check);
+
+        var nameText = new TextBlock
         {
             Text = profile.DisplayName,
-            FontSize = 12.5,
-            Foreground = (Brush?)TryFindResource("TextPrimaryBrush") ?? Brushes.White,
+            FontSize = 11,
+            Margin = new Thickness(0, 7, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 82,
+            MaxHeight = 30,
             TextTrimming = TextTrimming.CharacterEllipsis,
-        });
+            Foreground = (Brush?)TryFindResource("TextPrimaryBrush") ?? Brushes.White,
+        };
         if (known != null && !string.IsNullOrWhiteSpace(known.GameName))
-        {
-            text.Children.Add(new TextBlock
-            {
-                Text = known.GameName,
-                FontSize = 10.5,
-                Margin = new Thickness(0, 2, 0, 0),
-                Foreground = (Brush?)TryFindResource("TextTertiaryBrush") ?? Brushes.Gray,
-            });
-        }
-        Grid.SetColumn(text, 1);
-        grid.Children.Add(text);
+            nameText.ToolTip = profile.DisplayName + "（" + known.GameName + "）";
 
-        var pill = new CheckBox { Style = TryFindResource("WizPill") as Style, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(pill, 2);
-        grid.Children.Add(pill);
+        var stack = new StackPanel();
+        stack.Children.Add(iconBox);
+        stack.Children.Add(nameText);
+        tile.Child = stack;
 
-        row.Child = grid;
-        // 整行可点：胶囊太细，十六行往下排时很容易点到隔壁
-        row.MouseLeftButtonUp += (_, _) => pill.IsChecked = pill.IsChecked != true;
-        pill.Checked += (_, _) =>
+        // 整格可点：勾选框只有 17px，点在名字或图标上都该算。
+        tile.MouseLeftButtonUp += (_, _) => check.IsChecked = check.IsChecked != true;
+        check.Checked += (_, _) =>
         {
-            row.BorderBrush = (Brush?)TryFindResource("BrandBrush") ?? Brushes.Green;
+            tile.BorderBrush = (Brush?)TryFindResource("BrandBrush") ?? Brushes.Green;
+            tile.Background = (Brush?)TryFindResource("BrandSoftBrush") ?? Brushes.Transparent;
             RefreshPickSummary();
         };
-        pill.Unchecked += (_, _) =>
+        check.Unchecked += (_, _) =>
         {
-            row.BorderBrush = (Brush?)TryFindResource("BorderBrush") ?? Brushes.Gray;
+            tile.BorderBrush = (Brush?)TryFindResource("BorderBrush") ?? Brushes.Gray;
+            tile.Background = Brushes.Transparent;
             RefreshPickSummary();
         };
 
-        _picks[profile.ToolId] = pill;
-        return row;
+        _picks[profile.ToolId] = check;
+        return tile;
     }
 
     private void RefreshPickSummary()

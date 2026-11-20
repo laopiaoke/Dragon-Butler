@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -132,6 +134,7 @@ public partial class MainWindow : Window
         LoadSettingsToUi();
         RebuildCustomToolCards();
         RefreshPlugins();
+        RefreshMiyoushe();
         RenderQueue();
         RefreshToolCards();
         RefreshShield();
@@ -1406,20 +1409,116 @@ public partial class MainWindow : Window
         if (expand) RefreshToolCard(toolId);
     }
 
+    /// <summary>上一次画出来的那排工具按键的签名（id + 有没有配好）。</summary>
+    private string _toolButtonSignature = "";
+
     /// <summary>
-    /// v1.15 / L2：工具设置那一行。
+    /// v1.32：「每个工具怎么跑」那一排小按键。
     ///
     /// <para>
-    /// 收起来不是把功能藏掉——主卡的「选择 BetterGI.exe」已经覆盖了最常见的那一次操作，
-    /// 而「配好了几个」这件事仍然要能一眼看到，所以标题行右边挂一句摘要。
+    /// 原来是「工具设置」折叠区，里面每个工具再套一层折叠卡。用户想看 BetterGI，
+    /// 得先展开整个区、再展开 BetterGI——两次点击都在回答同一个问题「它在哪」。
+    /// 现在一个工具一个按键，点一下直接开它的配置窗口，跟托管桌面里「左键点图标」是同一个动作。
+    /// </para>
+    /// <para>
+    /// 图标 20×20、按键高 30：比格子小一号，因为它们不承担「今晚跑不跑」的信息，
+    /// 只承担「去哪改它」。排不下会自动换行（WrapPanel）。
     /// </para>
     /// </summary>
-    private void FoldTools_Click(object sender, RoutedEventArgs e)
+    private void RenderToolButtons()
     {
-        bool expand = ToolCardsHost.Visibility != Visibility.Visible;
-        ToolCardsHost.Visibility = expand ? Visibility.Visible : Visibility.Collapsed;
-        ChevTools.RenderTransform = new RotateTransform(expand ? 180 : 0);
-        if (expand) RefreshToolCards();
+        if (ToolButtonHost == null) return;
+
+        var ids = new List<string>();
+        foreach (var entry in AppState.Settings.Queue ?? new List<QueueEntry>())
+        {
+            if (string.IsNullOrWhiteSpace(entry.ToolId)) continue;
+            if (!ids.Contains(entry.ToolId, StringComparer.OrdinalIgnoreCase)) ids.Add(entry.ToolId);
+        }
+        foreach (var p in ProfileRegistry.All)
+        {
+            if (string.IsNullOrWhiteSpace(p.ExecutablePath)) continue;
+            if (!ids.Contains(p.ToolId, StringComparer.OrdinalIgnoreCase)) ids.Add(p.ToolId);
+        }
+        if (ids.Count == 0)
+        {
+            foreach (string id in new[] { "bettergi", "march7th", "ok-ww" }) ids.Add(id);
+        }
+
+        // 每秒一次的界面轮询也会走到这里。签名没变就一个控件都不碰——
+        // 重造一排按钮不只是浪费，还会把正按在上面的手指/鼠标弄丢（v1.23 桌面格子踩过同一条）。
+        string signature = string.Join("|", ids.Select(id =>
+            id + ":" + (ToolRunner.HasExecutable(ProfileRegistry.Get(id)) ? "1" : "0")));
+        if (signature == _toolButtonSignature) return;
+        _toolButtonSignature = signature;
+
+        ToolButtonHost.Children.Clear();
+        foreach (string id in ids) ToolButtonHost.Children.Add(BuildToolButton(id));
+    }
+
+    private Border BuildToolButton(string toolId)
+    {
+        var profile = ProfileRegistry.Get(toolId);
+        bool ready = ToolRunner.HasExecutable(profile);
+
+        var icon = new Border
+        {
+            Width = 20,
+            Height = 20,
+            CornerRadius = new CornerRadius(6),
+            Background = BrushOf("ControlBgBrush") ?? DotGray,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var bmp = ToolIconService.GetBitmap(profile);
+        if (bmp != null)
+        {
+            icon.Child = new Image { Source = bmp, Stretch = Stretch.Uniform, Margin = new Thickness(2) };
+        }
+        else
+        {
+            icon.Child = new TextBlock
+            {
+                Text = profile.DisplayName.Length > 0 ? profile.DisplayName[..1] : "?",
+                FontSize = 11,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
+            };
+        }
+
+        var stack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        stack.Children.Add(icon);
+        stack.Children.Add(new TextBlock
+        {
+            Text = profile.DisplayName,
+            FontSize = 11.5,
+            Margin = new Thickness(7, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
+            MaxWidth = 96,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+
+        var btn = new Border
+        {
+            Height = 30,
+            Margin = new Thickness(0, 0, 6, 6),
+            Padding = new Thickness(8, 0, 10, 0),
+            CornerRadius = new CornerRadius(8),
+            Background = BrushOf("InsetBrush") ?? DotGray,
+            BorderThickness = new Thickness(1),
+            BorderBrush = BrushOf(ready ? "BorderBrush" : "WarningBrush") ?? DotGray,
+            Child = stack,
+            Cursor = Cursors.Hand,
+            Tag = toolId,
+            ToolTip = ready
+                ? profile.DisplayName + "\n" + profile.ExecutablePath
+                : profile.DisplayName + "\n还没找到主程序——点一下填上。",
+        };
+        btn.MouseEnter += (_, _) => btn.Background = BrushOf("HoverBrush") ?? DotGray;
+        btn.MouseLeave += (_, _) => btn.Background = BrushOf("InsetBrush") ?? DotGray;
+        btn.MouseLeftButtonDown += (_, _) => OpenToolLaunch(toolId);
+        return btn;
     }
 
     /// <summary>「已配 1 个 / 3 个都没配」——收起状态下唯一能看出配置状况的地方。</summary>
@@ -1480,6 +1579,7 @@ public partial class MainWindow : Window
             try { RefreshCustomToolCard(id); } catch { }
         }
         RefreshToolsSummary();
+        try { RenderToolButtons(); } catch { }
         try { SyncToolGrid(); } catch { }
         // 路径或配置名刚变过时要重读；节流在 RefreshCompletionRow 里，20 秒最多读一次盘
         try { RefreshCompletionRow(); } catch { }
@@ -6016,6 +6116,101 @@ public partial class MainWindow : Window
             AppDialog.Show("打不开插件目录，详情见日志。", detail: ex.Message,
                 kind: AppDialog.Kind.Warning, title: "插件", primary: "知道了", owner: this);
         }
+    }
+
+    // ===== 米游社签到（v1.31）=====
+
+    /// <summary>
+    /// 把「登没登、上次签到什么结果、现在能不能签」摆到卡上。
+    /// 三个状态对应三种语气：没登录是陈述，签成功是成绩，签失败才是要人动手的。
+    /// </summary>
+    private void RefreshMiyoushe()
+    {
+        var s = AppState.Settings;
+        bool logged = MiyousheService.HasCredential;
+
+        BtnMiyousheLogin.Content = logged ? "换账号" : "登录";
+        BtnMiyousheSign.IsEnabled = logged;
+        TgMiyousheAuto.IsChecked = s.MiyousheAutoSign;
+
+        if (!logged)
+        {
+            TbMiyousheState.Text = "还没登录";
+            TbMiyousheState.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+            TbMiyousheHint.Text = "在米游社按日签到能攒米游币。这里不碰你的密码——点「登录」会开一个小浏览器窗口，"
+                                + "你在里面登录一次，凭证就存下来了。";
+            return;
+        }
+
+        string who = string.IsNullOrWhiteSpace(s.MiyousheNickname) ? "已登录" : "已登录 · " + s.MiyousheNickname;
+        TbMiyousheState.Text = who + (string.IsNullOrWhiteSpace(s.MiyousheStoken) ? "（无 stoken）" : "");
+        TbMiyousheState.Foreground = BrushOf("BrandBrush") ?? DotGray;
+
+        string when = s.MiyousheLastAt.HasValue
+            ? s.MiyousheLastAt.Value.ToString("M月d日 HH:mm") + "　"
+            : "";
+        string last = string.IsNullOrWhiteSpace(s.MiyousheLastResult) ? "还没签过。" : s.MiyousheLastResult;
+        TbMiyousheHint.Text = when + last
+            + (string.IsNullOrWhiteSpace(s.MiyousheStoken)
+                ? "\n没有 stoken 时，cookie 过期后要重新登录一次。用浏览器登录会自动带上。"
+                : "");
+    }
+
+    private void BtnMiyousheLogin_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dlg = new MiyousheLoginWindow { Owner = this };
+            bool ok = dlg.ShowDialog() == true;
+            if (ok || dlg.Saved) RefreshMiyoushe();
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Show("打不开米游社登录窗口，详情见日志。", detail: ex.Message,
+                kind: AppDialog.Kind.Warning, title: "米游社", primary: "知道了", owner: this);
+        }
+    }
+
+    private async void BtnMiyousheSign_Click(object sender, RoutedEventArgs e)
+    {
+        if (!MiyousheService.HasCredential)
+        {
+            AppDialog.Show("先登录一次。点旁边的「登录」，在里面登录完，凭证会自己存下来。",
+                kind: AppDialog.Kind.Info, title: "米游社", primary: "知道了", owner: this);
+            return;
+        }
+
+        BtnMiyousheSign.IsEnabled = false;
+        BtnMiyousheSign.Content = "签到中…";
+        TbMiyousheHint.Text = "正在签到…";
+        try
+        {
+            string result = await MiyousheService.SignNowAsync(CancellationToken.None);
+            RefreshMiyoushe();
+            bool bad = result.Contains("没成", StringComparison.Ordinal)
+                    || result.Contains("过期", StringComparison.Ordinal)
+                    || result.Contains("连不上", StringComparison.Ordinal);
+            TbMiyousheHint.Foreground = bad ? (BrushOf("WarningBrush") ?? DotGray) : (BrushOf("TextSecondaryBrush") ?? DotGray);
+            TbMiyousheHint.Text = result;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("米游社签到异常：" + ex.Message);
+            TbMiyousheHint.Text = "签到的时候出了点岔子：" + ex.Message;
+            TbMiyousheHint.Foreground = BrushOf("WarningBrush") ?? DotGray;
+        }
+        finally
+        {
+            BtnMiyousheSign.Content = "现在签到";
+            BtnMiyousheSign.IsEnabled = MiyousheService.HasCredential;
+        }
+    }
+
+    private void TgMiyousheAuto_Click(object sender, RoutedEventArgs e)
+    {
+        AppState.Settings.MiyousheAutoSign = TgMiyousheAuto.IsChecked == true;
+        AppState.SaveSettings();
+        LogService.LogEvent("米游社：跑完顺手签到=" + AppState.Settings.MiyousheAutoSign);
     }
 
     // ===== 折叠卡通用 =====

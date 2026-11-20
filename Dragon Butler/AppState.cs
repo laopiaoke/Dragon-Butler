@@ -386,6 +386,34 @@ public class AppSettings
     /// 一条规则 = 一个关键词 + 一个动作（提醒 / 留现场 / 停下队列），见 <see cref="LogRules"/>。
     /// </summary>
     public List<LogRule> LogRules { get; set; } = new();
+
+    // ===== v1.31：米游社签到 =====
+    /// <summary>
+    /// 米游社登录态。整套东西里最难拿的就是这个，见 <see cref="MiyousheSession"/>。
+    /// 存的是 cookie 原文（含 cookie_token / ltuid / account_id 等），不是账号密码。
+    /// </summary>
+    public string MiyousheCookie { get; set; } = "";
+
+    /// <summary>stoken（续期用）。没有它，cookie 过期后要人重新登录一次。</summary>
+    public string MiyousheStoken { get; set; } = "";
+
+    /// <summary>stuid（= 上面的 ltuid / account_id，取 token 时要用）。</summary>
+    public string MiyousheStuid { get; set; } = "";
+
+    /// <summary>mid（stoken 以 v2_ 开头时必须有，否则接口直接拒）。</summary>
+    public string MiyousheMid { get; set; } = "";
+
+    /// <summary>登录成功时记下昵称，界面里显示「已登录 · 某某」比一串数字好认。</summary>
+    public string MiyousheNickname { get; set; } = "";
+
+    /// <summary>上次签到结果，写成一句话给人看（今天已签到 / 米游币 +N / 失败了为什么）。</summary>
+    public string MiyousheLastResult { get; set; } = "";
+
+    /// <summary>上次签到时间。空 = 从没跑过。</summary>
+    public DateTime? MiyousheLastAt { get; set; }
+
+    /// <summary>要不要跟着队列一起签到（默认关：签到会花几秒网络时间，不该偷偷插进跑一条龙的流程里）。</summary>
+    public bool MiyousheAutoSign { get; set; } = false;
 }
 
 /// <summary>

@@ -1475,28 +1475,29 @@
                                                Foreground="{DynamicResource TextTertiaryBrush}"
                                                Text="依次执行勾选的工具；间隔在高级设置里调整。"/>
 
-                                    <!-- v1.29：工具设置原来在设置页上单独一张卡，和这张卡说的是同一批工具——
-                                         「哪些要跑」在这边，「每个怎么跑」在那边，用户点一个工具得先想清楚它在哪一页。
-                                         现在并成一张：上面挑、下面配，往下滚一点就到。一个控件都没删。 -->
-                                    <Border Margin="0,14,0,0" Height="1" Background="{DynamicResource BorderBrush}"/>
-                        <StackPanel>
-                            <Button x:Name="BtnFoldTools" Style="{StaticResource FoldHeader}" Click="FoldTools_Click">
-                                <DockPanel LastChildFill="False">
-                                    <Path DockPanel.Dock="Right" x:Name="ChevTools" Data="M4 6l4 4 4-4"
-                                          Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
-                                          Width="10" Height="10" Stretch="Uniform" VerticalAlignment="Center"/>
-                                    <Path DockPanel.Dock="Left" Data="M4 5h12M4 10h12M4 15h12"
-                                          Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
-                                          Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
-                                    <TextBlock DockPanel.Dock="Left" Text="工具设置" FontSize="13.5" FontWeight="SemiBold"
-                                               Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock x:Name="TbToolsSummary" DockPanel.Dock="Left" Text="" FontSize="10.5"
-                                               Margin="10,0,0,0" Foreground="{DynamicResource TextTertiaryBrush}"
-                                               VerticalAlignment="Center"/>
-                                </DockPanel>
-                            </Button>
-                            <StackPanel x:Name="ToolCardsHost" Visibility="Collapsed">
+                    <!-- v1.29：工具设置原来在设置页上单独一张卡，和这张卡说的是同一批工具——
+                         「哪些要跑」在这边，「每个怎么跑」在那边，用户点一个工具得先想清楚它在哪一页。
+                         现在并成一张：上面挑、下面配，往下滚一点就到。
+
+                         v1.32：那一层「工具设置」折叠行撤掉了。它是按「协议」分的（一个工具一块折叠区），
+                         但用户是按「哪个工具」想的——想看 BetterGI 得先展开整个折叠区，再展开 BetterGI，
+                         两次点击都在回答同一个问题。改成小按键：一个工具一个，点一下直接开它的配置窗口，
+                         和托管桌面里「左键点图标」是同一个动作。下面的长列表留着（代码还在引用那些控件），
+                         但不再显示。 -->
+                    <Border Margin="0,14,0,0" Height="1" Background="{DynamicResource BorderBrush}"/>
+        <StackPanel>
+            <Grid Margin="0,12,0,0">
+                <TextBlock Text="每个工具怎么跑" FontSize="13.5" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="TbToolsSummary" Text="" FontSize="10.5" HorizontalAlignment="Right"
+                           Margin="0,0,2,0" Foreground="{DynamicResource TextTertiaryBrush}"
+                           VerticalAlignment="Center"/>
+            </Grid>
+            <TextBlock FontSize="10.5" Margin="0,4,0,0" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextTertiaryBrush}"
+                       Text="点一下就能改它的程序位置和完成方式。按住小按键拖到别处，也就是换它今晚跑的顺序。"/>
+            <WrapPanel x:Name="ToolButtonHost" Margin="0,9,0,0"/>
+            <StackPanel x:Name="ToolCardsHost" Visibility="Collapsed">
 
                     <Border Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
@@ -1715,14 +1716,55 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
+
+                            <!-- v1.31：米游社签到。
+                                 放最上面是因为它是唯一一张「要先登录才能用」的卡——
+                                 藏在折叠列表底下的账号设置，等于没有。
+                                 卡本身只说三件事：登没登、上次签到什么结果、现在能不能签。 -->
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,0" Padding="16,13,16,14">
+                                <StackPanel>
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Path Data="M3,16 L3,7 L10,2.5 L17,7 L17,16 Z M7.6,16 L7.6,10.4 L12.4,10.4 L12.4,16"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"
+                                                  StrokeLineJoin="Round" Width="14" Height="14" Stretch="Uniform"
+                                                  VerticalAlignment="Center"/>
+                                            <TextBlock Text="米游社签到" FontSize="13.5" FontWeight="SemiBold"
+                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                            <TextBlock x:Name="TbMiyousheState" Text="还没登录" FontSize="10.5"
+                                                       Margin="10,2,0,0" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <Button x:Name="BtnMiyousheLogin" Content="登录" Style="{StaticResource MiniAction}"
+                                                    Height="26" Padding="10,0" Margin="0,0,6,0"
+                                                    Click="BtnMiyousheLogin_Click"/>
+                                            <Button x:Name="BtnMiyousheSign" Content="现在签到" Style="{StaticResource MiniAction}"
+                                                    Height="26" Padding="10,0" Click="BtnMiyousheSign_Click"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock x:Name="TbMiyousheHint" FontSize="11" TextWrapping="Wrap"
+                                               Margin="0,8,0,0" LineHeight="18"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="在米游社按日签到能攒米游币。这里不碰你的密码——点「登录」会开一个小浏览器窗口，你在里面登录一次，凭证就存下来了。"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
+                                        <ToggleButton x:Name="TgMiyousheAuto" Style="{StaticResource SwitchStyle}"
+                                                      Click="TgMiyousheAuto_Click"/>
+                                        <TextBlock Text="每次跑完一条龙顺手签一下" FontSize="11.5" Margin="10,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
 
 
                             <!-- v1.29：插件卡。这里一直是空的——插件加载器（PluginLoader）在 v1.20 就写好了，
                                  但界面上没有一个地方能看见「装了没有、装了什么、为什么没装」。
                                  空着也是信息：先说清 plugins 目录在哪、放进去会长什么样，
                                  再去扫真实目录，把读得懂的和读不懂的分开列。 -->
-                            <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,0" Padding="0">
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                                 <StackPanel>
                                     <Button x:Name="BtnFoldPlugins" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                         <DockPanel LastChildFill="False">
@@ -1756,7 +1798,7 @@
 
                     <!-- 第三层：高级设置（默认折叠） -->
 
-                    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldAdvanced" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -1970,7 +2012,7 @@
                     </Border>
 
                     <!-- ===== E 系统（折叠，默认收起；6 开关两列网格）===== -->
-                    <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldSystem" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2198,7 +2240,7 @@
                     </Border>
 
                     <!-- ===== F 通知（折叠，默认收起）===== -->
-                    <Border x:Name="NotifyCard" Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border x:Name="NotifyCard" Grid.Row="4" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">

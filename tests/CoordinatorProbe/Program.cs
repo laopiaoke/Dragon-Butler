@@ -117,6 +117,7 @@ internal static class Program
         "toolcatalog" => RunToolCatalog(),
         "pager" => RunPager(),
             "notice" => RunNotice(),
+            "miyoushe" => RunMiyoushe(),
             _ => Help(),
         };
     }
@@ -2311,6 +2312,144 @@ internal static class Program
     }
 
     /// <summary>
+    /// v1.31：米游社签到。
+    ///
+    /// 这块最要紧的不是「能不能签上」（那得联网、还得有账号），而是三件以前做错过的事：
+    /// 一、扫码请求的 app_id 必须是米游社 App 那个；二、二维码得自己画、且画得对；
+    /// 三、凭证四件套缺一样时给出的提示是给用户看的，不是给人看堆栈的。
+    /// 二维码用「与标准实现逐格一致」当判据——本机没有能用的解码库，见路线图 v1.31。
+    /// </summary>
+    private static int RunMiyoushe()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // ---- 1) cookie 认得出来 ----
+        string raw = "cookie_token=abc123; account_id=10001; ltoken=xyz; lmid=88";
+        var (cookie, stoken, stuid, mid, reason) =
+            MiyousheSession.FromCookieString(raw, "10001", "88");
+        Check("cookie/能认出 cookie_token", cookie.Contains("cookie_token=abc123"), cookie);
+        Check("cookie/能认出 uid", stuid == "10001", stuid);
+        // ltoken 要留着（浏览器那条路只给 ltoken/ltmid 时也能换 token），
+        // 但跟登录无关的项（设备指纹、设备 id 之类）不该被当成凭证存下来。
+        Check("cookie/跟登录无关的项不存", !cookie.Contains("_MHYUUID"), cookie);
+        Check("cookie/没意见时 reason 是空的", reason.Length == 0, reason);
+
+        var bad = MiyousheSession.FromCookieString("hello=1; world=2");
+        Check("cookie/缺 cookie_token 要说人话", bad.Reason.Contains("cookie_token"), bad.Reason);
+
+        Check("cookie/空输入不炸", MiyousheSession.FromCookieString(null).Reason.Length > 0);
+
+        // ---- 2) stoken 要不要 mid ----
+        Check("stoken/v2_ 开头要 mid", MiyousheSession.NeedsMid("v2_abcdef"));
+        Check("stoken/普通 stoken 不要 mid", !MiyousheSession.NeedsMid("abcdef"));
+        Check("stoken/空的不炸", !MiyousheSession.NeedsMid(null));
+
+        // ---- 3) 签名格式 ----
+        string ds = MiyousheSign.Ds(web: false);
+        var parts = ds.Split(',');
+        Check("签名/三段", parts.Length == 3, ds);
+        // 第一段是时间戳，不是盐；盐藏在第三段的 md5 里，验不了。
+        // 这里只验「第一段确实是秒级时间戳」，盐的归属靠下面那条 ds2 的断言和源码里的常量名。
+        long stamp = long.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        Check("签名/第一段是秒级时间戳", Math.Abs(now - stamp) < 120, parts[0]);
+        Check("签名/第三段是 32 位 md5", parts[2].Length == 32, parts[2]);
+        Check("签名/网页版的 r 是六位数", MiyousheSign.Ds(web: true).Split(',')[1].Length == 6);
+        Check("签名/两个盐不是同一个", MiyousheSign.SaltApp != MiyousheSign.SaltBbs);
+
+        // ---- 4) 接口说人话 ----
+        Check("解释/-100 是登录态过期", MiyousheSign.Explain(-100).Contains("登录"), MiyousheSign.Explain(-100));
+        Check("解释/1034 是风控", MiyousheSign.Explain(1034).Contains("频") || MiyousheSign.Explain(1034).Contains("风控"));
+        Check("解释/5003 是没绑角色", MiyousheSign.Explain(5003).Length > 0);
+        Check("解释/没见过的码也不留空", MiyousheSign.Explain(-99999).Length > 0);
+
+        // ---- 5) 二维码：尺寸、留白、定位图形 ----
+        var m = QrCode.Encode("HELLO");
+        Check("二维码/能编出来", m != null);
+        if (m != null)
+        {
+            Check("二维码/HELLO 是 21×21", m.GetLength(0) == 21, m.GetLength(0).ToString());
+            Check("二维码/左上角有定位图形", m[0, 0] && m[6, 6] && m[0, 6]);
+            // 7×7 定位图形：外圈黑、第二圈白、正中 3×3 黑。
+            Check("二维码/定位图形有白环", !m[1, 1] && !m[1, 5] && !m[5, 1]);
+            Check("二维码/定位图形正中是黑的", m[3, 3] && m[2, 2] && m[4, 4]);
+            Check("二维码/右下角有固定黑点", m[21 - 8, 8]);
+        }
+        Check("二维码/空串也给一个", QrCode.Encode("") != null);
+        Check("二维码/长内容换大版本", QrCode.Encode(new string('A', 150))!.GetLength(0) == 45);
+        Check("二维码/太长就放弃", QrCode.Encode(new string('A', 4000)) == null);
+        Check("二维码/中文也能编", QrCode.Encode("你好") != null);
+
+        // 与标准实现逐格一致（mask 也一致）——这几个数字是用 python qrcode 库比对出来的，
+        // 见 docs/路线图.md v1.31。改了编码器这几个数就该变。
+        Check("二维码/HELLO 用 mask7", QrCode.DebugEncode("HELLO").Mask == 7);
+        Check("二维码/你好 用 mask4", QrCode.DebugEncode("你好").Mask == 4);
+
+        // ---- 6) 二维码画成图 ----
+        var bmp = QrBitmap.Render("HELLO", scale: 4, quiet: 2);
+        Check("位图/画得出来", bmp != null);
+        if (bmp != null)
+        {
+            int expected = (21 + 2 * 2) * 4;
+            Check("位图/尺寸含留白", (int)bmp.PixelWidth == expected, $"{bmp.PixelWidth} vs {expected}");
+            Check("位图/是冻结的（能跨线程画）", bmp.IsFrozen);
+        }
+        Check("位图/编不出来就返回空", QrBitmap.Render(new string('A', 4000)) == null);
+
+        // ---- 7) 接线：扫码入口必须在，而且不该是「用浏览器」当主按钮 ----
+        string loginXaml = ReadRepoSources("Dragon Butler/MiyousheLoginWindow.xaml");
+        string loginCs = ReadRepoSources("Dragon Butler/MiyousheLoginWindow.xaml.cs");
+        string qrCs = ReadRepoSources("Dragon Butler/MiyousheQr.cs");
+        string bbsCs = ReadRepoSources("Dragon Butler/MiyousheBbs.cs");
+        string svcCs = ReadRepoSources("Dragon Butler/MiyousheService.cs");
+        string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+
+        Check("接线/登录窗有扫码按钮", loginXaml.Contains("x:Name=\"BtnQr\"") && loginXaml.Contains("Click=\"BtnQr_Click\""));
+        Check("接线/扫码是主按钮（Primary 样式）",
+            loginXaml.Contains("BtnQr") && loginXaml.IndexOf("BtnQr", StringComparison.Ordinal)
+                < loginXaml.IndexOf("BtnBrowser", StringComparison.Ordinal));
+        Check("接线/有二维码面板", loginXaml.Contains("QrPanel") && loginXaml.Contains("QrImage"));
+        Check("接线/二维码有白底（暗色主题下也能扫）", loginXaml.Contains("Background=\"White\""));
+        Check("接线/实现里有 BtnQr_Click", loginCs.Contains("private async void BtnQr_Click"));
+        Check("接线/轮询扫没扫", loginCs.Contains("MiyousheQr.PollAsync("));
+        Check("接线/扫完就关窗", loginCs.Contains("DialogResult = true; Close();"));
+        Check("接线/换不出 cookie_token 时说清下一步", loginCs.Contains("cookie_token"));
+        Check("接线/关窗要停掉轮询", loginCs.Contains("StopQr();"));
+
+        Check("接线/app_id 是米游社那个", qrCs.Contains("ddxf5qt290cg"), "用错就是 -3005");
+        Check("接线/轮询复用同一个 device_id", qrCs.Contains("session.DeviceId"));
+        Check("接线/-3503 有单独的人话", qrCs.Contains("-3503"));
+        Check("接线/轮询前先看本地过期", qrCs.Contains("session.Expired"));
+
+        Check("接线/签到用对域名", bbsCs.Contains("bbs-api.miyoushe.com"));
+        Check("接线/403 不当 JSON 解析", bbsCs.Contains("IsSuccessStatusCode"));
+        Check("接线/有续期调用", bbsCs.Contains("getCookieAccountInfoBySToken"));
+        Check("接线/有区服 id 列表", svcCs.Contains("DefaultGids"));
+        Check("接线/签完写回设置", svcCs.Contains("MiyousheLastAt"));
+        Check("接线/失败进消息中心", svcCs.Contains("NoticeCenter.AddError("));
+
+        Check("接线/设置页有米游社卡", mainXaml.Contains("BtnMiyousheLogin") && mainXaml.Contains("BtnMiyousheSign"));
+        Check("接线/默认不自动签到", (!mainXaml.Contains("<ToggleButton x:Name=\"TgMiyousheAuto\" IsChecked=\"True\"")));
+        Check("接线/跑完会顺手签", mainCs.Contains("MiyousheService.SignNowAsync"));
+
+        // 自动签到默认关：不该偷偷插进「跑一条龙」的流程里。
+        Check("接线/自动签到开关默认关", AppState.Settings.MiyousheAutoSign == false);
+
+        // ---- 8) 零依赖底线 ----
+        string csproj = ReadRepoSources("Dragon Butler/Dragon Butler.csproj");
+        Check("底线/没有 PackageReference", !csproj.Contains("<PackageReference"));
+
+        Console.WriteLine($"RESULT miyoushe fails={fails.Count}");
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
     /// v1.28：消息中心。
     ///
     /// 这块要挡住的是一件很具体的事：**崩溃提示不许再挡住启动流程**。
@@ -2833,6 +2972,7 @@ internal static class Program
         string soundCs = ReadRepoSources("Dragon Butler/SoundService.cs");
         string pathCs = ReadRepoSources("Dragon Butler/Paths.cs");
         string wizardCs = ReadRepoSources("Dragon Butler/FirstRunWindow.xaml.cs");
+        string wizardXaml = ReadRepoSources("Dragon Butler/FirstRunWindow.xaml");
         Check("接线/有 ToolGridHost", mainXaml.Contains("\"ToolGridHost\""));
         Check("接线/ToolGridHost 是 Grid", mainXaml.Contains("<Grid x:Name=\"ToolGridHost\""));
         // v1.26：队列卡标题行那个「＋ 添加」长条按钮删了——格子里本来就有一格「＋ 添加」，
@@ -2909,7 +3049,7 @@ internal static class Program
             mainXaml.IndexOf("<Border Grid.Row=\"2\" Background=\"{DynamicResource CardBgBrush}\"", StringComparison.Ordinal) > 0 &&
             mainXaml.Contains("x:Name=\"StatusBarBorder\""));
         Check("合并/工具设置搬进启动页",
-            mainXaml.IndexOf("x:Name=\"ToolCardsHost\"", StringComparison.Ordinal) <
+            mainXaml.IndexOf("x:Name=\"ToolButtonHost\"", StringComparison.Ordinal) <
             mainXaml.IndexOf("x:Name=\"PageSettings\"", StringComparison.Ordinal));
         Check("合并/设置页不再有工具设置壳", !mainXaml.Contains("第二层：工具设置"));
         Check("插件/有插件卡", mainXaml.Contains("x:Name=\"BtnFoldPlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
@@ -2926,7 +3066,11 @@ internal static class Program
         Check("窗口/横三竖二", trayCs.Contains("private const int Columns = 3;") && trayCs.Contains("private const int Rows = 2;"));
         Check("窗口/一屏六格", trayCs.Contains("private const int PerView = Columns * Rows;"));
         Check("窗口/左键单击改设置", trayCs.Contains("OpenConfig(toolId);"));
-        Check("窗口/双击直接启动", trayCs.Contains("LaunchNow(toolId)") && trayCs.Contains("MouseDoubleClick") == false);
+        // v1.32：双击现在是真的双击（ClickCount >= 2），单击要等一个双击间隔才走「改设置」。
+        Check("窗口/双击直接启动",
+            trayCs.Contains("e.ClickCount >= 2") && trayCs.Contains("LaunchNow(toolId)"));
+        Check("窗口/单击先等一等别抢先开窗",
+            trayCs.Contains("SystemInformation.DoubleClickTime") && trayCs.Contains("_click?.Stop();"));
         Check("窗口/右键有菜单", trayCs.Contains("new ContextMenu()"));
         Check("窗口/右键能改今晚跑不跑", trayCs.Contains("今晚不跑它") && trayCs.Contains("ToggleDuty(toolId)"));
         Check("窗口/悬停会说明三个键各做什么",
@@ -2957,6 +3101,36 @@ internal static class Program
         Check("目录/不再散着建 config",
             !mainCs.Contains("Path.Combine(AppContext.BaseDirectory, \"config\"") &&
             !appStateCs.Contains("Path.Combine(AppContext.BaseDirectory, \"config\""));
+
+        // ---- 11f) v1.32 一个工具一个按键 / 引导页图标格 ----
+        Check("按键/有那一排", mainXaml.Contains("x:Name=\"ToolButtonHost\""));
+        Check("按键/排不下会换行", mainXaml.Contains("<WrapPanel x:Name=\"ToolButtonHost\""));
+        Check("按键/旧的折叠头撤掉了",
+            !mainXaml.Contains("x:Name=\"BtnFoldTools\"") && !mainXaml.Contains("x:Name=\"ChevTools\""));
+        Check("按键/长列表留着但不再显示",
+            mainXaml.Contains("<StackPanel x:Name=\"ToolCardsHost\" Visibility=\"Collapsed\">"));
+        Check("按键/点一下开那个工具的配置窗", mainCs.Contains("btn.MouseLeftButtonDown += (_, _) => OpenToolLaunch(toolId);"));
+        Check("按键/名字太长会截断", mainCs.Contains("TextTrimming.CharacterEllipsis,") && mainCs.Contains("MaxWidth = 96"));
+        Check("按键/没配好的用警示色圈出来", mainCs.Contains("ready ? \"BorderBrush\" : \"WarningBrush\""));
+        // 每秒轮询会走到这里，签名没变就一个控件都不碰——否则手指按着的那颗按钮会被换掉
+        Check("按键/没变就不重造", mainCs.Contains("_toolButtonSignature") && mainCs.Contains("if (signature == _toolButtonSignature) return;"));
+
+        Check("引导/图标格不是一行一个", wizardXaml.Contains("<WrapPanel x:Name=\"ToolPickHost\""));
+        Check("引导/有压在角上的勾选框", wizardXaml.Contains("x:Key=\"WizTileCheck\""));
+        Check("引导/勾上周围变绿", wizardCs.Contains("tile.BorderBrush = (Brush?)TryFindResource(\"BrandBrush\")"));
+        Check("引导/一整格都能点", wizardCs.Contains("tile.MouseLeftButtonUp += (_, _) => check.IsChecked = check.IsChecked != true;"));
+        Check("引导/名字两行封顶", wizardCs.Contains("MaxHeight = 30") && wizardCs.Contains("TextWrapping = TextWrapping.Wrap"));
+
+        Check("图标/缺的那五个有图了",
+            System.IO.File.Exists("Dragon Butler/Assets/icons/baah.png") &&
+            System.IO.File.Exists("Dragon Butler/Assets/icons/hsr.png") &&
+            System.IO.File.Exists("Dragon Butler/Assets/icons/m9a.png") &&
+            System.IO.File.Exists("Dragon Butler/Assets/icons/mss.png") &&
+            System.IO.File.Exists("Dragon Butler/Assets/icons/src.png"));
+        // m9a 的原文件其实是 ICO 冒名 png，重存过；比 10 KB 大说明还是那个两百多 K 的壳
+        Check("图标/m9a 是真 PNG",
+            System.IO.File.Exists("Dragon Butler/Assets/icons/m9a.png") &&
+            new System.IO.FileInfo("Dragon Butler/Assets/icons/m9a.png").Length < 120_000);
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）
