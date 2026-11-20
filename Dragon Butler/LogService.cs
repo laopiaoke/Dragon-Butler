@@ -12,7 +12,7 @@ namespace DragonButler;
 public static class LogService
 {
     /// <summary>日志目录：exe 旁「全部日志」</summary>
-    public static readonly string Dir = Path.Combine(AppContext.BaseDirectory, "全部日志");
+    public static readonly string Dir = Paths.LogRoot;
 
     /// <summary>正常退出标记文件名</summary>
     private const string ExitMarker = "last_exit_ok";

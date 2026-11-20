@@ -19,7 +19,7 @@ namespace DragonButler;
 public static class SnapshotService
 {
     /// <summary>落盘目录：与日志、现场包同级，方便用户一个地方找全。</summary>
-    public static string Dir => Path.Combine(LogService.Dir, "snapshots");
+    public static string Dir => Paths.SnapshotsDir;
 
     /// <summary>保留份数，超出丢弃最旧的（抓屏就是为了「看一眼现在」，不需要囤积）。</summary>
     public const int Keep = 20;

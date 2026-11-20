@@ -32,7 +32,7 @@ public sealed class PluginMeta
 public static class PluginLoader
 {
     /// <summary>插件根目录：<c>plugins\</c>（exe 旁边）。</summary>
-    public static string Root => Path.Combine(AppContext.BaseDirectory, "plugins");
+    public static string Root => Paths.PluginsDir;
 
     /// <summary>单个插件目录里默认的入口文件名。</summary>
     public const string DefaultAssembly = "Plugin.dll";

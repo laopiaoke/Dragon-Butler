@@ -1267,6 +1267,20 @@
                                              这句话删掉不损失信息；代码保留控件，仍在跑/度假时用它报个别的情况。 -->
                                         <TextBlock x:Name="TbQueueStatus" VerticalAlignment="Center" Visibility="Collapsed"
                                                    FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        <!-- v1.30：这张卡上的格子墙搬进独立窗口之后，这里放一颗齿轮当入口。
+                                             放在「计划」左边第一位：「配置」是这张卡最主要的动作，
+                                             其余五个都是「看一眼」或者「定某个规矩」。 -->
+                                        <Button x:Name="BtnOpenTrayConfig" Style="{StaticResource MiniAction}"
+                                                Margin="10,0,0,0" Click="BtnOpenTrayConfig_Click"
+                                                ToolTip="打开托管配置窗口：拖拽排序、双击启动、右键改设置">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Path Data="M10,3.2 A2.4,2.4 0 1 0 10,8 A2.4,2.4 0 1 0 10,3.2 M10,0.6 L10,2.1 M10,9.1 L10,10.6 M1.5,5.6 L3,5.6 M17,5.6 L18.5,5.6 M4,1.6 L5,2.6 M15,8.6 L16,9.6 M4,9.6 L5,8.6 M15,2.6 L16,1.6"
+                                                      Stroke="{DynamicResource BrandBrush}" StrokeThickness="1.4"
+                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                      Width="12" Height="11" Stretch="Uniform" VerticalAlignment="Center"/>
+                                                <TextBlock Text="配置" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
                                         <Button x:Name="BtnWeeklyPlan" Content="计划" Style="{StaticResource MiniAction}"
                                                 Margin="10,0,0,0" Click="BtnWeeklyPlan_Click"
                                                 ToolTip="按星期配置每天跑哪些工具（只影响定时触发）"/>
@@ -1292,7 +1306,7 @@
                                      放在标题行底下单独一行——左列被右边五个按钮挤得只剩一百多像素，
                                      塞进去会被压成三行。 -->
                                 <TextBlock x:Name="TbGridHint" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,5,0,0"
-                                           Text="点一下改启动方式；按住一格拖到别处能换顺序；右键能改「今晚跑不跑」。"
+                                           Text="点「配置」打开托管桌面：拖拽换顺序、双击直接启动、右键改设置。"
                                            FontSize="10.5" TextWrapping="Wrap"
                                            Foreground="{DynamicResource TextTertiaryBrush}"/>
 
@@ -1339,13 +1353,12 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- v1.27：桌面从「固定 8 格 + 竖向滚动」改成「可翻页的 2×3 桌面」。
-                                     每页 6 格、左右滑翻页、页码点可点可长按删。
-                                     为什么不再用滚动条：滚动条只回答「还有多少」，不回答「这是第几屏」；
-                                     翻页能回答后者，而且和手机桌面的手感一致。
-                                     拖动中的那一格会被搬到卡片顶层的 DragLayer（不裁切），
-                                     所以放到卡片边缘时会露出半格——那是「还能往那边放」的提示。 -->
-                                <Grid Grid.Row="2" Margin="0,10,0,0">
+                                <!-- v1.30：桌面搬到独立窗口（TrayConfigWindow）了。
+                                     这张卡从「半屏的格子墙」缩成一行摘要 + 一颗「配置」按钮——
+                                     格子墙在启动页上占的高度比它传达的信息多，
+                                     而「改哪个工具怎么跑」本来也不是一打开就要做的事。
+                                     下面这块留空但不删：老代码里还有引用，删了要改十几处。 -->
+                                <Grid Grid.Row="2" Margin="0,10,0,0" Visibility="Collapsed">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -20,7 +20,7 @@ namespace DragonButler;
 public static class SoundService
 {
     private const int SampleRate = 22050;
-    private static readonly string SoundDir = Path.Combine(AppContext.BaseDirectory, "sounds");
+    private static readonly string SoundDir = Paths.SoundsDir;
 
     /// <summary>音效文件版本：改音色时 +1，启动时发现版本不符会全部重建</summary>
     private const string SoundVersion = "5";

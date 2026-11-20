@@ -76,7 +76,7 @@ public static class HarvestLedger
     public const int KeepDays = 400;
 
     /// <summary>账本文件：exe 旁 config\harvest.json。</summary>
-    public static string FilePath => PathOverride ?? Path.Combine(AppContext.BaseDirectory, "config", "harvest.json");
+    public static string FilePath => PathOverride ?? Paths.Config("harvest.json");
 
     /// <summary>
     /// 换一条路径（仅给断言用）。探针不能往用户的真实账本里写——

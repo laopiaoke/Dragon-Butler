@@ -26,7 +26,7 @@ public static class ToolIconService
     }
 
     /// <summary>图标缓存目录。</summary>
-    public static string CacheDir => Path.Combine(AppContext.BaseDirectory, "cache", "icons");
+    public static string CacheDir => Paths.CacheDir;
 
     /// <summary>取工具图标（失败返回 null，调用方回退到首字母）。手动换过的图标优先。</summary>
     public static BitmapSource? GetBitmap(ToolProfile profile)

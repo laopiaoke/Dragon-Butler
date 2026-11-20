@@ -834,6 +834,35 @@ internal static class RenderProbe
                         try { if (File.Exists(sandbox)) File.Delete(sandbox); } catch { }
                     }
 
+                    // v1.30：托管配置独立窗口。要证明的两件事——
+                    // ① 横三竖二摆得开、不挤（主窗那张卡只有半屏宽，这里翻了一倍）；
+                    // ② 格子是「图标在上、名字在下」的桌面感，不是列表行。
+                    // 种多于一页的工具（7 个），顺带看一眼页码点与溢出提示。
+                    if (mode == "tray" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        // 种进来的工具必须先有档案：窗口是按 ProfileRegistry.All ∪ 队列画的，
+                        // 只往 ToolPages 里塞 id 而不建档案，Normalize 会把它们当「已删工具」剔掉，
+                        // 截出来就只剩种子队列自带的三个（第一次跑就是这么少了一半）。
+                        foreach (var id in new[] { "zzz-od", "maaend", "ok-nte", "src" })
+                        {
+                            try { ProfileRegistry.Save(ProfileRegistry.Get(id)); } catch { }
+                        }
+                        AppState.Settings.ToolPages = new List<List<string>>
+                        {
+                            new() { "bettergi", "march7th", "ok-ww", "zzz-od", "maaend", "ok-nte" },
+                            new() { "src" },
+                        };
+                        AppState.Settings.ToolOrder = ToolPages.Flatten(AppState.Settings.ToolPages).ToArray();
+                        AppState.SaveSettings();
+
+                        var w = new TrayConfigWindow();
+                        w.UpdateLayout();
+                        bool ok = Save(w, Path.Combine(spot, "tray.png"), 720, 560);
+                        Console.WriteLine($"RENDER tray={ok}");
+                        w.Close();
+                    }
+
                     // v1.21：点开一个格子之后的启动设置窗，四张分别是
                     // BetterGI（文档写过参数）/ ok-ww（实战见过）/ 绝区零（全要自己填）/ 自定义工具（什么都没有）
                     if (mode == "launch" || mode == "all")

@@ -31,7 +31,7 @@ public static class ProfileRegistry
     public static event Action<string>? MigrationFailed;
 
     /// <summary><c>tools\</c> 目录：exe 旁。</summary>
-    public static string ToolsDir => Path.Combine(AppContext.BaseDirectory, "tools");
+    public static string ToolsDir => Paths.ToolsDir;
 
     /// <summary>全部已加载的工具档案（只读视图）。</summary>
     public static IReadOnlyList<ToolProfile> All => _all;

@@ -999,6 +999,66 @@ public partial class MainWindow : Window
     /// <summary>v1.13：打开「今日运行」——今天这一盘跑了什么、各花多久。</summary>
     private void BtnToday_Click(object sender, RoutedEventArgs e) => OpenToday();
 
+    // ===== 托管配置独立窗口（v1.30）=====
+
+    /// <summary>
+    /// 打开托管配置窗口。
+    ///
+    /// <para>
+    /// 原来这张卡本身就是那个桌面——半屏宽的 3×2 格子墙压在启动页上，
+    /// 而「改哪个工具怎么跑」其实一打开程序并不急着做。现在卡缩成一行摘要 + 一颗齿轮，
+    /// 桌面搬进独立窗口：地方更大（3×2 摆得开）、能拖能双击能右键，也不再和定时卡抢宽度。
+    /// </para>
+    /// <para>
+    /// 两份界面共用 <see cref="AppState.Settings.ToolPages"/> 与队列顺序，改哪边都一样。
+    /// </para>
+    /// </summary>
+    private void BtnOpenTrayConfig_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // 已经开着就把它提到前面，不要叠出第二份
+            foreach (Window w in Application.Current.Windows)
+            {
+                if (w is TrayConfigWindow old && old.IsVisible)
+                {
+                    old.Activate();
+                    return;
+                }
+            }
+
+            var dlg = new TrayConfigWindow { Owner = this };
+            dlg.ShowDialog();
+
+            if (dlg.Changed)
+            {
+                RenderToolGrid();
+                RenderQueue();
+                RefreshToolCards();
+                RefreshHomeHero();
+            }
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Show("打不开托管配置窗口，详情见日志。\n" + ex.Message,
+                kind: AppDialog.Kind.Warning, title: "托管配置", primary: "知道了", owner: this);
+            LogService.LogEvent("打开托管配置窗口失败：" + ex);
+        }
+    }
+
+    /// <summary>给托管配置窗口的「今晚队列…」按钮用：回到启动页并定位到队列那块。</summary>
+    internal void RevealQueueFromOutside()
+    {
+        try
+        {
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            Activate();
+            ShowPage(1, animate: false);
+            RevealCard(QueueHost);
+        }
+        catch (Exception ex) { LogService.LogEvent("定位队列失败：" + ex.Message); }
+    }
+
     // ===== 消息中心（v1.28）=====
 
     /// <summary>

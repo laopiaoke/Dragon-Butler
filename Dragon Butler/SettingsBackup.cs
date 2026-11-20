@@ -42,7 +42,7 @@ public static class SettingsBackup
     /// 备份根目录：exe 旁的「备份」文件夹。刻意与「全部日志」分开——
     /// 日志是排错用的、会被 Trim 清掉；备份是用户资产，不该被同一套清理逻辑顺手删掉。
     /// </summary>
-    public static string Dir => Path.Combine(AppContext.BaseDirectory, "备份");
+    public static string Dir => Paths.BackupDir;
 
     /// <summary>默认包名：一条龙管家-20261116-0801.zip</summary>
     public static string FileName(DateTime now) => "一条龙管家-" + now.ToString("yyyyMMdd-HHmm") + ".zip";

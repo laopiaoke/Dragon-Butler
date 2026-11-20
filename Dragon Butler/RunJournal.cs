@@ -59,7 +59,7 @@ public static class RunJournal
     private static Dictionary<string, List<JournalEntry>> _data = new();
     private static bool _loaded;
 
-    public static string FilePath => PathOverride ?? Path.Combine(AppContext.BaseDirectory, "config", "run_journal.json");
+    public static string FilePath => PathOverride ?? Paths.Config("run_journal.json");
 
     /// <summary>
     /// 覆盖落盘路径。只给验证用，不设的时候行为完全不变——

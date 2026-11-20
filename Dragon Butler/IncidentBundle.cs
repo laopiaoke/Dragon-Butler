@@ -34,7 +34,7 @@ public static class IncidentBundle
     private const int MaxProcesses = 30;
 
     public static string Root =>
-        Path.Combine(LogService.Dir, "incidents");
+        Paths.IncidentsDir;
 
     /// <summary>
     /// 抓一份现场。返回目录路径；被关闭、或写盘失败时返回 null。

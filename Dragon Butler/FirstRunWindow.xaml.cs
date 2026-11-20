@@ -598,6 +598,25 @@ public partial class FirstRunWindow : Window
         foreach (var kv in _picks) Set(kv.Key, kv.Value.IsChecked == true);
         AppState.Settings.Queue = queue;
 
+        // v1.30：桌面上摆什么 = 用户在这里勾了什么，顺序就是勾上的先后。
+        //
+        // 以前这一页只写 Queue.Enabled，桌面靠 EnsureQueueDefaults 顺手塞了三个内置工具，
+        // 于是「我只勾了 BAAH」的人进来会看到 BetterGI / 三月七 / ok-ww 也在桌上，
+        // 三个都写着「未配置」。现在桌面直接照着勾选重建，一个不多一个不少。
+        // 已经有 ToolPages 的（老用户）不覆盖：那是他自己拖过的排法，比勾选顺序更值钱。
+        try
+        {
+            var picked = new List<string>();
+            foreach (var known in ToolCatalog.All)
+            {
+                if (_picks.TryGetValue(known.ToolId, out var pill) && pill.IsChecked == true)
+                    picked.Add(known.ToolId);
+            }
+            if (picked.Count > 0)
+                AppState.Settings.ToolPages = ToolPages.Repack(new List<List<string>> { picked });
+        }
+        catch { }
+
         // v1.23：勾上的工具必须真的有一份档案落到磁盘上。
         // 只写队列是不够的——主窗的桌面网格与自定义工具卡都是照着 ProfileRegistry.All 画的，
         // 档案不存在的话，用户在这一页勾了 BAAH，进主界面却找不到它。

@@ -73,7 +73,7 @@ public static class NoticeCenter
     public static string? PathOverride { get; set; }
 
     private static string FilePath =>
-        PathOverride ?? Path.Combine(AppContext.BaseDirectory, "config", "notices.json");
+        PathOverride ?? Paths.Config("notices.json");
 
     /// <summary>把内存里的那份丢掉，下次访问重新读盘（换过 <see cref="PathOverride"/> 之后要调）。</summary>
     public static void Reload()

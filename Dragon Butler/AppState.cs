@@ -418,7 +418,7 @@ public static class AppState
     private static bool _initialized;
 
     /// <summary>settings.json 路径：exe 旁 config\settings.json</summary>
-    public static string SettingsPath => Path.Combine(AppContext.BaseDirectory, "config", "settings.json");
+    public static string SettingsPath => Paths.Config("settings.json");
 
     /// <summary>初始化：读设置 → 载入工具档案 → 补齐队列默认值 → 2 秒状态轮询（幂等）。</summary>
     public static void Init()
@@ -440,20 +440,20 @@ public static class AppState
         _timer.Start();
     }
 
-    /// <summary>队列为空时给出默认三项（仅 BetterGI 勾选），避免首屏空白。</summary>
+    /// <summary>
+    /// 队列为空时不再塞默认三项。
+    ///
+    /// <para>
+    /// v1.30：这里原来会把内置的三个工具（BetterGI / 三月七 / ok-ww）全塞进队列，
+    /// 只把 BetterGI 勾上——本意是「别让首屏空着」，代价是**用户根本没选过的工具
+    /// 自己出现在了桌面上**，看着像「这软件自作主张装了三样东西」。
+    /// 向导里勾了什么就是什么：勾了三个就是三个，只勾一个就只有一个，一个不勾就空着。
+    /// 空着的桌面配一句「右手边「配置」里加」，比一堆「未配置」清楚。
+    /// </para>
+    /// </summary>
     public static void EnsureQueueDefaults()
     {
         Settings.Queue ??= new List<QueueEntry>();
-        if (Settings.Queue.Count > 0) return;
-
-        foreach (var p in ProfileRegistry.All)
-        {
-            Settings.Queue.Add(new QueueEntry
-            {
-                ToolId = p.ToolId,
-                Enabled = string.Equals(p.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase),
-            });
-        }
     }
 
     /// <summary>队列中启用且顺序有效的条目（按列表顺序）。</summary>

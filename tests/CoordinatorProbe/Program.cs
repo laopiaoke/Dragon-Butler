@@ -2644,10 +2644,10 @@ internal static class Program
         var natural = new List<string> { "bettergi", "march7th", "ok-ww" };
 
         // ---- 1) 常量 ----
-        // v1.27：桌面改成可翻页的 2 列 3 行（一页 6 格），多出来的工具翻页放。
+        // v1.30：桌面改成 3 列 2 行（一页 6 格）——主窗那张卡缩了一半宽，2 列会把每格拉得很宽。
         // 4 行要 216 高，翻页之后没必要为了少翻一页把「一键开跑」挤出屏幕。
-        Check("格子/2 列", ToolGrid.Columns == 2, ToolGrid.Columns.ToString());
-        Check("格子/3 行", ToolGrid.Rows == 3, ToolGrid.Rows.ToString());
+        Check("格子/3 列", ToolGrid.Columns == 3, ToolGrid.Columns.ToString());
+        Check("格子/2 行", ToolGrid.Rows == 2, ToolGrid.Rows.ToString());
         Check("格子/一页 6 格", ToolGrid.Capacity == 6, ToolGrid.Capacity.ToString());
         Check("分页/常量转发到 ToolPages", ToolGrid.Columns == ToolPages.Columns && ToolGrid.Rows == ToolPages.Rows);
 
@@ -2737,7 +2737,7 @@ internal static class Program
         // ---- 10c) ToolPages：可翻页桌面（v1.27） ----
         // 桌面从「固定 8 格」变成「2 列 3 行，可以有很多页」。规则全部抽在这个纯函数类里，
         // 界面上那层只负责画和拖——规则能被断言，界面就不会偷偷变形。
-        Check("分页/一页 2 列 3 行", ToolPages.Columns == 2 && ToolPages.Rows == 3 && ToolPages.PerPage == 6);
+        Check("分页/一页 3 列 2 行", ToolPages.Columns == 3 && ToolPages.Rows == 2 && ToolPages.PerPage == 6);
         Check("分页/最多 9 页", ToolPages.MaxPages == 9);
 
         var knownAll = new List<string> { "a", "b", "c", "d", "e", "f", "g", "h" };
@@ -2822,6 +2822,17 @@ internal static class Program
         // ---- 11) 接线 ----
         string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
         string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        string trayXaml = ReadRepoSources("Dragon Butler/TrayConfigWindow.xaml");
+        string trayCs = ReadRepoSources("Dragon Butler/TrayConfigWindow.xaml.cs");
+        string appStateCs = ReadRepoSources("Dragon Butler/AppState.cs");
+        string logCs = ReadRepoSources("Dragon Butler/LogService.cs");
+        string profileCs = ReadRepoSources("Dragon Butler/ProfileRegistry.cs");
+        string pluginCs = ReadRepoSources("Dragon Butler/PluginLoader.cs");
+        string backupCs = ReadRepoSources("Dragon Butler/SettingsBackup.cs");
+        string iconCs = ReadRepoSources("Dragon Butler/ToolIconService.cs");
+        string soundCs = ReadRepoSources("Dragon Butler/SoundService.cs");
+        string pathCs = ReadRepoSources("Dragon Butler/Paths.cs");
+        string wizardCs = ReadRepoSources("Dragon Butler/FirstRunWindow.xaml.cs");
         Check("接线/有 ToolGridHost", mainXaml.Contains("\"ToolGridHost\""));
         Check("接线/ToolGridHost 是 Grid", mainXaml.Contains("<Grid x:Name=\"ToolGridHost\""));
         // v1.26：队列卡标题行那个「＋ 添加」长条按钮删了——格子里本来就有一格「＋ 添加」，
@@ -2905,6 +2916,47 @@ internal static class Program
         Check("插件/折叠头认它", mainCs.Contains("\"BtnFoldPlugins\" => PluginsBody"));
         Check("插件/读得懂的与读不懂的都列出来", mainCs.Contains("PluginLoader.Scan()") && mainCs.Contains("没加载"));
         Check("插件/空着也说清不影响功能", mainCs.Contains("这不影响任何功能"));
+
+        // ---- 11d) v1.30 托管配置缩成入口 + 独立窗口 + 目录收拾 ----
+        Check("入口/有配置按钮", mainXaml.Contains("x:Name=\"BtnOpenTrayConfig\""));
+        Check("入口/按钮上有齿轮图标", mainXaml.Contains("A2.4,2.4 0 1 0 10,8"));
+        Check("入口/点它会开窗口", mainCs.Contains("new TrayConfigWindow { Owner = this };"));
+        Check("入口/不会叠出第二份", mainCs.Contains("w is TrayConfigWindow old"));
+        Check("入口/卡里的格子墙收起来了", mainXaml.Contains("<Grid Grid.Row=\"2\" Margin=\"0,10,0,0\" Visibility=\"Collapsed\">"));
+        Check("窗口/横三竖二", trayCs.Contains("private const int Columns = 3;") && trayCs.Contains("private const int Rows = 2;"));
+        Check("窗口/一屏六格", trayCs.Contains("private const int PerView = Columns * Rows;"));
+        Check("窗口/左键单击改设置", trayCs.Contains("OpenConfig(toolId);"));
+        Check("窗口/双击直接启动", trayCs.Contains("LaunchNow(toolId)") && trayCs.Contains("MouseDoubleClick") == false);
+        Check("窗口/右键有菜单", trayCs.Contains("new ContextMenu()"));
+        Check("窗口/右键能改今晚跑不跑", trayCs.Contains("今晚不跑它") && trayCs.Contains("ToggleDuty(toolId)"));
+        Check("窗口/悬停会说明三个键各做什么",
+            trayCs.Contains("左键单击改设置") && trayCs.Contains("双击现在就跑") && trayCs.Contains("TbHint.Text"));
+        Check("窗口/拖拽是插入不是交换", trayCs.Contains("ToolPages.Insert("));
+        Check("窗口/拖完别格让位有动画", trayCs.Contains("AnimateFrom(") && trayCs.Contains("TimeSpan.FromMilliseconds(260)"));
+        Check("窗口/翻页有动画", trayCs.Contains("TimeSpan.FromMilliseconds(300)"));
+        Check("窗口/自带样式不靠主窗", trayXaml.Contains("x:Key=\"Ghost\"") && trayXaml.Contains("x:Key=\"CloseBtn\""));
+        Check("窗口/三页共用同一份数据", trayCs.Contains("AppState.Settings.ToolPages"));
+        Check("默认/不再自己塞三个工具", !appStateCs.Contains("Settings.Queue.Add(new QueueEntry\n            {\n                ToolId = p.ToolId,"));
+        Check("默认/队列只保证非 null", appStateCs.Contains("Settings.Queue ??= new List<QueueEntry>();"));
+        Check("引导/桌面照着勾选重建", wizardCs.Contains("AppState.Settings.ToolPages = ToolPages.Repack("));
+        Check("引导/一个都不勾就空着", wizardCs.Contains("if (picked.Count > 0)"));
+
+        // ---- 11e) v1.30 目录收拾成两个 ----
+        Check("目录/配置根叫所有配置", pathCs.Contains("\"所有配置\""));
+        Check("目录/日志根叫全部日志", pathCs.Contains("\"全部日志\""));
+        Check("目录/静态构造先建目录", pathCs.Contains("static Paths() => Prepare();"));
+        Check("目录/老 config 摊平搬过来", pathCs.Contains("flatten: true"));
+        Check("目录/搬完打标记不再扫", pathCs.Contains(".moved-to-所有配置"));
+        Check("目录/设置走新根", appStateCs.Contains("Paths.Config(\"settings.json\")"));
+        Check("目录/日志走新根", logCs.Contains("public static readonly string Dir = Paths.LogRoot;"));
+        Check("目录/工具档案走新根", profileCs.Contains("public static string ToolsDir => Paths.ToolsDir;"));
+        Check("目录/插件走新根", pluginCs.Contains("public static string Root => Paths.PluginsDir;"));
+        Check("目录/备份走新根", backupCs.Contains("public static string Dir => Paths.BackupDir;"));
+        Check("目录/图标缓存走新根", iconCs.Contains("public static string CacheDir => Paths.CacheDir;"));
+        Check("目录/音效走新根", soundCs.Contains("Paths.SoundsDir"));
+        Check("目录/不再散着建 config",
+            !mainCs.Contains("Path.Combine(AppContext.BaseDirectory, \"config\"") &&
+            !appStateCs.Contains("Path.Combine(AppContext.BaseDirectory, \"config\""));
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）

@@ -54,7 +54,7 @@ public static class GroupArchive
     private static bool _loaded;
 
     /// <summary>group_archive.json 路径</summary>
-    public static string FilePath => PathOverride ?? Path.Combine(AppContext.BaseDirectory, "config", "group_archive.json");
+    public static string FilePath => PathOverride ?? Paths.Config("group_archive.json");
 
     /// <summary>
     /// 覆盖落盘路径。只给验证用（渲染日历要造一年的假记录），

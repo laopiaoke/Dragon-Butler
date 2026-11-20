@@ -18,11 +18,11 @@ namespace DragonButler;
 /// </summary>
 public static class ToolPages
 {
-    /// <summary>一页 2 列。</summary>
-    public const int Columns = 2;
+    /// <summary>一页 3 列。v1.30：主窗那张卡缩了一半，2 列会把每格拉得很宽、四行又太高。</summary>
+    public const int Columns = 3;
 
-    /// <summary>一页 3 行。</summary>
-    public const int Rows = 3;
+    /// <summary>一页 2 行。横 3 竖 2 就是「一屏六格」，和独立窗口那张桌子同一个排法。</summary>
+    public const int Rows = 2;
 
     /// <summary>一页 6 格。</summary>
     public const int PerPage = Columns * Rows;

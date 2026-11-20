@@ -45,6 +45,7 @@ It does exactly four things: start processes, read the public logs those tools w
 - **No sense of "how does today compare"** — it compares against your own 14-day median, not a hard-coded threshold, and stays quiet when samples are thin.
 - **No idea how much time it saved you** — one number: hours it ran for you this month.
 - **A crash prompt ate the whole night** — no more dialogs. Crashes, tools that failed to launch and interrupted queues go into the message centre in the title bar, each translated into plain language (what happened / why / what you can do). The dot stays lit until you look, and never blocks startup.
+- **Three nested fold-outs before you could edit a tool** — one ⚙ button in the startup page header opens a 3×2 tool desktop: click to edit, double-click to run now, right-click for "run tonight or not" / remove, hold and drag to reorder. Hovering spells out what each button does.
 
 ## One self-imposed rule
 
@@ -66,13 +67,19 @@ Want it unattended? Tick on the schedule card (defaults to 08:00 daily). Want me
 Everything sits next to the exe; deleting the folder uninstalls it (turn off autostart first).
 
 ```
-config\settings.json        all settings, hand-editable
-config\group_archive.json   which config groups ran each day
-config\notices.json         message centre (capped at 100)
-tools\*.json                tool profiles
+所有配置\settings.json      all settings, hand-editable
+所有配置\group_archive.json which config groups ran each day
+所有配置\notices.json       message centre (capped at 100)
+所有配置\tools\*.json       tool profiles
+所有配置\plugins\           plugins
+所有配置\备份\              settings backups
+所有配置\sounds\            custom sounds
 全部日志\                    runtime log — check here first
+全部日志\snapshots\          scheduled snapshots
 全部日志\incidents\          failure bundles
 ```
+
+Older builds scattered `config` / `tools` / `plugins` / `cache` / `sounds` / `备份` next to the exe. The first launch of 1.30 moves them into these two folders and leaves a `.moved-to-所有配置` marker behind so it never runs twice.
 
 Nothing is written to `%APPDATA%`; the whole folder is portable.
 
@@ -159,4 +166,4 @@ Released under [GNU AGPL-3.0](LICENSE). You may use, modify and redistribute it 
 
 ## Version
 
-Latest release **v1.29** (in-app `1.29.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).
+Latest release **v1.30** (in-app `1.30.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).

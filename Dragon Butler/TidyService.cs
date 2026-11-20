@@ -26,7 +26,7 @@ public static class TidyService
     public static string? PathOverride { get; set; }
 
     public static string FilePath => PathOverride
-        ?? Path.Combine(AppContext.BaseDirectory, "config", "window_spots.json");
+        ?? Paths.Config("window_spots.json");
 
     private static List<Tidy.WindowSpot>? _spots;
 
