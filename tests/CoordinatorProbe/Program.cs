@@ -3046,9 +3046,13 @@ internal static class Program
         Check("导航/标题栏不再有三页切换",
             !mainXaml.Contains("Style=\"{StaticResource SegBtn}\" Checked=\"SegPage_Checked\"")); 
         // v1.32 那条横贯的 Border 换成了悬浮的 Grid，判据跟着改：底栏占第 2 行、状态条在第 3 行
-        Check("导航/底栏在状态条上面",
+        // v1.33：导航栏不再占自己一行，它浮在内容区（Row 1）底部；状态条退到 Row 2。
+        // 判据从「两者的行号」改成「导航栏跟内容区同一行、状态条在它下面一行」——
+        // 它们是「浮在上面」而不是「排在上面的」，行号相等才是这一段想要的样子。
+        Check("导航/底栏浮在内容区上",
             mainXaml.Contains("x:Name=\"NavShell\"") &&
-            mainXaml.Contains("<Border Grid.Row=\"3\" x:Name=\"StatusBarBorder\""));
+            mainXaml.Contains("Grid.Row=\"1\" Panel.ZIndex=\"20\"") &&
+            mainXaml.Contains("<Border Grid.Row=\"2\" x:Name=\"StatusBarBorder\""));
         Check("合并/工具设置搬进启动页",
             mainXaml.IndexOf("x:Name=\"ToolButtonHost\"", StringComparison.Ordinal) <
             mainXaml.IndexOf("x:Name=\"PageSettings\"", StringComparison.Ordinal));
@@ -3159,7 +3163,37 @@ internal static class Program
         // 位置由 Grid.Row/Column 决定，跟标签在文件里的先后没关系——判标签顺序会自找麻烦
         Check("设置页/通知在右列第一排",
             mainXaml.Contains("x:Name=\"NotifyCard\" Grid.Row=\"1\" Grid.Column=\"1\""));
-        Check("设置页/高级设置占第二排", mainXaml.Contains("<Border Grid.Row=\"2\" Grid.ColumnSpan=\"2\" Style=\"{StaticResource Card}\""));
+        // v1.33：外观卡插在「高级设置」前面占了一排，高级设置从 2 挪到 3。
+        Check("设置页/高级设置占第三排", mainXaml.Contains("<Border Grid.Row=\"3\" Grid.ColumnSpan=\"2\" Style=\"{StaticResource Card}\""));
+
+        // ---- 11h) v1.33 导航栏点得动了 + 三段式玻璃主题开关 + 引导页不塞满 ----
+
+        // ① 导航栏点不动的病根：按下就抢鼠标，RadioButton 收不到完整的按下/松开。
+        // 判「没有那一句调用」而不是「没有这个词」——注释里正在解释这件事，会被自己绊倒。
+        Check("导航/按下不抢鼠标", !SliceBetween(mainCs, "NavShell_PreviewMouseLeftButtonDown", "}").Contains("NavShell.CaptureMouse()"));
+        Check("导航/拖起来才抢", SliceBetween(mainCs, "_navDragging = true;", "}").Contains("NavShell.CaptureMouse()"));
+        Check("导航/松手才放开", mainCs.Contains("if (NavShell.IsMouseCaptured) NavShell.ReleaseMouseCapture();"));
+        Check("导航/拖完别让按钮再补一次", SliceBetween(mainCs, "int want = NavIndexAt(_navPillX);", "}").Contains("e.Handled = true;"));
+
+        // ② 主题开关：三段、玻璃、可拖、有视差、自定义搬走
+        Check("主题/是三段不是四段", mainCs.Contains("private static readonly string[] ThemeModes = { \"Dark\", \"System\", \"Light\" };"));
+        Check("主题/默认停在中间那格", SliceBetween(mainCs, "private int ThemeModeIndex()", "\n    }").Contains("_ => 1,"));
+        Check("主题/有那块会滑的玻璃", mainXaml.Contains("x:Name=\"ThemeThumb\"") && mainXaml.Contains("x:Name=\"ThemeThumbShift\""));
+        Check("主题/玻璃比轨道高（探出去才看得出玻璃）", mainXaml.Contains("Width=\"58\" Height=\"42\" CornerRadius=\"21\""));
+        Check("主题/边缘有色散", mainXaml.Contains("#66FF8FA3") && mainXaml.Contains("#668FD8FF"));
+        Check("主题/投影用蓝色不用黑", mainXaml.Contains("Color=\"#FF1B3A6B\""));
+        Check("主题/点图标能切", mainCs.Contains("Array.FindIndex(ThemeModes"));
+        Check("主题/拖动也能切", mainCs.Contains("ThemeSlotAt(_themeThumbX)"));
+        Check("主题/切的时候图标分两层走", mainCs.Contains("private void PlayThemeParallax") && mainCs.Contains("Push(SunRays, -12, 0, ms, 20);"));
+        Check("主题/自定义搬去设置页", !mainXaml.Contains("Content=\"自定义\"") && mainXaml.Contains("x:Name=\"BtnCustomTheme\""));
+        Check("主题/外观卡说清现在用的是哪套", mainCs.Contains("private void RefreshAppearanceSummary") && mainCs.Contains("现在用的就是自定义配色"));
+        Check("主题/自定义状态下点那格真能切走", mainCs.Contains("bool sameAsNow = to == from"));
+
+        // ③ 引导页：没勾的不进队列
+        Check("引导/只勾了的才进队列", wizardCs.Contains("if (on) queue.Add(new QueueEntry { ToolId = kv.Key, Enabled = true });"));
+        Check("引导/没勾的不再无条件写一行", !wizardCs.Contains("foreach (var kv in _picks) Set(kv.Key, kv.Value.IsChecked == true);"));
+
+        // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）

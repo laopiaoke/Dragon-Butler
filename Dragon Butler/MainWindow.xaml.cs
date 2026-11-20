@@ -224,13 +224,217 @@ public partial class MainWindow : Window
         _suppressThemeSeg = true;
         try
         {
-            string m = Theme.Mode;
-            SegDark.IsChecked = m == "Dark";
-            SegLight.IsChecked = m == "Light";
-            SegSystem.IsChecked = m == "System";
-            SegCustom.IsChecked = m == "Custom";
+            // v1.33：主题不再是三个 RadioButton，而是一块会滑的玻璃。
+            // 「在哪一格」= 当前模式；超过三段的「自定义」搬到设置页去了。
+            PlaceThemeThumb(ThemeModeIndex(), animate: false);
         }
         finally { _suppressThemeSeg = false; }
+    }
+
+    // ===== 三段式主题开关（v1.33）=====
+    //
+    // 做法照 BV15dVd6JEns 那期：一条轨道 + 一块玻璃滑块 + 三个图标。
+    // 三个要点：
+    //   ① 滑块比轨道高（42 vs 36）、上下各探出去 3px —— 视频里专门说过，
+    //      缩在轨道里面玻璃效果根本看不出来，探出来才有「一块东西贴在玻璃上」的感觉。
+    //   ② 切换时图标要分层错位再归位。视频里的说法是「位移距离不同 -> 速度不同 -> 视差」，
+    //      到位时间一样（我们取 520ms），所以只要给不同元素不同距离，就有了速度差。
+    //   ③ 图标超出轨道范围要裁掉。视频里是加一层蒙版；我们让 ClipToBounds 交给外层轨道 Grid，
+    //      但滑块本身要能露出轨道，所以蒙版只包图标那一层。
+    private const double ThemeThumbWidth = 58;
+    private const double ThemeTrackWidth = 174;
+    private static readonly string[] ThemeModes = { "Dark", "System", "Light" };
+
+    private bool _themeDragging;
+    private double _themeGrabOffset;
+    private double _themeThumbX;
+
+    private int ThemeModeIndex()
+    {
+        string m = Theme.Mode;
+        int i = Array.FindIndex(ThemeModes, x => string.Equals(x, m, StringComparison.OrdinalIgnoreCase));
+
+        // 自定义配色不在这三段里，但开关总得停在某一格上。
+        // 让它停在这套配色实际偏的那一端（深色底停左、浅色底停右、说不准就中间），
+        // 同时把外观卡里的那句话点亮——第二处解释，免得人以为开关失灵。
+        if (i < 0)
+        {
+            i = AppState.Settings.CustomScheme switch
+            {
+                "Dark" => 0,
+                "Light" => 2,
+                _ => 1,
+            };
+        }
+        return i;
+    }
+
+    /// <summary>三个位置：左 / 中 / 右。滑块宽 58，轨道宽 174，所以两端各贴边、中间正好居中。</summary>
+    private static double ThemeSlotX(int index) =>
+        index <= 0 ? 0 : index >= 2 ? ThemeTrackWidth - ThemeThumbWidth : (ThemeTrackWidth - ThemeThumbWidth) / 2.0;
+
+    private int ThemeSlotAt(double x)
+    {
+        // 按滑块中心落在哪三分之一来判断，而不是按左上角——手是按在滑块中间拖的。
+        double center = x + ThemeThumbWidth / 2.0;
+        double slice = ThemeTrackWidth / 3.0;
+        int i = (int)Math.Floor(center / slice);
+        return Math.Clamp(i, 0, 2);
+    }
+
+    private void PlaceThemeThumb(int index, bool animate)
+    {
+        if (ThemeThumbShift == null) return;
+        double target = ThemeSlotX(index);
+        _themeThumbX = target;
+
+        if (!animate)
+        {
+            ThemeThumbShift.BeginAnimation(TranslateTransform.XProperty, null);
+            ThemeThumbShift.X = target;
+        }
+        else
+        {
+            // Smart Animate 那一档的手感：先略微冲过头再回来。
+            // 260ms 太快（看不清视差），800ms 太黏（每天点好几次的东西不该等这么久）。
+            var anim = new DoubleAnimation(target, TimeSpan.FromMilliseconds(420))
+            {
+                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.22 },
+                FillBehavior = FillBehavior.HoldEnd,
+            };
+            ThemeThumbShift.BeginAnimation(TranslateTransform.XProperty, anim);
+        }
+
+        PaintThemeIcons(index);
+    }
+
+    /// <summary>把三个图标按「当前模式」上色：选中的用主文字色，其余退成三级灰。</summary>
+    private void PaintThemeIcons(int index)
+    {
+        var on = BrushOf("TextPrimaryBrush") ?? DotGray;
+        var off = BrushOf("TextTertiaryBrush") ?? DotGray;
+
+        try
+        {
+            MoonPath.Stroke = index == 0 ? on : off;
+            Star1.Fill = index == 0 ? on : off;
+            Star2.Fill = index == 0 ? on : off;
+
+            SysRing.Stroke = index == 1 ? on : off;
+            SysHalf.Fill = index == 1 ? on : off;
+
+            SunCore.Stroke = index == 2 ? on : off;
+            SunRays.Stroke = index == 2 ? on : off;
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 切换时的视差：滑块往哪边去，三个图标就整体往反方向轻推一点再弹回，
+    /// 月亮/星星、太阳/光晕各自错开不同距离 —— 到位时间相同、距离不同，就是视频里说的视差。
+    /// </summary>
+    private void PlayThemeParallax(int from, int to)
+    {
+        if (from == to) return;
+        double dir = to > from ? 1 : -1;
+        double ms = 520;
+
+        void Push(FrameworkElement? el, double dx, double dy, double ms2, double delayMs = 0)
+        {
+            if (el == null) return;
+            var tt = el.RenderTransform as TranslateTransform;
+            if (tt == null) { tt = new TranslateTransform(); el.RenderTransform = tt; }
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var ax = new DoubleAnimation(dx * dir, TimeSpan.FromMilliseconds(ms2))
+            { EasingFunction = ease, FillBehavior = FillBehavior.Stop };
+            var ay = new DoubleAnimation(dy, TimeSpan.FromMilliseconds(ms2))
+            { EasingFunction = ease, FillBehavior = FillBehavior.Stop };
+            if (delayMs > 0) { ax.BeginTime = TimeSpan.FromMilliseconds(delayMs); ay.BeginTime = TimeSpan.FromMilliseconds(delayMs); }
+            tt.BeginAnimation(TranslateTransform.XProperty, ax);
+            tt.BeginAnimation(TranslateTransform.YProperty, ay);
+        }
+
+        // 主体往反方向走 7px，两个「附件」再多走 3~5px —— 距离差就是视差。
+        Push(IconDark, -7, 0, ms);
+        Push(MoonPath, -7, 0, ms);
+        Push(Star1, -11, -2, ms, 20);
+        Push(Star2, -9, 2, ms, 40);
+
+        Push(IconSystem, -7, 0, ms, 10);
+        Push(SysRing, -7, 0, ms, 10);
+        Push(SysHalf, -7, 0, ms, 10);
+
+        Push(IconLight, -7, 0, ms);
+        Push(SunCore, -7, 0, ms);
+        Push(SunRays, -12, 0, ms, 20);
+    }
+
+    private void ThemeSwitch_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (ThemeSwitchRoot == null || ThemeThumbShift == null) return;
+        _themeGrabOffset = e.GetPosition(ThemeSwitchRoot).X - _themeThumbX;
+        _themeDragging = false;
+        // 和导航栏同一个道理：按下先不抢鼠标，等真的拖起来才抢，
+        // 否则「点一下图标切主题」会被这块 Grid 吃掉。
+    }
+
+    private void ThemeSwitch_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (ThemeSwitchRoot == null || ThemeThumbShift == null) return;
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+
+        double x = e.GetPosition(ThemeSwitchRoot).X - _themeGrabOffset;
+
+        if (!_themeDragging && Math.Abs(x - _themeThumbX) < 4) return;
+        if (!_themeDragging)
+        {
+            _themeDragging = true;
+            ThemeSwitchRoot.CaptureMouse();
+        }
+
+        double max = ThemeTrackWidth - ThemeThumbWidth;
+        ThemeThumbShift.BeginAnimation(TranslateTransform.XProperty, null);
+        ThemeThumbShift.X = _themeThumbX = Math.Clamp(x, 0, max);
+    }
+
+    private void ThemeSwitch_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (ThemeSwitchRoot == null) return;
+        bool wasDragging = _themeDragging;
+        _themeDragging = false;
+        if (ThemeSwitchRoot.IsMouseCaptured) ThemeSwitchRoot.ReleaseMouseCapture();
+
+        int from = ThemeModeIndex();
+        int to = wasDragging ? ThemeSlotAt(_themeThumbX) : ThemeSlotAt(e.GetPosition(ThemeSwitchRoot).X - ThemeThumbWidth / 2.0);
+
+        if (wasDragging) e.Handled = true;
+
+        // 注意判据是「这次点的模式跟现在真的模式一样吗」，不是「跟滑块所在那格一样吗」。
+        // 自定义配色下开关会停在最近的三段之一（见 ThemeModeIndex），这时候点那一格
+        // 必须真的切过去，否则人会发现「点了一下没反应」——和标签栏那个 bug 是同一种失望。
+        bool sameAsNow = to == from
+                         && string.Equals(Theme.Mode, ThemeModes[to], StringComparison.OrdinalIgnoreCase);
+        if (sameAsNow)
+        {
+            // 拖了一点又放回原处，或者点到自己那一格：弹回去，不做任何切换。
+            PlaceThemeThumb(from, animate: true);
+            return;
+        }
+        ApplyTheme(ThemeModes[to], from);
+    }
+
+    private void ApplyTheme(string mode, int fromIndex = -1)
+    {
+        if (_suppressThemeSeg) return;
+        int from = fromIndex >= 0 ? fromIndex : ThemeModeIndex();
+        int to = Math.Max(0, Array.FindIndex(ThemeModes, x => string.Equals(x, mode, StringComparison.OrdinalIgnoreCase)));
+
+        AppState.Settings.Theme = mode;
+        AppState.SaveSettings();
+        Theme.Set(mode);
+
+        PlaceThemeThumb(to, animate: true);
+        PlayThemeParallax(from, to);
     }
 
     // ===== 初始化 =====
@@ -280,6 +484,7 @@ public partial class MainWindow : Window
         SelectComboByTag(CbFailStrategy, s.FailStrategy);
         SelectComboByTag(CbInterval, s.QueueIntervalMinutes.ToString());
         SyncThemeSeg();
+        RefreshAppearanceSummary();
         _suppressToggle = false;
 
         UpdateTimeDisplay();
@@ -1425,14 +1630,24 @@ public partial class MainWindow : Window
     /// 只承担「去哪改它」。排不下会自动换行（WrapPanel）。
     /// </para>
     /// </summary>
-    private void RenderToolButtons()
+    /// <summary>
+    /// 「我现在在用的工具」——小按键那一排和右边那句「已配 N 个」用的是同一份名单。
+    /// 两处各自算一遍的话，迟早会出现「一排三颗按键，摘要写着还有五个没配」这种自相矛盾。
+    /// </summary>
+    private static List<string> ToolButtonIds()
     {
-        if (ToolButtonHost == null) return;
-
         var ids = new List<string>();
         foreach (var entry in AppState.Settings.Queue ?? new List<QueueEntry>())
         {
             if (string.IsNullOrWhiteSpace(entry.ToolId)) continue;
+
+            // v1.33：只列「今晚真的要跑」的，不列「队列里躺着但关着」的。
+            // 
+            // 队列里有一堆 Enabled=false 的条目是历史遗留（引导页以前会把十六个工具全写进去）。
+            // 这一排的意思是「这些是你现在在用的」，把用不上的也摆出来，等于每打开一次就提醒
+            // 一次「你还差五个没配」——用户的原话是「显然我用不着这么多」。
+            // 关着但已经填好路径的仍然列出来（那说明他配过、只是这轮不跑），见下面的补漏。
+            if (!entry.Enabled) continue;
             if (!ids.Contains(entry.ToolId, StringComparer.OrdinalIgnoreCase)) ids.Add(entry.ToolId);
         }
         foreach (var p in ProfileRegistry.All)
@@ -1444,6 +1659,14 @@ public partial class MainWindow : Window
         {
             foreach (string id in new[] { "bettergi", "march7th", "ok-ww" }) ids.Add(id);
         }
+        return ids;
+    }
+
+    private void RenderToolButtons()
+    {
+        if (ToolButtonHost == null) return;
+
+        var ids = ToolButtonIds();
 
         // 每秒一次的界面轮询也会走到这里。签名没变就一个控件都不碰——
         // 重造一排按钮不只是浪费，还会把正按在上面的手指/鼠标弄丢（v1.23 桌面格子踩过同一条）。
@@ -1528,13 +1751,10 @@ public partial class MainWindow : Window
         {
             int ready = 0;
             var missing = new List<string>();
-            foreach (string id in new[] { "bettergi", "march7th", "ok-ww" })
-            {
-                var p = ProfileRegistry.Get(id);
-                if (ToolRunner.HasExecutable(p)) ready++;
-                else missing.Add(p.DisplayName);
-            }
-            foreach (string id in _customCards.Keys.ToList())
+            // v1.33：跟小按键那一排用同一份名单。原来这里写死三个内置 + 自定义卡，
+            // 于是「只勾了 BetterGI」的人会看到「已配 1 个·还有 2 个没配」——
+            // 那两个他根本没勾，报出来只是在提醒他「你还不够」。
+            foreach (string id in ToolButtonIds())
             {
                 try
                 {
@@ -3747,19 +3967,32 @@ public partial class MainWindow : Window
         _navGrabPoint = e.GetPosition(NavShell);
         _navGrabOffset = _navGrabPoint.X - _navPillX;
         _navDragging = false;
-        NavShell.CaptureMouse();
+
+        // v1.33：这里原来无条件 CaptureMouse()，于是底下的 RadioButton 永远收不到完整的
+        // 按下/松开序列，Checked 不触发 —— 表现就是「点标签栏没反应」。
+        // 现在按下不抢，等真的拖出 4px 才在 MouseMove 里捕获。
     }
 
     private void NavShell_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (NavShell == null || e.LeftButton != MouseButtonState.Pressed) return;
-        if (!NavShell.IsMouseCaptured) return;
+        if (NavShell == null || NavPillShift == null) return;
+
+        // 只有按在导航栏上、并且左键还按着，才算「可能拖」。
+        // 没按着就只是在上面划过，直接走人。
+        if (e.LeftButton != MouseButtonState.Pressed) return;
 
         double x = e.GetPosition(NavShell).X - _navGrabOffset;
 
         // 超过 4px 才算「在拖底」，否则当成普通点击让下面的 RadioButton 自己处理
         if (!_navDragging && Math.Abs(x - _navPillX) < 4) return;
-        _navDragging = true;
+
+        if (!_navDragging)
+        {
+            _navDragging = true;
+            // 到这里才真正开始拖：抢鼠标，接下来一直到松手都归我们管。
+            // 抢早了会把点击吃掉；抢晚了会在拖动中途「跳一下」。
+            NavShell.CaptureMouse();
+        }
 
         double max = (Math.Max(0, Pager.Count - 1)) * NavItemWidth;
         NavPillShift.BeginAnimation(TranslateTransform.XProperty, null);
@@ -3771,13 +4004,15 @@ public partial class MainWindow : Window
         if (NavShell == null) return;
         bool wasDragging = _navDragging;
         _navDragging = false;
-        NavShell.ReleaseMouseCapture();
+        if (NavShell.IsMouseCaptured) NavShell.ReleaseMouseCapture();
         if (!wasDragging) return;
 
         // 拖完松手：吸附到最近的一项，并真的切过去。拖了等于点了，这是视频里那一下的关键。
         int want = NavIndexAt(_navPillX);
         MoveNavPill(want, animate: true);
         if (want != _page) ShowPage(want);
+        // 拖动已经处置过这次点击了，别再让 RadioButton 补一次，否则会连切两页。
+        e.Handled = true;
     }
 
     private void BtnRunToday_Click(object sender, RoutedEventArgs e) => OpenToday();
@@ -6313,21 +6548,7 @@ public partial class MainWindow : Window
         body.Visibility = body.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    // ===== 主题（四段式分段控件）=====
-
-    private void SegTheme_Checked(object sender, RoutedEventArgs e)
-    {
-        if (_suppressThemeSeg) return;
-        string name = (sender as FrameworkElement)?.Tag as string ?? "System";
-        if (name == "Custom")
-        {
-            OpenCustomThemeEditor();
-            return;
-        }
-        AppState.Settings.Theme = name;
-        AppState.SaveSettings();
-        Theme.Set(name);
-    }
+    // ===== 主题（v1.33 起是三段式玻璃开关，见上面的「三段式主题开关」段）=====
 
     private void OpenCustomThemeEditor()
     {
@@ -6336,6 +6557,7 @@ public partial class MainWindow : Window
             var dlg = new CustomThemeWindow { Owner = this };
             bool ok = dlg.ShowDialog() == true;
             SyncThemeSeg();
+            RefreshAppearanceSummary();
             if (ok) { RenderQueue(); RefreshShield(); }
         }
         catch (Exception ex)
@@ -6343,6 +6565,38 @@ public partial class MainWindow : Window
             LogService.LogEvent("打开自定义主题失败：" + ex.Message);
             SyncThemeSeg();
         }
+    }
+
+    // ===== 外观卡（v1.33）=====
+
+    private void BtnCustomTheme_Click(object sender, RoutedEventArgs e) => OpenCustomThemeEditor();
+
+    /// <summary>
+    /// 一句话说清现在的配色是怎么来的。
+    /// 主题开关只切「深/浅/跟随系统」三段，自定义是第四种状态——它不在那三段里，
+    /// 所以这里要主动说「你现在用的是自定义」，否则开关停在「跟随系统」上、
+    /// 界面却是一张图，人会以为开关坏了。
+    /// </summary>
+    private void RefreshAppearanceSummary()
+    {
+        if (TbAppearanceSummary == null) return;
+        try
+        {
+            var s = AppState.Settings;
+            string scheme = s.CustomScheme switch
+            {
+                "Light" => "浅色控件",
+                "Dark" => "深色控件",
+                _ => "跟随配色自动选控件深浅",
+            };
+            string body = s.CustomBgKind == "Image" && !string.IsNullOrWhiteSpace(s.CustomBgImage)
+                ? $"用一张图当底（叠色 {s.CustomOverlay}%），{scheme}。"
+                : $"用 {s.CustomBgColor} 当底，{scheme}。";
+            TbAppearanceSummary.Text = Theme.Mode == "Custom"
+                ? "现在用的就是自定义配色：" + body
+                : "深/浅/跟随系统之外，还可以自己挑底色或放一张图。" + body;
+        }
+        catch { }
     }
 
     // ===== 首启向导 =====

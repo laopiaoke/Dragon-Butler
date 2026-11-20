@@ -791,13 +791,12 @@
                 <RowDefinition Height="44"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- 自定义主题背景层：图片 + 遮罩（默认透明，预设主题下不参与绘制） -->
-            <Border Grid.RowSpan="4" CornerRadius="15" IsHitTestVisible="False"
+            <Border Grid.RowSpan="3" CornerRadius="15" IsHitTestVisible="False"
                     Background="{DynamicResource BgArtBrush}"/>
-            <Border Grid.RowSpan="4" CornerRadius="15" IsHitTestVisible="False"
+            <Border Grid.RowSpan="3" CornerRadius="15" IsHitTestVisible="False"
                     Background="{DynamicResource ScrimBrush}"/>
 
             <!-- 标题栏：应用标记 + 名称 / 分段主题 / 最小化 / 关闭（空白处可拖动） -->
@@ -832,24 +831,127 @@
                                VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <!-- v1.29：三个页面的切换器搬到窗口底部去了（见下面那条导航栏）。
-                     标题栏只留「我是谁 + 主题 + 消息 + 窗口按钮」，中间那格留空——
-                     换页是「去哪儿」，属于内容区的事；标题栏是「这是什么软件、怎么关掉它」。
-                     Tag 里留着原来的说明：左边「刚才跑了什么」，中间「接下来几点跑」，右边「把东西配好」。 -->
+                <!-- v1.33：主题开关改成三段式液态玻璃滑块（照 BV15dVd6JEns 那期的做法）。
+                     以前是三个并排的文字按钮，选中靠「白底 + 加粗」——那是按钮，不是开关。
+                     现在是：一条轨道、一块玻璃滑块、三个图标；点图标或者直接拖滑块都能切，
+                     切的时候图标分层错位再归位（视差），文字放大淡入。
+                     只留深/浅/跟随系统三段；「自定义」搬进设置页（它不是「模式」，是一套配色方案）。 -->
+                <Border Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0" Background="Transparent">
+                    <Grid x:Name="ThemeSwitchRoot" Width="174" Height="46"
+                          Background="Transparent" ClipToBounds="False"
+                          Cursor="Hand"
+                          MouseLeftButtonDown="ThemeSwitch_MouseLeftButtonDown"
+                          MouseMove="ThemeSwitch_MouseMove"
+                          MouseLeftButtonUp="ThemeSwitch_MouseLeftButtonUp">
 
-                <Border Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0"
-                        Background="{DynamicResource ControlBgBrush}" BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="2">
-                    <StackPanel Orientation="Horizontal">
-                        <RadioButton x:Name="SegDark" Content="深色" Tag="Dark"
-                                     Style="{StaticResource SegBtn}" Checked="SegTheme_Checked"/>
-                        <RadioButton x:Name="SegLight" Content="浅色" Tag="Light"
-                                     Style="{StaticResource SegBtn}" Checked="SegTheme_Checked"/>
-                        <RadioButton x:Name="SegSystem" Content="跟随系统" Tag="System"
-                                     Style="{StaticResource SegBtn}" Checked="SegTheme_Checked"/>
-                        <RadioButton x:Name="SegCustom" Content="自定义" Tag="Custom"
-                                     Style="{StaticResource SegBtn}" Checked="SegTheme_Checked"/>
-                    </StackPanel>
+                        <!-- 轨道：一条内凹的槽。内阴影用两层叠出来（上暗下亮 => 凹） -->
+                        <Border x:Name="ThemeTrack" Width="174" Height="36" CornerRadius="18"
+                                VerticalAlignment="Center"
+                                Background="{DynamicResource InsetBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
+                        <Border Width="172" Height="34" CornerRadius="17" VerticalAlignment="Center"
+                                IsHitTestVisible="False"
+                                BorderThickness="1,1,1,0">
+                            <Border.BorderBrush>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#00000000" Offset="0"/>
+                                    <GradientStop Color="#22FFFFFF" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.BorderBrush>
+                        </Border>
+
+                        <!-- 三个图标：位置固定，选中时前景色变化；切换时由代码推视差 -->
+                        <Grid x:Name="ThemeIconHost" Width="174" Height="36" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 深色：月亮 + 两颗星（分层，视差时星和月错开） -->
+                            <Canvas x:Name="IconDark" Grid.Column="0" Width="18" Height="18"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Path x:Name="MoonPath" Data="M12.4,2.6 A6.6,6.6 0 1 0 15.4,11.6 A5.2,5.2 0 0 1 12.4,2.6 Z"
+                                      Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"
+                                      StrokeLineJoin="Round" Width="18" Height="18" Stretch="Uniform"/>
+                                <Ellipse x:Name="Star1" Canvas.Left="14.2" Canvas.Top="1.4" Width="2.4" Height="2.4"
+                                         Fill="{DynamicResource TextTertiaryBrush}"/>
+                                <Ellipse x:Name="Star2" Canvas.Left="12.6" Canvas.Top="5.6" Width="1.6" Height="1.6"
+                                         Fill="{DynamicResource TextTertiaryBrush}"/>
+                            </Canvas>
+
+                            <!-- 跟随系统：半明半暗的一个圆（左半白右半黑），最中性的那个「自动」 -->
+                            <Canvas x:Name="IconSystem" Grid.Column="1" Width="18" Height="18"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Ellipse x:Name="SysRing" Canvas.Left="1" Canvas.Top="1" Width="16" Height="16"
+                                         Stroke="{DynamicResource TextSecondaryBrush}" StrokeThickness="1.5"/>
+                                <Path x:Name="SysHalf" Data="M9,1 A8,8 0 0 1 9,17 Z"
+                                      Fill="{DynamicResource TextSecondaryBrush}"/>
+                            </Canvas>
+
+                            <!-- 浅色：太阳 + 光晕 -->
+                            <Canvas x:Name="IconLight" Grid.Column="2" Width="18" Height="18"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Ellipse x:Name="SunCore" Canvas.Left="4.6" Canvas.Top="4.6" Width="8.8" Height="8.8"
+                                         Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"/>
+                                <Path x:Name="SunRays" Data="M9,0.6 L9,3 M9,15 L9,17.4 M0.6,9 L3,9 M15,9 L17.4,9 M3.2,3.2 L4.9,4.9 M13.1,13.1 L14.8,14.8 M14.8,3.2 L13.1,4.9 M4.9,13.1 L3.2,14.8"
+                                      Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            </Canvas>
+                        </Grid>
+
+                        <!-- 液态玻璃滑块。三层叠出来：
+                             ① 主体：半透明白 + 上亮下暗的渐变（玻璃本身）
+                             ② 边缘：一圈更亮的描边（折射时边缘比中间亮）
+                             ③ 色散：沿边缘一圈彩虹色薄环，只有最外面 1px 看得见
+                             阴影用蓝色而不是黑色——纯黑投在浅色卡面上会发脏（那期视频专门提过这一点）。 -->
+                        <Canvas x:Name="ThemeThumbLayer" Width="174" Height="46" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <Border x:Name="ThemeThumb" Canvas.Left="0" Canvas.Top="2"
+                                    Width="58" Height="42" CornerRadius="21"
+                                    RenderTransformOrigin="0.5,0.5">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="ThemeThumbShift" X="0"/>
+                                </Border.RenderTransform>
+                                <Border.Effect>
+                                    <DropShadowEffect x:Name="ThemeThumbShadow" BlurRadius="14" ShadowDepth="3"
+                                                      Direction="270" Opacity="0.45"
+                                                      Color="#FF1B3A6B"/>
+                                </Border.Effect>
+                                <Grid>
+                                    <!-- ① 玻璃主体 -->
+                                    <Border CornerRadius="21">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#3AFFFFFF" Offset="0"/>
+                                                <GradientStop Color="#1CFFFFFF" Offset="0.48"/>
+                                                <GradientStop Color="#10FFFFFF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <!-- ② 顶部高光（玻璃的「镜面」那一条） -->
+                                    <Border CornerRadius="21" VerticalAlignment="Top" Height="20" Margin="3,2,3,0">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#4CFFFFFF" Offset="0"/>
+                                                <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <!-- ③ 边缘色散：一圈彩虹薄环 -->
+                                    <Border CornerRadius="21" BorderThickness="1.4">
+                                        <Border.BorderBrush>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#66FF8FA3" Offset="0"/>
+                                                <GradientStop Color="#66FFFFFF" Offset="0.32"/>
+                                                <GradientStop Color="#668FD8FF" Offset="0.66"/>
+                                                <GradientStop Color="#66C99BFF" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.BorderBrush>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </Canvas>
+                    </Grid>
                 </Border>
 
                 <!-- v1.28：消息中心。信封 + 右上角红点。
@@ -926,7 +1028,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftRun" X="-980"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageRun" Margin="14,10,14,8">
+                        <Grid x:Name="PageRun" Margin="14,10,14,88">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -978,7 +1080,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftHome" X="0"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageHome" Margin="14,10,14,8">
+                        <Grid x:Name="PageHome" Margin="14,10,14,88">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -1709,13 +1811,14 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftSettings" X="980"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageSettings" Margin="14,10,14,8">
+                        <Grid x:Name="PageSettings" Margin="14,10,14,88">
                             <!-- v1.32：设置页从「五条等宽长条摞在一起」改成卡片墙。
                                  原来四块长得一模一样、上下等距，看着像一列抽屉，分不清是四件事；
                                  现在短的两块（插件、通知）并排放，长的两块（高级设置、系统）各占整行——
                                  长度不一样，眼睛才认得出这是四张卡而不是一个列表。
                                  米游社那张也占整行：它有自己的两个按钮和一段说明，切一半会挤成两行字。 -->
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -1809,9 +1912,27 @@
                                 </StackPanel>
                             </Border>
 
-                    <!-- 第三层：高级设置（默认折叠） -->
+                            <!-- 第三层：高级设置（默认折叠） -->
 
+                    <!-- v1.33：外观。主题开关从标题栏搬走「自定义」之后，它需要一个落脚处。
+                         单独一张卡而不是塞进系统里：它不是开关，是一套配色方案（底色/图/叠色/明暗），
+                         点开是一个窗口——放在「系统」里会让人以为又是一项开关。 -->
                     <Border Grid.Row="2" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                        <Grid Margin="16,12,16,12">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="外观" FontSize="13.5" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                <TextBlock x:Name="TbAppearanceSummary" FontSize="10.5" Margin="0,4,0,0"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource TextTertiaryBrush}"/>
+                            </StackPanel>
+                            <Button x:Name="BtnCustomTheme" Content="自定义配色…" Style="{StaticResource MiniAction}"
+                                    HorizontalAlignment="Right" VerticalAlignment="Center"
+                                    Click="BtnCustomTheme_Click"
+                                    ToolTip="选底色、放一张背景图、调叠色深浅、强制明暗"/>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldAdvanced" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2025,7 +2146,7 @@
                     </Border>
 
                     <!-- ===== E 系统（折叠，默认收起；6 开关两列网格）===== -->
-                    <Border Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                    <Border Grid.Row="4" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
                         <StackPanel>
                             <Button x:Name="BtnFoldSystem" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -2489,18 +2610,20 @@
             </Border>
 
 
-            <!-- v1.32：悬浮标签栏。
-                 跟 v1.29 那条贴边的导航栏比，这里只改了两件事，但观感完全是另一回事：
-                 ① 栏本身不再横贯整个窗口，而是浮在内容上方的一块圆角胶囊（左右各留 20 的呼吸）；
-                 ② 选中态不再是「每一项自己画一块底」，而是**一整块圆角矩形在三个位置之间滑动**，
-                    滑动带一点回弹。切换时人眼跟的是那块底，于是三个页像是同一本书的三页在翻，
-                    而不是三个互不相干的按钮轮流亮起来。
-                 拖动那块底也能切换（松手吸附到最近的一项），这是视频里最像「真机」的那一下。 -->
-            <Grid Grid.Row="2" Background="Transparent" Margin="0,2,0,10">
+            <!-- v1.32/v1.33：悬浮标签栏。
+                 v1.33 修了两处：
+                 ① 它原来占自己一行（Grid.Row="2"），于是窗口为了它多长出一截，卡片区被顶短。
+                    现在它坐在内容区里（Row 1）浮在最上层，卡片从它底下滚过去——这才是「悬浮」。
+                 ② 点击没反应。原因是按下就 CaptureMouse()，鼠标被这块 Border 抢走，
+                    底下的 RadioButton 收不到完整的按下/松开序列，Checked 永远不会触发。
+                    现在只有真的拖出 4px 才捕获，纯点击一律让给按钮自己。 -->
+            <Grid Grid.Row="1" Panel.ZIndex="20" Background="Transparent"
+                  VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14">
                 <Border x:Name="NavShell" HorizontalAlignment="Center" VerticalAlignment="Center"
                         Background="{DynamicResource CardBg2Brush}"
                         BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1"
                         CornerRadius="25" Padding="5" Height="58"
+                        Opacity="0.97"
                         PreviewMouseLeftButtonDown="NavShell_PreviewMouseLeftButtonDown"
                         PreviewMouseMove="NavShell_PreviewMouseMove"
                         PreviewMouseLeftButtonUp="NavShell_PreviewMouseLeftButtonUp">
@@ -2571,7 +2694,7 @@
             </Grid>
 
             <!-- 底部状态条：守护盾牌 + 最近一条事件 -->
-            <Border Grid.Row="3" x:Name="StatusBarBorder" Background="{DynamicResource InsetBrush}"
+            <Border Grid.Row="2" x:Name="StatusBarBorder" Background="{DynamicResource InsetBrush}"
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Height="28">
                 <Grid>
                     <Grid.ColumnDefinitions>

@@ -607,13 +607,27 @@ public partial class FirstRunWindow : Window
     private void SaveSelection()
     {
         var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
-        void Set(string id, bool on)
+
+        // v1.33：没勾的工具不要进队列。
+        //
+        // 这里原来无条件 Set(每个 id, 是否勾上)，于是 16 个工具全进了 Queue（15 个 Enabled=false）。
+        // 队列是「今晚要跑什么」的清单，不是「这台机器上可能有哪些工具」的清单——
+        // 用户只勾了 BetterGI，结果进主界面看到一排十六个小按键，那不叫配置好了，那叫吓人。
+        //
+        // 没勾的不写进队列，但已经在队列里的（老用户手动加过）保留原状，只是置成不启用。
+        foreach (var kv in _picks)
         {
-            var entry = queue.FirstOrDefault(q => string.Equals(q.ToolId, id, StringComparison.OrdinalIgnoreCase));
-            if (entry == null) queue.Add(new QueueEntry { ToolId = id, Enabled = on });
-            else entry.Enabled = on;
+            bool on = kv.Value.IsChecked == true;
+            var existing = queue.FirstOrDefault(q => string.Equals(q.ToolId, kv.Key, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
+            {
+                if (on) queue.Add(new QueueEntry { ToolId = kv.Key, Enabled = true });
+            }
+            else
+            {
+                existing.Enabled = on;
+            }
         }
-        foreach (var kv in _picks) Set(kv.Key, kv.Value.IsChecked == true);
         AppState.Settings.Queue = queue;
 
         // v1.30：桌面上摆什么 = 用户在这里勾了什么，顺序就是勾上的先后。
