@@ -3134,6 +3134,51 @@ internal static class Program
         Check("插件目录/老位置的内容会搬过来", pathCs.Contains("MoveDir(Path.Combine(ConfigRoot, \"plugins\"), PluginsDir, flatten: true);"));
 
 
+        // ---- 11n) v1.37 UI 任务书：首次运行别递刀 + 小按钮长大 + 一半没配要警示 ----
+        // 任务书 P0-1：一个工具都没配好时，「一键开跑」点下去必然失败。
+        // 处理是「禁用 + 压暗」，不是「整卡消失」——整卡消失会让下面的布局跳一下，
+        // 用户也就看不到它在那儿等着。
+        Check("首运行/一键开跑先禁用",
+            SliceBetween(mainCs, "bool firstRun = view.Phase == HomePhase.FirstRun;", "RenderHomeSteps")
+                .Contains("BtnQueueStart.IsEnabled = !firstRun;"));
+        Check("首运行/卡片压暗但还看得见",
+            mainCs.Contains("QueueCard.Opacity = firstRun ? 0.72 : 1.0;")
+            && !mainCs.Contains("QueueCard.Visibility"));
+        Check("首运行/队列卡有名字才改得动",
+            mainXaml.Contains("x:Name=\"QueueCard\""));
+        Check("首运行/事件里也挡一道",
+            mainCs.Contains("if (!BtnQueueStart.IsEnabled) return;"));
+        Check("首运行/禁用态有灰底",
+            SliceBetween(mainXaml, "<Style x:Key=\"LaunchPrimary\"", "</Style>")
+                .Contains("Value=\"{DynamicResource ControlBgBrush}\""));
+        Check("首运行/禁用态的字色设在 Bd 上",
+            // 模板触发器改不到模板父（Button 自己）的 Foreground，会被 Style 的 Setter 压回去，
+            // 结果是深色字贴在灰底上、比原来更难读。所以字色必须落在 Bd 的 TextElement.Foreground。
+            SliceBetween(mainXaml, "<Style x:Key=\"LaunchPrimary\"", "</Style>")
+                .Contains("Property=\"TextElement.Foreground\""));
+        Check("首运行/提示行与工具块一起收起",
+            mainCs.Contains("TbGridHint.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;")
+            && mainCs.Contains("ToolSetupBlock.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;"));
+
+        // 任务书 P0-2：26 高 / 11 号字在深色底上又小又密，低于可点中尺寸。
+        Check("小按钮/长到 30 高",
+            SliceBetween(mainXaml, "<Style x:Key=\"MiniAction\"", "</Style>")
+                .Contains("Property=\"Height\" Value=\"30\""));
+        Check("小按钮/字号 11.5",
+            SliceBetween(mainXaml, "<Style x:Key=\"MiniAction\"", "</Style>")
+                .Contains("Property=\"FontSize\" Value=\"11.5\""));
+        Check("小按钮/标题行五个之间留 8",
+            SliceBetween(mainXaml, "x:Name=\"BtnWeeklyPlan\"", "</StackPanel>")
+                .Split(new[] { "8,0,0,0" }, StringSplitOptions.None).Length - 1 >= 3);
+
+        // 任务书 P1-4：只配了一部分时也是警示——那正是「一键开跑」会悄悄跳过它们的场景。
+        Check("半配/文案用警示色",
+            SliceBetween(mainCs, "if (missing.Count == 0)", "catch (Exception ex)")
+                .Split(new[] { "WarningBrush" }, StringSplitOptions.None).Length - 1 >= 2);
+        Check("半配/配齐了才用三级灰",
+            SliceBetween(mainCs, "TbToolsSummary.Text = $\"已配 {ready} 个\";", "}")
+                .Contains("TextTertiaryBrush"));
+
         // ---- 11m) v1.35 设置页卡片墙 + 日志图标 + 鼠标拖动换页 ----
         // 设置页：两列四卡，每张卡有图标标题副标题，行与行之间只靠留白和一条极淡的分隔线。
         // 判据全部落在「结构属性」上，不看标签在文件里的先后（v1.32 在这里绊过一跤）。

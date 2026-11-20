@@ -1073,6 +1073,9 @@ public partial class MainWindow : Window
 
     private void BtnQueueStart_Click(object sender, RoutedEventArgs e)
     {
+        // v1.37：首次运行按钮是禁用的，正常点不到；键盘空格或自动化仍可能送进来。
+        if (!BtnQueueStart.IsEnabled) return;
+
         if (QueueService.IsRunning)
         {
             QueueService.Stop();
@@ -1777,9 +1780,12 @@ public partial class MainWindow : Window
                 TbToolsSummary.Text = ready == 0
                     ? "还没配，点开填一下"
                     : $"已配 {ready} 个 · 还有 {missing.Count} 个没配";
+                // v1.37：只配了一部分时也是警示，不是普通状态——
+                // 「一键开跑」会把没配好的那几个直接跳过，跑出来的结果和用户以为的不一样。
+                // 原来这里跟「全部配好」一样用三级灰，等于把一句要紧的话写成了旁白。
                 TbToolsSummary.Foreground = ready == 0
                     ? (BrushOf("WarningBrush") ?? DotYellow)
-                    : (BrushOf("TextTertiaryBrush") ?? DotGray);
+                    : (BrushOf("WarningBrush") ?? DotYellow);
             }
         }
         catch (Exception ex)
@@ -5790,6 +5796,23 @@ public partial class MainWindow : Window
             // 次按钮多余时收起：主卡已经说了「停下」，旁边再挂一个「看今天」只会分走注意力。
             BtnHeroSecondary.Visibility = string.IsNullOrEmpty(view.SecondaryText)
                 ? Visibility.Collapsed : Visibility.Visible;
+
+            // v1.37：首次运行（一个工具都没配好）时，「一键开跑」点了必然失败。
+            // 首屏上原本并排三个绿色主按钮（选择 exe / 打开定时 / 一键开跑），
+            // 后两个在此时都是噪音——只留主卡那一个，剩下的说明「配好之后这里能用」。
+            // 不做 Collapsed：整卡消失会让下面布局跳一下，而且用户也就看不到它在那儿等着。
+            bool firstRun = view.Phase == HomePhase.FirstRun;
+            BtnQueueStart.IsEnabled = !firstRun;
+            // v1.37：压暗到 0.72 而不是任务书最初写的 0.55——0.55 之下「一键开跑」四个字
+            // 叠在灰底上基本读不出来，用户会以为那里是一条空白。压暗的目的是「往后退」，
+            // 不是「看不见」：按钮本身已经换成灰底灰字，卡再压一层只是把它推远一点。
+            QueueCard.Opacity = firstRun ? 0.72 : 1.0;
+            TbGridHint.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;
+
+            // 「每个工具怎么跑」整块也是同一件事：首次运行时它只会显示一行
+            // 「还没配，点开填一下」的橙色小字，而卡已经整体压暗了，那行字不再提供信息。
+            ToolSetupDivider.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;
+            ToolSetupBlock.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;
 
             RenderHomeSteps(view.ShowSteps);
             RefreshHomeRecap();

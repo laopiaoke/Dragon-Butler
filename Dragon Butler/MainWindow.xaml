@@ -73,12 +73,25 @@
                                 <Setter TargetName="HoverVeil" Property="Opacity" Value="0.12"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
+                                <!-- v1.37：禁用时不能只把绿底调到 55% 透明——那样看着像「还没加载完」，
+                                     不像「现在不能用」。换成冷灰底 + 灰字，一眼就知道点不了。
+                                     注意：字色要设在 Bd 的 TextElement.Foreground 上——模板触发器
+                                     改不到模板父（Button 自己）的 Foreground，那会被 Style 的
+                                     Setter 压回去，结果是深色字贴在灰底上，比原来还难读。 -->
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlBgBrush}"/>
+                                <Setter TargetName="Bd" Property="Opacity" Value="1"/>
+                                <Setter TargetName="Bd" Property="TextElement.Foreground"
+                                        Value="{DynamicResource TextSecondaryBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Cursor" Value="Arrow"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <!-- 启动台次按钮：全宽 32、幽灵样式（透明底 + 1px BorderStrong） -->
@@ -696,9 +709,12 @@
         <!-- 守护卡快捷动作（立刻启动 / 停止） -->
         <Style x:Key="MiniAction" TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-            <Setter Property="Height" Value="26"/>
-            <Setter Property="Padding" Value="9,0"/>
-            <Setter Property="FontSize" Value="11"/>
+            <!-- v1.37：26 高 / 11 号字低于 Fluent 的 32px 触达下限，深色底上又小又密。
+                 加到 30 高、11.5 号、左右各多 1px：手指点得准、鼠标也不容易点空，
+                 又没把标题行那排按钮撑得比标题还显眼。 -->
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="FontSize" Value="11.5"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Background" Value="{DynamicResource BrandSoftBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource BrandTextBrush}"/>
@@ -1063,7 +1079,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftRun" X="-980"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageRun" Margin="14,10,14,88">
+                        <Grid x:Name="PageRun" Margin="14,10,14,96">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -1115,7 +1131,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftHome" X="0"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageHome" Margin="14,10,14,88">
+                        <Grid x:Name="PageHome" Margin="14,10,14,96">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -1351,7 +1367,7 @@
                         </Border>
 
 
-                        <Border Grid.Column="1" Style="{StaticResource Card}" Margin="7,0,0,0" Padding="16,13,16,13">
+                        <Border x:Name="QueueCard" Grid.Column="1" Style="{StaticResource Card}" Margin="7,0,0,0" Padding="16,13,16,13">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -1410,10 +1426,10 @@
                                                 Margin="10,0,0,0" Click="BtnWeeklyPlan_Click"
                                                 ToolTip="按星期配置每天跑哪些工具（只影响定时触发）"/>
                                         <Button x:Name="BtnCalendar" Content="日历" Style="{StaticResource MiniAction}"
-                                                Margin="6,0,0,0" Click="BtnCalendar_Click"
+                                                Margin="8,0,0,0" Click="BtnCalendar_Click"
                                                 ToolTip="过去一年哪天跑了、跑成没成（方格墙）"/>
                                         <Button x:Name="BtnToday" Content="今日" Style="{StaticResource MiniAction}"
-                                                Margin="6,0,0,0" Click="BtnToday_Click"
+                                                Margin="8,0,0,0" Click="BtnToday_Click"
                                                 ToolTip="今天每组花了多久、比往常快还是慢、哪个工具没跑成"/>
                                         <!-- v1.12：前两个是「看一眼」，后两个是「定规矩」，
                                              中间一道 1px 竖线把两类分开，省得四个按钮排成一串看不出区别 -->
@@ -1422,7 +1438,7 @@
                                                 Margin="0,0,0,0" Click="BtnDepends_Click"
                                                 ToolTip="配置「谁必须等谁跑完成」——写明白了就按依赖顺序跑，没跑成不放行"/>
                                         <Button x:Name="BtnGroupSlice" Content="配置组" Style="{StaticResource MiniAction}"
-                                                Margin="6,0,0,0" Click="BtnGroupSlice_Click"
+                                                Margin="8,0,0,0" Click="BtnGroupSlice_Click"
                                                 ToolTip="让某一项只跑指定的几个 BGI 配置组（不设就沿用上面的全局勾选）"/>
                                     </StackPanel>
                                 </Grid>
@@ -1629,8 +1645,11 @@
                          两次点击都在回答同一个问题。改成小按键：一个工具一个，点一下直接开它的配置窗口，
                          和托管桌面里「左键点图标」是同一个动作。下面的长列表留着（代码还在引用那些控件），
                          但不再显示。 -->
-                    <Border Margin="0,14,0,0" Height="1" Background="{DynamicResource BorderBrush}"/>
-        <StackPanel>
+                    <!-- v1.37：这块在首次运行时会整块收起（见 RefreshHomeHero）——
+                         一个工具都没配好时它既不能点也不能看，只是把「一键开跑」推得更远。 -->
+                    <Border x:Name="ToolSetupDivider" Margin="0,14,0,0" Height="1"
+                            Background="{DynamicResource BorderBrush}"/>
+        <StackPanel x:Name="ToolSetupBlock">
             <Grid Margin="0,12,0,0">
                 <TextBlock Text="每个工具怎么跑" FontSize="13.5" FontWeight="SemiBold"
                            Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
@@ -1855,7 +1874,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftSettings" X="980"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageSettings" Margin="14,10,14,88">
+                        <Grid x:Name="PageSettings" Margin="14,10,14,96">
                             <!-- v1.35：设置页从「一摞等宽长条」改成两列卡片墙。
                                  一张卡一件事：卡里有图标、有副标题、有一根细线把标题和内容分开，
                                  行与行之间靠留白与极淡分隔线区分，不再每一行套一个方块。
@@ -2566,7 +2585,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftPlugins" X="1960"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PagePlugins" Margin="14,10,14,88">
+                        <Grid x:Name="PagePlugins" Margin="14,10,14,96">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -2629,7 +2648,12 @@
                  ② 外壳改成真正的液态玻璃：不再是「一块实心 CardBg2 + 一根描边」，
                     而是一层半透明白、顶部一道高光、底边一道冷色反光——见下面的三层叠法。
                     同时也要能看见底下的卡片在动，所以外面不能再铺不透明底色。
-                 ③ 插件单独一页，不再挤在设置里当一张折叠卡。 -->
+                 ③ 插件单独一页，不再挤在设置里当一张折叠卡。
+
+                     v1.37：页面底部留白 88 → 96。胶囊高 58、离窗口底 14，加起来 72；
+                 88 只多出 16px 呼吸，而卡片最后一行（比如「一键开跑」按钮）在
+                 900×480 这个最小尺寸下正好落在胶囊后面——截图里按钮被压住一半。
+                 96 让最后一行完整地停在胶囊上方。 -->
             <Grid Grid.Row="1" Panel.ZIndex="20" Background="Transparent"
                   VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14">
                 <Border x:Name="NavShell" HorizontalAlignment="Center" VerticalAlignment="Center"

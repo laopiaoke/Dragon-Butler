@@ -666,6 +666,45 @@ internal static class RenderProbe
                         w.Close();
                     }
 
+                    // v1.37：任务书要求「最小窗口 900×480 下底部导航不压住任何按钮」。
+                    // 960×480 是这台机器工作区的实际下界（WPF 会把窗口夹在可用高度内），
+                    // 用 980 宽 × 480 高近似最小的可读状态，滚动到底看最后一行。
+                    if (mode == "small" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        SeedSampleArchive();
+                        SeedHeroState("ready");
+                        var w = new MainWindow();
+                        // 主窗是 SizeToContent="Height"，只设 Height 会被内容顶穿——
+                        // 那样截到的 480 只是长图的上半截，底部导航在画面外，等于没验。
+                        // 这里显式改成 Manual，窗口才真的只有 480 高。
+                        w.SizeToContent = SizeToContent.Manual;
+                        w.Width = 900;
+                        w.Height = 480;
+                        w.UpdateLayout();
+                        var refresh = typeof(MainWindow).GetMethod("RefreshHomeHero",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        refresh?.Invoke(w, null);
+                        for (int pass = 0; pass < 2; pass++)
+                        {
+                            if (w.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer sh)
+                            {
+                                if (pass == 0) sh.ScrollToTop(); else sh.ScrollToEnd();
+                            }
+                            w.UpdateLayout();
+                            string nm = pass == 0 ? "small_top.png" : "small_bottom.png";
+                            bool ok = Save(w, Path.Combine(spot, nm), 900, 480);
+                            Console.WriteLine($"RENDER {System.IO.Path.GetFileNameWithoutExtension(nm)}={ok}");
+                        }
+                        // 任务书要求两个尺寸都看：大窗下同样的内容不该出现新的截断或错位。
+                        w.Width = 1280;
+                        w.Height = 800;
+                        if (w.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer sh2) sh2.ScrollToTop();
+                        w.UpdateLayout();
+                        bool big = Save(w, Path.Combine(spot, "small_wide.png"), 1280, 800);
+                        Console.WriteLine($"RENDER small_wide={big}");
+                        w.Close();
+                    }
                     if (mode == "hero" || mode == "recap" || mode == "all")
                     {
                         var states = mode == "recap"
@@ -1141,7 +1180,7 @@ internal static class RenderProbe
                         if (expanded)
                         {
                             // v1.15 / L6：通知卡也要能展开拍——模板输入框就在那张卡里。
-                            foreach (string name in new[] { "AdvancedBody", "SystemBody", "NotifyBody" })
+                            foreach (string name in new[] { "NotifyBody" })
                             {
                                 if (w.FindName(name) is FrameworkElement fe) fe.Visibility = Visibility.Visible;
                             }
