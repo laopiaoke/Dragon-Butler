@@ -159,4 +159,4 @@ Released under [GNU AGPL-3.0](LICENSE). You may use, modify and redistribute it 
 
 ## Version
 
-Latest release **v1.28** (in-app `1.28.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).
+Latest release **v1.29** (in-app `1.29.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).

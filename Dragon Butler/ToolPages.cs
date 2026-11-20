@@ -92,7 +92,12 @@ public static class ToolPages
             result[MaxPages - 1].AddRange(result[MaxPages]);
             result.RemoveAt(MaxPages);
         }
-        return result;
+
+        // v1.29：页数不再是「用户摆出来的形状」，而是数量的一个函数————
+        // 收尾统一按 6 个一页重切一遍，空页、半空的页都会被收掉。
+        // 这一段必须放在最后：前面的「删掉已不存在的工具」会让某一页空出来，
+        // 不重切的话那一页会一直挂在那儿，页码点比实际内容多。
+        return Repack(result);
     }
 
     /// <summary>把页面拍平成一条顺序表（执行顺序 = 「页 0 左→右、上→下，再页 1……」）。</summary>
@@ -223,5 +228,32 @@ public static class ToolPages
         if (pages == null) return list;
         foreach (var page in pages) list.Add(page == null ? new List<string>() : page.Where(id => !string.IsNullOrWhiteSpace(id)).ToList());
         return list;
+    }
+
+    /// <summary>
+    /// 按 Flatten 顺序把工具重新切页：每页 <see cref="PerPage"/> 个，满了才开下一页。
+    /// <para>
+    /// v1.29：页面不再是一个「可以手动加、可以留白的东西」，而是数量的一个函数——
+    /// 8 个工具就是两页（6 + 2），删掉三个就自己收回一页。
+    /// 原来那个「＋ 新页」按钮的毛病是：加了页不会自动删，用户手上有几页空页自己都不知道，
+    /// 而且翻到第二页看到的常是六个空格子——那页除了让人多点两下，没有任何信息。
+    /// </para>
+    /// <para>
+    /// 一行空白（最后一页没满）是允许的：「＋」要占一格，摆不满的那格本来就是空的。
+    /// </para>
+    /// </summary>
+    public static List<List<string>> Repack(IEnumerable<IEnumerable<string>?>? pages)
+    {
+        var flat = Flatten(pages);
+        var result = new List<List<string>>();
+        for (int i = 0; i < flat.Count; i += PerPage)
+        {
+            var page = new List<string>();
+            for (int j = i; j < flat.Count && j < i + PerPage; j++) page.Add(flat[j]);
+            result.Add(page);
+        }
+        if (result.Count == 0) result.Add(new List<string>());
+        while (result.Count > MaxPages) result.RemoveAt(result.Count - 1);
+        return result;
     }
 }

@@ -888,8 +888,9 @@ internal static class RenderProbe
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                         picker?.Invoke(w, null);
                         w.UpdateLayout();
-                        SwitchToSettingsPage(w);
-                        if (w.FindName("ScrollSettings") is System.Windows.Controls.ScrollViewer sv2)
+                        // v1.29：工具设置整块搬进了启动页的「托管配置」卡，所以这里要切到启动页
+                        // （Home=1）而不是设置页——设置页上已经没有 ToolCardsHost 了。
+                        if (w.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer sv2)
                         {
                             // v1.15 / L4：滚到 BetterGI 那张卡本身。430 只到折叠头，
                             // 配置组勾选区在卡片下半部分，看不到就等于没验。

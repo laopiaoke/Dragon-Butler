@@ -2742,8 +2742,10 @@ internal static class Program
 
         var knownAll = new List<string> { "a", "b", "c", "d", "e", "f", "g", "h" };
         var np1 = ToolPages.Normalize(new[] { new[] { "a", "b" }, new[] { "c" } }, knownAll);
-        Check("分页/整理保留页数", np1.Count == 2, np1.Count.ToString());
-        Check("分页/整理保留顺序", string.Join(",", np1[0]) == "a,b" && string.Join(",", np1[1]) == "c",
+        // v1.29：Normalize 末尾会过一遍 Repack，所以「两页共 3 个工具」会被收成一页。
+        // 这是新的语义：页数是数量的函数，用户手工留下的空页/半页会被合并。
+        Check("分页/整理后按容量收页", np1.Count == 1, np1.Count.ToString());
+        Check("分页/整理保留顺序", string.Join(",", np1[0]) == "a,b,c",
             string.Join("|", np1.Select(p => string.Join(",", p))));
         // 关键一条：不存在的工具不补回来。否则「删掉一整页」删不干净——
         // 重新渲染时 Normalize 又把它补回去，页面看着又满了。
@@ -2794,6 +2796,21 @@ internal static class Program
         Check("分页/到 9 页不再加", ToolPages.AddPage(Enumerable.Repeat(new[] { "a" }, 9).ToList()).Count == 9);
         Check("分页/去掉尾巴空页", ToolPages.TrimEmptyTail(new[] { new[] { "a" }, Array.Empty<string>() }).Count == 1);
         Check("分页/最后一页空也留着", ToolPages.TrimEmptyTail(new[] { Array.Empty<string>() }).Count == 1);
+
+        // v1.29：Repack——页数是数量的函数，不是用户手动维护的东西。
+        var repacked = ToolPages.Repack(new List<List<string>>
+        {
+            new() { "a", "b", "c", "d" },
+            new(),
+            new() { "e", "f", "g" },
+        });
+        Check("分页/重切按容量切满", repacked.Count == 2, repacked.Count.ToString());
+        Check("分页/重切第一页塞满 6 个", repacked[0].Count == 6, repacked[0].Count.ToString());
+        Check("分页/重切第二页只剩多的", repacked[1].SequenceEqual(new[] { "g" }));
+        Check("分页/重切丢掉空页",
+            ToolPages.Repack(new List<List<string>> { new() { "a" }, new() }).Count == 1);
+        Check("分页/重切空输入也给一页",
+            ToolPages.Repack(null).Count == 1 && ToolPages.Repack(null)[0].Count == 0);
 
         // Clone 必须真复制：拖拽时是「在副本上算完再换上去」，
         // 如果 Clone 返回的是同一批 List 引用，中途一次异常就把用户桌面改坏了。
@@ -2849,7 +2866,11 @@ internal static class Program
         Check("翻页/裁切容器能触摸横滑", mainXaml.Contains("ToolPager_ManipulationCompleted"));
         Check("翻页/拖拽层在裁切外面", mainXaml.Contains("x:Name=\"ToolDragLayer\""));
         Check("翻页/有页码点容器", mainXaml.Contains("x:Name=\"PageDotsHost\""));
-        Check("翻页/有加页按钮", mainXaml.Contains("x:Name=\"BtnAddPage\"") && mainXaml.Contains("BtnAddPage_Click"));
+        // v1.29：「＋ 新页」按钮删了。它的问题是只能加不能删——加出来的空页会一直挂在页码条上，
+        // 于是「页」变成了一个用户要自己整理的东西。现在页数由工具数量决定。
+        Check("翻页/不再有加页按钮",
+            !mainXaml.Contains("x:Name=\"BtnAddPage\"") && !mainCs.Contains("void BtnAddPage_Click("));
+        Check("翻页/页数由数量决定", ReadRepoSources("Dragon Butler/ToolPages.cs").Contains("public static List<List<string>> Repack("));
         Check("翻页/切页走 GoToolPage", mainCs.Contains("void GoToolPage("));
         Check("翻页/摆位走 PlaceToolPages", mainCs.Contains("void PlaceToolPages("));
         Check("翻页/拖到边缘会翻页", mainCs.Contains("CheckEdgeFlip("));
@@ -2862,6 +2883,28 @@ internal static class Program
         Check("翻页/只剩一页时拒绝删", mainCs.Contains("ToolPages.RemovePageAt("));
         Check("翻页/新工具落到它所在的那页", mainCs.Contains("ToolPages.Locate("));
         Check("翻页/页面存进设置", ReadRepoSources("Dragon Butler/AppState.cs").Contains("ToolPages"));
+        // v1.29：页码故意不落盘。存了的话每次启动都要先划两下才看得到「今晚跑什么」，
+        // 而那正是九成人打开它的理由。这条盯的是「别哪天顺手把它持久化」。
+        Check("翻页/页码不落盘",
+            !ReadRepoSources("Dragon Butler/AppState.cs").Contains("ToolPageIndex"));
+
+        // ---- 11c) v1.29 底部导航栏 + 两卡合并 + 插件卡 ----
+        Check("导航/三页按钮搬到底部",
+            mainXaml.Contains("Style=\"{StaticResource NavBtn}\"") &&
+            mainXaml.Split("NavBtn").Length == 5);
+        Check("导航/标题栏不再有三页切换",
+            !mainXaml.Contains("Style=\"{StaticResource SegBtn}\" Checked=\"SegPage_Checked\"")); 
+        Check("导航/底栏在状态条上面",
+            mainXaml.IndexOf("<Border Grid.Row=\"2\" Background=\"{DynamicResource CardBgBrush}\"", StringComparison.Ordinal) > 0 &&
+            mainXaml.Contains("x:Name=\"StatusBarBorder\""));
+        Check("合并/工具设置搬进启动页",
+            mainXaml.IndexOf("x:Name=\"ToolCardsHost\"", StringComparison.Ordinal) <
+            mainXaml.IndexOf("x:Name=\"PageSettings\"", StringComparison.Ordinal));
+        Check("合并/设置页不再有工具设置壳", !mainXaml.Contains("第二层：工具设置"));
+        Check("插件/有插件卡", mainXaml.Contains("x:Name=\"BtnFoldPlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
+        Check("插件/折叠头认它", mainCs.Contains("\"BtnFoldPlugins\" => PluginsBody"));
+        Check("插件/读得懂的与读不懂的都列出来", mainCs.Contains("PluginLoader.Scan()") && mainCs.Contains("没加载"));
+        Check("插件/空着也说清不影响功能", mainCs.Contains("这不影响任何功能"));
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）

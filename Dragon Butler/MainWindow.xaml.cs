@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using DragonButler.Plugins;
 
 namespace DragonButler;
 
@@ -130,6 +131,7 @@ public partial class MainWindow : Window
 
         LoadSettingsToUi();
         RebuildCustomToolCards();
+        RefreshPlugins();
         RenderQueue();
         RefreshToolCards();
         RefreshShield();
@@ -1582,7 +1584,14 @@ public partial class MainWindow : Window
 
     // ===== 可翻页桌面（v1.27）=====
 
-    /// <summary>当前停在第几页（0 起）。</summary>
+    /// <summary>
+    /// 当前停在第几页（0 起）。
+    ///
+    /// v1.29：<b>故意不存进设置</b>。上次停在第三页，这次打开就还在第三页——
+    /// 那意味着用户每次启动都要先往左划两下才看得到「今晚跑什么」，
+    /// 而他打开这个程序十次有九次就是为了看那一件事。
+    /// 把它归零不需要记性，也不需要一次「重置」。
+    /// </summary>
     private int _toolPage;
 
     /// <summary>每页一个 Grid（2×3），下标＝页码。翻页动画直接改它们的 TranslateTransform。</summary>
@@ -1619,9 +1628,12 @@ public partial class MainWindow : Window
 
     private void ReplacePages(List<List<string>> pages)
     {
-        AppState.Settings.ToolPages = pages;
+        // v1.29：存之前先按「6 个一页」重切一遍——页数由数量决定，
+        // 不再保留用户手动加的空白页（「＋ 新页」这个按钮已经删了）。
+        var packed = ToolPages.Repack(pages);
+        AppState.Settings.ToolPages = packed;
         // ToolOrder 是 v1.21 留下的字段（导出/备份还有它），同步一份，免得两处说法不一致
-        AppState.Settings.ToolOrder = ToolPages.Flatten(pages).ToArray();
+        AppState.Settings.ToolOrder = ToolPages.Flatten(packed).ToArray();
         AppState.SaveSettings();
     }
 
@@ -1835,6 +1847,17 @@ public partial class MainWindow : Window
     {
         if (PageDotsHost == null) return;
         int count = PageList().Count;
+
+        // v1.29：只有一页时整行不出现——一个点不传递任何信息，
+        // 摆在那儿只会让人猜「是不是还有别的页我没翻到」。
+        PageDotsHost.Visibility = count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (count <= 1)
+        {
+            PageDotsHost.Children.Clear();
+            _pageDots.Clear();
+            return;
+        }
+
         if (_pageDots.Count == count)
         {
             UpdatePageDots();
@@ -1955,22 +1978,6 @@ public partial class MainWindow : Window
         RenderQueue();
         AppState.PublishLog($"✓ 已删除第 {index + 1} 页桌面");
         LogService.LogEvent($"删除桌面页：第 {index + 1} 页，含 {ids.Count} 个工具");
-    }
-
-    private void BtnAddPage_Click(object sender, RoutedEventArgs e)
-    {
-        var pages = PageList();
-        if (pages.Count >= ToolPages.MaxPages)
-        {
-            AppDialog.Show($"最多 {ToolPages.MaxPages} 页。再多的工具，建议先收一收不常用的。",
-                kind: AppDialog.Kind.Info, title: "加一页", primary: "知道了", owner: this);
-            return;
-        }
-        var next = ToolPages.AddPage(pages);
-        ReplacePages(next);
-        _toolPage = next.Count - 1;
-        RenderToolGrid();
-        LogService.LogEvent($"新建桌面页：第 {next.Count} 页");
     }
 
     // ===== 触摸横滑翻页 =====
@@ -2393,12 +2400,9 @@ public partial class MainWindow : Window
         }
         var pages = PageList();
         if (dir < 0 && _toolPage <= 0) dir = 0;
-        if (dir > 0 && _toolPage >= pages.Count - 1)
-        {
-            // 已经是最后一页：往右拖就当「开一页新的」，不然最后一格永远搬不出去
-            if (pages.Count < ToolPages.MaxPages) dir = 2;
-            else dir = 0;
-        }
+        // v1.29：最后一页再往右不再「自动开一页新的」——页数现在由工具数量决定，
+        // 手动开出来的页没有工具可放，就只是一个空壳。真要放到后面，先「＋ 添加」。
+        if (dir > 0 && _toolPage >= pages.Count - 1) dir = 0;
 
         if (dir == _edgeDir && _edgeFlip != null) return;
         _edgeFlip?.Stop();
@@ -2415,16 +2419,7 @@ public partial class MainWindow : Window
             _edgeFlip?.Stop();
             _edgeFlip = null;
             if (!_dragging) return;
-            if (dir == 2)
-            {
-                var added = ToolPages.AddPage(PageList());
-                ReplacePages(added);
-                GoToolPage(added.Count - 1);
-            }
-            else
-            {
-                GoToolPage(_toolPage + dir);
-            }
+            GoToolPage(_toolPage + dir);
             _edgeDir = 0;
             SoundService.Play("tick.wav");
         };
@@ -5821,6 +5816,148 @@ public partial class MainWindow : Window
             ClipboardHelper.ShowManualCopyFallback(url, this);
     }
 
+    // ===== 插件卡（v1.29）=====
+
+    /// <summary>
+    /// 扫 plugins 目录，把「读得懂的」和「读不懂的」分开列出来。
+    /// 读不懂的也要显示——否则用户放进去一个包、界面上什么都没变，
+    /// 他只会以为这个功能坏了，而不是「这个包少写了名字」。
+    /// </summary>
+    private void RefreshPlugins()
+    {
+        try
+        {
+            PluginsHost.Children.Clear();
+            var found = PluginLoader.Scan();
+            var okList = found.Where(f => f.Refuse == null && f.HasAssembly).ToList();
+            var badList = found.Where(f => f.Refuse != null || !f.HasAssembly).ToList();
+
+            TbPluginsSummary.Text = found.Count == 0
+                ? "还没装"
+                : okList.Count > 0
+                    ? $"已装 {okList.Count} 个"
+                    : "有目录，但都读不懂";
+
+            foreach (var f in okList)
+            {
+                string name = f.Meta?.Name ?? f.DirName;
+                string ver = f.Meta?.Version ?? "";
+                string needs = f.Meta?.Needs ?? "";
+                var card = new Border
+                {
+                    Background = BrushOf("CardBg2Brush") ?? DotGray,
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(12, 9, 12, 9),
+                    Margin = new Thickness(0, 0, 0, 6),
+                };
+                var panel = new StackPanel();
+                var head = new Grid();
+                head.Children.Add(new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(ver) ? name : $"{name} {ver}",
+                    FontSize = 12.5,
+                    Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
+                });
+                head.Children.Add(new TextBlock
+                {
+                    Text = "已就绪",
+                    FontSize = 10.5,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Foreground = BrushOf("BrandTextBrush") ?? DotGray,
+                });
+                panel.Children.Add(head);
+                if (!string.IsNullOrWhiteSpace(needs))
+                {
+                    panel.Children.Add(new TextBlock
+                    {
+                        Text = needs,
+                        FontSize = 10.5,
+                        Margin = new Thickness(0, 3, 0, 0),
+                        TextWrapping = TextWrapping.Wrap,
+                        Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+                    });
+                }
+                var hosts = f.Meta?.Hosts ?? new List<string>();
+                if (hosts.Count > 0)
+                {
+                    panel.Children.Add(new TextBlock
+                    {
+                        Text = "会访问：" + string.Join("、", hosts),
+                        FontSize = 10,
+                        Margin = new Thickness(0, 3, 0, 0),
+                        TextWrapping = TextWrapping.Wrap,
+                        Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+                    });
+                }
+                card.Child = panel;
+                PluginsHost.Children.Add(card);
+            }
+
+            foreach (var f in badList)
+            {
+                string why = f.Refuse ?? "目录里没找到入口程序集（默认 Plugin.dll）。";
+                var card = new Border
+                {
+                    Background = BrushOf("CardBg2Brush") ?? DotGray,
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(12, 9, 12, 9),
+                    Margin = new Thickness(0, 0, 0, 6),
+                };
+                var panel = new StackPanel();
+                panel.Children.Add(new TextBlock
+                {
+                    Text = f.DirName + "（没加载）",
+                    FontSize = 12.5,
+                    Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
+                });
+                panel.Children.Add(new TextBlock
+                {
+                    Text = why,
+                    FontSize = 10.5,
+                    Margin = new Thickness(0, 3, 0, 0),
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = BrushOf("WarningBrush") ?? DotGray,
+                });
+                card.Child = panel;
+                PluginsHost.Children.Add(card);
+            }
+
+            if (found.Count == 0)
+            {
+                PluginsHost.Children.Add(new TextBlock
+                {
+                    Text = "现在一个插件都没有。这不影响任何功能——管家自己就能跑完一套。",
+                    FontSize = 10.5,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("刷新插件列表失败：" + ex.Message);
+        }
+    }
+
+    private void BtnPluginsOpen_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string dir = PluginLoader.Root;
+            Directory.CreateDirectory(dir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = dir,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Show("打不开插件目录，详情见日志。", detail: ex.Message,
+                kind: AppDialog.Kind.Warning, title: "插件", primary: "知道了", owner: this);
+        }
+    }
+
     // ===== 折叠卡通用 =====
 
     private void FoldHeader_Click(object sender, RoutedEventArgs e)
@@ -5831,6 +5968,7 @@ public partial class MainWindow : Window
             "BtnFoldSystem" => SystemBody,
             "BtnFoldNotify" => NotifyBody,
             "BtnFoldAdvanced" => AdvancedBody,
+            "BtnFoldPlugins" => PluginsBody,
             _ => null,
         };
         if (body == null) return;

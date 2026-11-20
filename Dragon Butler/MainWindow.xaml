@@ -485,6 +485,37 @@
             </Setter>
         </Style>
 
+        <!-- v1.29 底部导航项：图标在上、字在下，选中时整格变成品牌色的浅底。
+             为什么不沿用 SegBtn：那个是标题栏里 24 高的小胶囊，放到底部会像一排标签页；
+             手机上认得出「这是导航」靠的是图标+文字竖排、以及选中项明显更亮。 -->
+        <Style x:Key="NavBtn" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Width" Value="78"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <!-- 内容由使用处自己写（图标 + 文字竖排），Foreground 一路传下去：
+                             图标 Path 绑 AncestorType=RadioButton 的 Foreground，所以选中时一起变色。 -->
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="10" Padding="0,6,0,5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BrandSoftBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource BrandTextBrush}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 分段式主题切换按钮（§5：三段式，选中态=容器高亮块） -->
         <Style x:Key="SegBtn" TargetType="RadioButton">
             <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
@@ -761,12 +792,13 @@
                 <RowDefinition Height="44"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- 自定义主题背景层：图片 + 遮罩（默认透明，预设主题下不参与绘制） -->
-            <Border Grid.RowSpan="3" CornerRadius="15" IsHitTestVisible="False"
+            <Border Grid.RowSpan="4" CornerRadius="15" IsHitTestVisible="False"
                     Background="{DynamicResource BgArtBrush}"/>
-            <Border Grid.RowSpan="3" CornerRadius="15" IsHitTestVisible="False"
+            <Border Grid.RowSpan="4" CornerRadius="15" IsHitTestVisible="False"
                     Background="{DynamicResource ScrimBrush}"/>
 
             <!-- 标题栏：应用标记 + 名称 / 分段主题 / 最小化 / 关闭（空白处可拖动） -->
@@ -801,21 +833,10 @@
                                VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <!-- v1.22：三个页面。左边是「刚才跑了什么」，中间是「接下来几点跑」，
-                     右边是「把东西配好」。以前这些全挤在一列里往下滚，滚到哪算哪；
-                     现在按「我现在想知道什么」分成三屏，标题栏中间就是换页的地方。 -->
-                <Border Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Background="{DynamicResource ControlBgBrush}" BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="2">
-                    <StackPanel Orientation="Horizontal">
-                        <RadioButton x:Name="SegPageRun" Content="运行" Tag="0"
-                                     Style="{StaticResource SegBtn}" Checked="SegPage_Checked"/>
-                        <RadioButton x:Name="SegPageHome" Content="启动" Tag="1" IsChecked="True"
-                                     Style="{StaticResource SegBtn}" Checked="SegPage_Checked"/>
-                        <RadioButton x:Name="SegPageSettings" Content="设置" Tag="2"
-                                     Style="{StaticResource SegBtn}" Checked="SegPage_Checked"/>
-                    </StackPanel>
-                </Border>
+                <!-- v1.29：三个页面的切换器搬到窗口底部去了（见下面那条导航栏）。
+                     标题栏只留「我是谁 + 主题 + 消息 + 窗口按钮」，中间那格留空——
+                     换页是「去哪儿」，属于内容区的事；标题栏是「这是什么软件、怎么关掉它」。
+                     Tag 里留着原来的说明：左边「刚才跑了什么」，中间「接下来几点跑」，右边「把东西配好」。 -->
 
                 <Border Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0"
                         Background="{DynamicResource ControlBgBrush}" BorderBrush="{DynamicResource BorderBrush}"
@@ -1348,15 +1369,14 @@
                                     <Canvas x:Name="ToolDragLayer" Grid.Row="0" IsHitTestVisible="False"/>
 
 
-                                    <!-- 页码指示器：当前页是一个拉长的胶囊，其余是圆点 -->
-                                    <Grid Grid.Row="1" Margin="0,9,0,0">
-                                        <StackPanel x:Name="PageDotsHost" Orientation="Horizontal"
-                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                        <Button x:Name="BtnAddPage" Content="＋ 新页" Style="{StaticResource MiniAction}"
-                                                Height="26" Padding="9,0" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                Click="BtnAddPage_Click"
-                                                ToolTip="加一页空桌面。摆不下的工具可以放到新的一页"/>
-                                    </Grid>
+                                    <!-- 页码指示器：当前页是一个拉长的胶囊，其余是圆点。
+                                         v1.29：这里原来还有一颗「＋ 新页」按钮，删了。
+                                         它能加页却不能删页，加出来的空页永远赖在那儿，页码点比内容多；
+                                         而且「摆不下」本来就不该由用户手动解决——放满 6 个自动开下一页，
+                                         删掉工具自动收回一页，这才是「托管配置」该有的样子。
+                                         只有一页时整行都不显示：一个孤零零的点不传递任何信息。 -->
+                                    <StackPanel x:Name="PageDotsHost" Grid.Row="1" Orientation="Horizontal"
+                                                Margin="0,9,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
                                     <TextBlock x:Name="TbGridOverflow" Grid.Row="1" FontSize="10.5" Margin="5,32,5,0"
                                                Visibility="Collapsed" TextWrapping="Wrap"
@@ -1441,42 +1461,11 @@
                                     <TextBlock x:Name="TbQueueHint" FontSize="10.5" Margin="0,7,0,0" TextWrapping="Wrap"
                                                Foreground="{DynamicResource TextTertiaryBrush}"
                                                Text="依次执行勾选的工具；间隔在高级设置里调整。"/>
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </Grid>
-                        </Grid>
-                    </ScrollViewer>
 
-                    <!-- ===== 右页：设置 =====
-                         工具、通知、系统这些「配一次就不常动」的东西全在这页。
-                         它们以前压在中页下面，得滚很久；现在右滑一步就到，
-                         而中页从此只剩「今晚跑什么」这件事。 -->
-                    <ScrollViewer x:Name="ScrollSettings" VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <ScrollViewer.RenderTransform>
-                            <TranslateTransform x:Name="ShiftSettings" X="980"/>
-                        </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageSettings" Margin="14,10,14,8">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-
-                    <!-- 第二层：工具设置（v1.15 / L2：从三张卡收成一行）
-                         工具卡的唯一作用是填 exe 路径，而这件事在第一次打开时已经由主卡接管、
-                         之后很少再动。它占着三张卡的版面，等于天天提醒用户「你还有东西没配」。
-                         现在收成一行，点开才铺出原来的三张卡——一个控件都没删。 -->
-                    <StackPanel Grid.Row="0">
-
-                    <!-- v1.26：这张「我的工具」卡整块删掉了。
-                         它和启动页那张卡（原「睡前队列」）摆的是同一批工具，两张永远在说同一件事，
-                         用户要点一个工具得先想清楚「它在哪一页」。
-                         格子搬进启动页那张卡（名字也叫「我的工具」），这一页只管「每个工具怎么配」。 -->
-
-                    <Border Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
+                                    <!-- v1.29：工具设置原来在设置页上单独一张卡，和这张卡说的是同一批工具——
+                                         「哪些要跑」在这边，「每个怎么跑」在那边，用户点一个工具得先想清楚它在哪一页。
+                                         现在并成一张：上面挑、下面配，往下滚一点就到。一个控件都没删。 -->
+                                    <Border Margin="0,14,0,0" Height="1" Background="{DynamicResource BorderBrush}"/>
                         <StackPanel>
                             <Button x:Name="BtnFoldTools" Style="{StaticResource FoldHeader}" Click="FoldTools_Click">
                                 <DockPanel LastChildFill="False">
@@ -1691,8 +1680,66 @@
                     </Border>
                             </StackPanel>
                         </StackPanel>
-                    </Border>
-                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- ===== 右页：设置 =====
+                         工具、通知、系统这些「配一次就不常动」的东西全在这页。
+                         它们以前压在中页下面，得滚很久；现在右滑一步就到，
+                         而中页从此只剩「今晚跑什么」这件事。 -->
+                    <ScrollViewer x:Name="ScrollSettings" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="ShiftSettings" X="980"/>
+                        </ScrollViewer.RenderTransform>
+                        <Grid x:Name="PageSettings" Margin="14,10,14,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+
+                            <!-- v1.29：插件卡。这里一直是空的——插件加载器（PluginLoader）在 v1.20 就写好了，
+                                 但界面上没有一个地方能看见「装了没有、装了什么、为什么没装」。
+                                 空着也是信息：先说清 plugins 目录在哪、放进去会长什么样，
+                                 再去扫真实目录，把读得懂的和读不懂的分开列。 -->
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,0" Padding="0">
+                                <StackPanel>
+                                    <Button x:Name="BtnFoldPlugins" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
+                                        <DockPanel LastChildFill="False">
+                                            <Path DockPanel.Dock="Right" x:Name="ChevPlugins" Data="M4 6l4 4 4-4"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
+                                                  Width="10" Height="10" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <Path DockPanel.Dock="Left" Data="M10,3 L10,10 M10,13.5 L10,14.5 M3,3 L17,3 L17,17 L3,17 Z"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.6"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                  Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <TextBlock DockPanel.Dock="Left" Text="插件" FontSize="13.5" FontWeight="SemiBold"
+                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock x:Name="TbPluginsSummary" DockPanel.Dock="Left" Text="" FontSize="10.5"
+                                                       Margin="10,0,0,0" Foreground="{DynamicResource TextTertiaryBrush}"
+                                                       VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Button>
+                                    <StackPanel x:Name="PluginsBody" Margin="16,0,16,14" Visibility="Collapsed">
+                                        <TextBlock Text="把一个插件文件夹放进 plugins\ 目录，重启管家就会出现在这里。每个插件要说清它要访问哪些域名、需要什么权限——写不明白的不加载。"
+                                                   FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,8"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        <StackPanel x:Name="PluginsHost"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <Button x:Name="BtnPluginsOpen" Content="打开插件目录" Style="{StaticResource MiniAction}"
+                                                    Height="26" Padding="10,0" Click="BtnPluginsOpen_Click"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
 
                     <!-- 第三层：高级设置（默认折叠） -->
 
@@ -2373,8 +2420,75 @@
             </Border>
 
 
+            <!-- v1.29：底部导航栏。原来这三个按钮挤在标题栏正中间，和主题切换、消息、窗口按钮
+                 排成一行，全是「小胶囊」——用户得先读完四组文字才找得到「运行」在哪。
+                 搬到窗口底部之后，屏幕最下沿是手指/眼睛默认会到的地方，三个大格子一眼就分得清。
+                 高度 56：图标 20 + 间距 3 + 一行字 14 + 上下留白，刚好不挤。 -->
+            <Border Grid.Row="2" Background="{DynamicResource CardBgBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,4">
+                        <!-- 运行：一个环形箭头（「刚才跑了什么」） -->
+                        <RadioButton x:Name="SegPageRun" Tag="0"
+                                     Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
+                                     ToolTip="看刚才/今天跑了什么">
+                            <StackPanel>
+                                <Path Data="M13.5,3.2 A6.4,6.4 0 1 0 16,8" Width="18" Height="18"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                      StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Stretch="Uniform" HorizontalAlignment="Center"/>
+                                <TextBlock Text="运行" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                            </StackPanel>
+                        </RadioButton>
+
+                        <!-- 启动：房子（「接下来几点跑」，每天回来的那一页） -->
+                        <RadioButton x:Name="SegPageHome" Tag="1" IsChecked="True"
+                                     Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
+                                     ToolTip="定时、托管配置、一键开跑">
+                            <StackPanel>
+                                <Path Data="M3,9.5 L10,3 L17,9.5 L17,16.5 L3,16.5 Z" Width="18" Height="18"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                      StrokeThickness="1.6" StrokeLineJoin="Round"
+                                      Stretch="Uniform" HorizontalAlignment="Center"/>
+                                <TextBlock Text="启动" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                            </StackPanel>
+                        </RadioButton>
+
+                        <!-- 设置：两根滑杆（「把东西配好」） -->
+                        <RadioButton x:Name="SegPageSettings" Tag="2"
+                                     Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
+                                     ToolTip="工具、通知、系统和插件">
+                            <StackPanel>
+                                <Grid Width="18" Height="18" HorizontalAlignment="Center">
+                                    <Path Data="M2,5.5 L16,5.5 M2,12.5 L16,12.5"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                          StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Stretch="Uniform" VerticalAlignment="Center"/>
+                                    <Ellipse Width="4" Height="4" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                             Margin="9,3,0,0"
+                                             Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                                    <Ellipse Width="4" Height="4" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                             Margin="4,0,0,3"
+                                             Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                                </Grid>
+                                <TextBlock Text="设置" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                            </StackPanel>
+                        </RadioButton>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
             <!-- 底部状态条：守护盾牌 + 最近一条事件 -->
-            <Border Grid.Row="2" x:Name="StatusBarBorder" Background="{DynamicResource InsetBrush}"
+            <Border Grid.Row="3" x:Name="StatusBarBorder" Background="{DynamicResource InsetBrush}"
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Height="28">
                 <Grid>
                     <Grid.ColumnDefinitions>
