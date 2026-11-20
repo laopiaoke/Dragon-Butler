@@ -290,9 +290,12 @@ public partial class MainWindow : Window
         {
             // Smart Animate 那一档的手感：先略微冲过头再回来。
             // 260ms 太快（看不清视差），800ms 太黏（每天点好几次的东西不该等这么久）。
-            var anim = new DoubleAnimation(target, TimeSpan.FromMilliseconds(420))
+            // v1.35：回弹从 0.22 收到 0.12。原来那一版冲过头接近 11px，
+            // 而轨道只有 112 宽、滑块 52 宽 —— 过头的那一下会探到轨道外面，
+            // 看起来像「气泡把图标蹭歪了」。现在只留一点点惯性。
+            var anim = new DoubleAnimation(target, TimeSpan.FromMilliseconds(380))
             {
-                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.22 },
+                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.12 },
                 FillBehavior = FillBehavior.HoldEnd,
             };
             ThemeThumbShift.BeginAnimation(TranslateTransform.XProperty, anim);
@@ -320,8 +323,14 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 切换时的视差：滑块往哪边去，三个图标就整体往反方向轻推一点再弹回，
-    /// 月亮/星星、太阳/光晕各自错开不同距离 —— 到位时间相同、距离不同，就是视频里说的视差。
+    /// 切换时的视差：滑块往哪边去，图标里那几个「附件」就往反方向轻推一点再弹回。
+    ///
+    /// v1.35：这里原来连图标本体一起推（IconDark / MoonPath 各 -7），而 MoonPath 是 IconDark
+    /// 的子元素 —— 两层位移会叠加，月亮实际走了 14px。人看到的是「整组图标跟着气泡一起飞」，
+    /// 那正是用户报的那个 bug。
+    ///
+    /// 现在只推附件（星星、光芒），并且把距离压到 2~4px：本体不动，附件微动，
+    /// 阅读起来才是「前后有层次」，而不是「图标被气泡拖走了」。
     /// </summary>
     private void PlayThemeParallax(int from, int to)
     {
@@ -344,15 +353,12 @@ public partial class MainWindow : Window
             tt.BeginAnimation(TranslateTransform.YProperty, ay);
         }
 
-        // 主体往反方向走 7px，两个「附件」再多走 3~5px —— 距离差就是视差。
-        Push(IconDark, -7, 0, ms);
-        Push(MoonPath, -7, 0, ms);
-        Push(Star1, -11, -2, ms, 20);
-        Push(Star2, -9, 2, ms, 40);
-
-        Push(IconLight, -7, 0, ms);
-        Push(SunCore, -7, 0, ms);
-        Push(SunRays, -12, 0, ms, 20);
+        // 本体（月亮、太阳圆盘）一步都不动：它们必须钉在原来的位置，
+        // 否则「图标」和「气泡」看起来是一起被推走的，人眼立刻读成错位。
+        // 只有星星和光芒走 2~4px，这些本来就是点缀，轻微错开才像有厚度。
+        Push(Star1, -4, -1.5, ms, 30);
+        Push(Star2, -3, 1.5, ms, 60);
+        Push(SunRays, -4, 0, ms, 30);
     }
 
     private void ThemeSwitch_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -3860,6 +3866,94 @@ public partial class MainWindow : Window
         if (want != _page) ShowPage(want);
     }
 
+    // ===== 鼠标拖动换页（v1.35）=====
+    //
+    // 为什么以前不做：鼠标按下就会被卡片里的按钮、格子的长按拖拽当成「自己开始的那件事」，
+    // 我们要是按下就抢鼠标，按钮就点不着了。
+    // 现在的做法是「晚一步」：
+    //   按下 → 只记住起点，什么都不抢；
+    //   移动 → 横向真的拉开 40px（而且比纵向拉得更开）才 CaptureMouse，这时那件事早就开始了，
+    //          Mouse.Captured 已经是别人，我们直接放弃；
+    //   松手 → 位移够一屏的 12%（Pager.SwipeThreshold）就翻页，不够就弹回去。
+
+    private const double PageDragStart = 40;      // 横向拖多远才算「想换页」，不是「手抖」
+    private Point _pageDragFrom;
+    private bool _pageDragArmed;                  // 按下了，还没决定要不要夺鼠标
+    private bool _pageDragging;                   // 已经在拖了（鼠标已捕获）
+    private double _pageDragShift;                // 当前跟手位移，松手时用来判翻页
+
+    private void PageClip_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // 已经有别人抓着鼠标（按钮按住了、格子在长按拖拽）就别掺和
+        if (Mouse.Captured != null && !ReferenceEquals(Mouse.Captured, PageClip)) return;
+        _pageDragFrom = e.GetPosition(PageClip);
+        _pageDragArmed = true;
+        _pageDragging = false;
+        _pageDragShift = 0;
+    }
+
+    private void PageClip_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_pageDragArmed || e.LeftButton != MouseButtonState.Pressed) return;
+        var now = e.GetPosition(PageClip);
+        double dx = now.X - _pageDragFrom.X;
+        double dy = now.Y - _pageDragFrom.Y;
+
+        if (!_pageDragging)
+        {
+            if (Math.Abs(dx) < PageDragStart) return;
+            // 竖着划拉得多，说明人家是在滚列表，不是在换页
+            if (Math.Abs(dy) > Math.Abs(dx)) { _pageDragArmed = false; return; }
+            // 到头了往反方向拖没有意义，直接放弃，别让页面回弹一下
+            if ((dx > 0 && _page == 0) || (dx < 0 && _page == Pager.Count - 1)) { _pageDragArmed = false; return; }
+            if (Mouse.Captured != null && !ReferenceEquals(Mouse.Captured, PageClip)) { _pageDragArmed = false; return; }
+
+            _pageDragging = true;
+            PageClip.CaptureMouse();
+        }
+
+        // 跟手：当前页跟着鼠标走，相邻页从边上探进来。
+        // 位移打个折（0.85），拖到头那一下不会显得「怎么拖都还在原地」。
+        _pageDragShift = dx;
+        DragPages(dx * 0.85);
+        e.Handled = true;
+    }
+
+    private void PageClip_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        bool wasDragging = _pageDragging;
+        _pageDragArmed = false;
+        _pageDragging = false;
+        if (!wasDragging) return;
+
+        if (PageClip.IsMouseCaptured) PageClip.ReleaseMouseCapture();
+        int want = Pager.Swipe(_page, _pageDragShift, PageClip.ActualWidth);
+        ShowPage(want);   // 同一页时它会动画弹回原位，不换页也不会僵在半路
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// 拖动过程中把四页临时挪到「当前页 + shift」。不碰 _page，也不碰 Pager 的档位，
+    /// 松手之后 ShowPage 会重新摆正——所以这里只要管好看，不用管对不对。
+    /// </summary>
+    private void DragPages(double shift)
+    {
+        double width = PageClip.ActualWidth;
+        if (width <= 0) return;
+        var offsets = Pager.Offsets(_page);
+        var transforms = new (TranslateTransform? T, int Offset)[]
+        {
+            (ShiftRun, offsets[0]), (ShiftHome, offsets[1]),
+            (ShiftSettings, offsets[2]), (ShiftPlugins, offsets[3]),
+        };
+        foreach (var (t, offset) in transforms)
+        {
+            if (t == null) continue;
+            t.BeginAnimation(TranslateTransform.XProperty, null);
+            t.X = offset * width + shift;
+        }
+    }
+
     /// <summary>
     /// 整屏横移。三页叠在 PageClip 里、各自撑满，靠三个 TranslateTransform 摆位，
     /// 所以「移一屏」就是把当前页的 X 归零、把另外两页推到 ±1 屏。
@@ -5003,9 +5097,7 @@ public partial class MainWindow : Window
     {
         if (_suppressToggle) return;
         AppState.Settings.StayInTray = TgStayTray.IsChecked == true;
-        // v1.28：这个提示说的是「这个开关打开之后会怎样」。开关重新打开，
-        // 提示也该重新有机会出现一次；否则关掉再开的人，永远看不到那句解释。
-        if (AppState.Settings.StayInTray) NotifyService.ResetTrayNote();
+        // v1.35：ResetTrayNote 跟着那条提示一起删了——提示本就不该存在。
         AppState.SaveSettings();
     }
 
@@ -6443,9 +6535,7 @@ public partial class MainWindow : Window
         if (sender is not Button btn) return;
         FrameworkElement? body = btn.Name switch
         {
-            "BtnFoldSystem" => SystemBody,
             "BtnFoldNotify" => NotifyBody,
-            "BtnFoldAdvanced" => AdvancedBody,
             _ => null,
         };
         if (body == null) return;
@@ -6578,11 +6668,15 @@ public partial class MainWindow : Window
         if (App.ForceExit || !AppState.Settings.StayInTray) return;
         e.Cancel = true;
         Hide();
-        // v1.28：以前这里直接 ShowBalloon，绕开了「不推送」的判断——
-        // 在向导里选了不推送的人，一关窗口照样挨一下气泡。改走 ShowTrayNote。
-        // 那里面还有两道闸：选了不推送就一条都不弹；这台机器只提醒一次。
-        NotifyService.ShowTrayNote(NotifyLevel.Info, "一条龙管家",
-            "一条龙管家 仍在后台运行，双击托盘图标可打开。");
+        // v1.35：不弹了。
+        //
+        // 这条以前是「关窗口时告诉你还在后台」，v1.28 给它加过闸（选了不推送就不弹、
+        // 一台机器只说一次），但闸的判据是「通知渠道 != 不推送」——而「关窗口」跟
+        // 「跑完了要不要通知我」根本是两件事。选了 Windows 通知的人，在意的是跑完的
+        // 结果；不是每次关窗都被系统弹一次「还在后台」。
+        //
+        // 真正的判据只有一条：这一刻用户就坐在屏幕前，看着窗户消失。他知道自己关了什么。
+        // 托盘图标还在，双击能开回来——不需要谁告诉他。
 
         // v1.21 / 内存方案 B：收进托盘就把整窗销毁，把「已经画到屏幕上」的那 28 MB 还回去。
         // 挂在托盘图标上的只有一项设置，重建一次约 1 秒——用 1 秒换常驻少 28 MB，
@@ -6693,7 +6787,9 @@ public partial class MainWindow : Window
                 case "view.schedule": RevealCard(ScheduleCard); break;
                 case "view.queue": RevealCard(QueueHost); break;
                 case "view.tools": RevealCard(CustomToolsHost); break;
-                case "view.advanced": RevealCard(AdvancedBody); break;
+                // v1.35：高级设置与系统不再是折叠卡，内容直接摊在「守护与恢复 / 节奏与报告」两张卡里。
+                // 这条命令还留着，落到那张卡的第一行上，位置一样是「设置页往下一点的地方」。
+                case "view.advanced": RevealCard(TgSentinel); break;
                 case "view.log": RevealCard(TbLog); break;
                 case "view.calendar": OpenCalendar(); break;
                 case "view.today": OpenToday(); break;
@@ -6762,7 +6858,8 @@ public partial class MainWindow : Window
             }
 
             // 折叠卡里的元素是 Collapsed 的，先展开父级（只往上找一层已知的折叠体）
-            foreach (var body in new FrameworkElement?[] { AdvancedBody, SystemBody, NotifyBody })
+            // v1.35：只剩通知还是折叠的。别的设置项现在直接是卡片里的一行，本来就在。
+            foreach (var body in new FrameworkElement?[] { NotifyBody })
             {
                 if (body == null) continue;
                 if (body == target || body.IsAncestorOf(target))

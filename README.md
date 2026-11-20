@@ -72,7 +72,7 @@
 所有配置\group_archive.json 每天跑了哪些配置组
 所有配置\notices.json       消息中心（最多留 100 条）
 所有配置\tools\*.json       工具档案
-所有配置\plugins\           插件
+插件\                       插件（导航第四项「打开插件目录」就是这里）
 所有配置\备份\              设置备份与恢复包
 所有配置\sounds\            自定义音效
 全部日志\                    运行日志（出问题先看这里）
@@ -80,7 +80,7 @@
 全部日志\incidents\          失败现场包
 ```
 
-老版本散在 exe 旁边的 `config` / `tools` / `plugins` / `cache` / `sounds` / `备份`，第一次启动 1.30 会自动搬进这两个文件夹，老的 `config` 里留一个 `.moved-to-所有配置` 标记防止重复搬。
+老版本散在 exe 旁边的 `config` / `tools` / `plugins` / `cache` / `sounds` / `备份`，第一次启动 1.30 会自动搬进这几个文件夹，老的 `config` 里留一个 `.moved-to-所有配置` 标记防止重复搬。
 
 不写 `%APPDATA%`，整个文件夹可以拷走接着用。
 
@@ -172,4 +172,4 @@ dotnet "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.dll" 
 
 ## 版本
 
-最新发布 **v1.34**（程序内 `1.34.0`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。
+最新发布 **v1.35**（程序内 `1.35.0`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。

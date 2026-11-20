@@ -71,7 +71,7 @@ Everything sits next to the exe; deleting the folder uninstalls it (turn off aut
 所有配置\group_archive.json which config groups ran each day
 所有配置\notices.json       message centre (capped at 100)
 所有配置\tools\*.json       tool profiles
-所有配置\plugins\           plugins
+插件\                       plugins (the 「打开插件目录」 button on the Plugins tab opens this)
 所有配置\备份\              settings backups
 所有配置\sounds\            custom sounds
 全部日志\                    runtime log — check here first
@@ -166,4 +166,4 @@ Released under [GNU AGPL-3.0](LICENSE). You may use, modify and redistribute it 
 
 ## Version
 
-Latest release **v1.34** (in-app `1.34.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).
+Latest release **v1.35** (in-app `1.35.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).

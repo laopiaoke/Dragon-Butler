@@ -262,6 +262,40 @@
             <Setter Property="Padding" Value="12,9,12,9"/>
         </Style>
 
+        <!-- v1.35：设置页改成卡片墙之后，卡里的一行设置。
+             不再给每行套一块浅底的方块——卡自己已经是浅底了，行再套一层就变成「盒子里的盒子」，
+             一行一条横线似的方块叠起来，正是用户说的「一个一个长条」。
+             现在只靠留白和一条极淡的分隔线分区，最后一行不画线（画了会顶到卡的圆角上）。 -->
+        <Style x:Key="SetRow" TargetType="Border">
+            <Setter Property="Padding" Value="16,11,16,11"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+
+        <!-- 同一张卡里的最后一行：不画底部分隔线 -->
+        <Style x:Key="SetRowLast" TargetType="Border" BasedOn="{StaticResource SetRow}">
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <!-- 一行设置的名字 -->
+        <Style x:Key="SetLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="Margin" Value="0,0,12,0"/>
+        </Style>
+
+        <!-- 一行设置的补充说明：只在真的需要解释时才写，写完就收嘴 -->
+        <Style x:Key="SetHint" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,4,0,0"/>
+            <Setter Property="LineHeight" Value="16"/>
+        </Style>
+
         <!-- 开关（§4：38×21，轨道圆角 12，滑块 15，切换 120ms 缓动） -->
         <Style x:Key="SwitchStyle" TargetType="ToggleButton">
             <Setter Property="Cursor" Value="Hand"/>
@@ -995,7 +1029,10 @@
                  三个页面都一样宽，靠 PageHost 下每个页面的 TranslateTransform 做横移；
                  PageClip 负责裁掉露在外面的部分，切换时 260ms 缓出，手感接近手机。 -->
             <!-- v1.22：触摸板/触屏横滑也能换页（IsManipulationEnabled）。
-                 鼠标拖动不做：那会和卡片里的按钮、格子的长按拖拽抢事件。 -->
+                 v1.35：鼠标也能拖着换页了（用户要的「视图滑动切换」）。
+                 当年的顾虑是「会和卡片里的按钮、格子的长按拖拽抢事件」——解法是按下时什么都不做：
+                 先只记坐标，横向真拖出 40px 才夺过鼠标；按钮的点击、格子的长按拖拽都在那之前各自开始了，
+                 谁先抓住鼠标谁说了算（Mouse.Captured 已经有别人时我们直接放弃）。 -->
             <!-- v1.22：三页的底比卡片更暗一层。
                  以前内容区直接坐在窗口底色上（#0D0F13），卡片是 #16191F——
                  亮度只差 9 级，卡片之间的 10px 缝隙几乎看不出边界，
@@ -1006,7 +1043,10 @@
                     IsManipulationEnabled="True"
                     ManipulationStarting="PageClip_ManipulationStarting"
                     ManipulationDelta="PageClip_ManipulationDelta"
-                    ManipulationCompleted="PageClip_ManipulationCompleted">
+                    ManipulationCompleted="PageClip_ManipulationCompleted"
+                    PreviewMouseLeftButtonDown="PageClip_PreviewMouseLeftButtonDown"
+                    PreviewMouseMove="PageClip_PreviewMouseMove"
+                    PreviewMouseLeftButtonUp="PageClip_PreviewMouseLeftButtonUp">
                 <!-- 三页叠在同一个格子里，各自用 TranslateTransform 平移：
                      当前页在 0，右邻在 +1 屏，左邻在 -1 屏。
                      不用「三列并排 + 整体平移」，是因为列宽要等于可视区宽度，
@@ -1363,20 +1403,9 @@
                                              这句话删掉不损失信息；代码保留控件，仍在跑/度假时用它报个别的情况。 -->
                                         <TextBlock x:Name="TbQueueStatus" VerticalAlignment="Center" Visibility="Collapsed"
                                                    FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        <!-- v1.30：这张卡上的格子墙搬进独立窗口之后，这里放一颗齿轮当入口。
-                                             放在「计划」左边第一位：「配置」是这张卡最主要的动作，
-                                             其余五个都是「看一眼」或者「定某个规矩」。 -->
-                                        <Button x:Name="BtnOpenTrayConfig" Style="{StaticResource MiniAction}"
-                                                Margin="10,0,0,0" Click="BtnOpenTrayConfig_Click"
-                                                ToolTip="打开托管配置窗口：拖拽排序、双击启动、右键改设置">
-                                            <StackPanel Orientation="Horizontal">
-                                                <Path Data="M10,3.2 A2.4,2.4 0 1 0 10,8 A2.4,2.4 0 1 0 10,3.2 M10,0.6 L10,2.1 M10,9.1 L10,10.6 M1.5,5.6 L3,5.6 M17,5.6 L18.5,5.6 M4,1.6 L5,2.6 M15,8.6 L16,9.6 M4,9.6 L5,8.6 M15,2.6 L16,1.6"
-                                                      Stroke="{DynamicResource BrandBrush}" StrokeThickness="1.4"
-                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                                      Width="12" Height="11" Stretch="Uniform" VerticalAlignment="Center"/>
-                                                <TextBlock Text="配置" Margin="5,0,0,0" VerticalAlignment="Center"/>
-                                            </StackPanel>
-                                        </Button>
+                                        <!-- v1.35：「配置」从标题行搬到卡片中间那块空白里（见下面 Grid.Row="2"）。
+                                             它会占掉整张卡最显眼的位置，而标题行那一排全是 26 高的小按钮——
+                                             把这张卡最主要的动作做成其中最不起眼的一个，是反的。 -->
                                         <Button x:Name="BtnWeeklyPlan" Content="计划" Style="{StaticResource MiniAction}"
                                                 Margin="10,0,0,0" Click="BtnWeeklyPlan_Click"
                                                 ToolTip="按星期配置每天跑哪些工具（只影响定时触发）"/>
@@ -1453,7 +1482,27 @@
                                      这张卡从「半屏的格子墙」缩成一行摘要 + 一颗「配置」按钮——
                                      格子墙在启动页上占的高度比它传达的信息多，
                                      而「改哪个工具怎么跑」本来也不是一打开就要做的事。
-                                     下面这块留空但不删：老代码里还有引用，删了要改十几处。 -->
+                                     v1.35：这一行原来是折起来的格子墙，现在是「配置」按钮的家。
+                                     这一行是 *（吃掉剩余高度），所以按钮正好落在卡片中间的空白里——
+                                     标题下面、按日计划上面，整张卡最空也最显眼的地方。 -->
+                                <Grid Grid.Row="2" Margin="0,10,0,10">
+                                    <Button x:Name="BtnOpenTrayConfig" Style="{StaticResource LaunchGhost}"
+                                            Height="38" MinWidth="132" Padding="16,0"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                                            Click="BtnOpenTrayConfig_Click"
+                                            ToolTip="打开托管配置窗口：拖拽排序、双击启动、右键改设置">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Data="M10,3.2 A2.4,2.4 0 1 0 10,8 A2.4,2.4 0 1 0 10,3.2 M10,0.6 L10,2.1 M10,9.1 L10,10.6 M1.5,5.6 L3,5.6 M17,5.6 L18.5,5.6 M4,1.6 L5,2.6 M15,8.6 L16,9.6 M4,9.6 L5,8.6 M15,2.6 L16,1.6"
+                                                  Stroke="{DynamicResource BrandBrush}" StrokeThickness="1.4"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                  Width="13" Height="12" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <TextBlock Text="配置" Margin="7,0,0,0" VerticalAlignment="Center"
+                                                       FontSize="13"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <!-- 下面这块留空但不删：老代码里还有引用，删了要改十几处。 -->
                                 <Grid Grid.Row="2" Margin="0,10,0,0" Visibility="Collapsed">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
@@ -1807,486 +1856,25 @@
                             <TranslateTransform x:Name="ShiftSettings" X="980"/>
                         </ScrollViewer.RenderTransform>
                         <Grid x:Name="PageSettings" Margin="14,10,14,88">
-                            <!-- v1.32：设置页从「五条等宽长条摞在一起」改成卡片墙。
-                                 v1.34：米游社搬成插件、插件搬去独立一页，这里只剩通知 / 外观 / 高级 / 系统四块。
-                                 四块现在都占整行——没有并排的了，再把其中一块切成半宽只会显得它比别的矮。 -->
+                            <!-- v1.35：设置页从「一摞等宽长条」改成两列卡片墙。
+                                 一张卡一件事：卡里有图标、有副标题、有一根细线把标题和内容分开，
+                                 行与行之间靠留白与极淡分隔线区分，不再每一行套一个方块。
+                                 左列是「跑的时候怎么兜底」，右列是「平时怎么用」——
+                                 两列长短天然不一样；一样长反而说明分组是凑出来的。
+                                 通知整块占满第一排：它里面有一排渠道胶囊、各自的地段表单，半宽会挤成三行。 -->
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
-                                <!-- 单列。原来那个 1:2 是为了让插件卡和通知卡并排，插件卡走了就用不上了。 -->
+                                <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- v1.34：插件卡搬去独立的一页了（导航第四项）。这里只剩通知、外观、高级、系统四块。 -->
-                            <!-- 第三层：高级设置（默认折叠） -->
-
-                    <!-- v1.33：外观。主题开关从标题栏搬走「自定义」之后，它需要一个落脚处。
-                         单独一张卡而不是塞进系统里：它不是开关，是一套配色方案（底色/图/叠色/明暗），
-                         点开是一个窗口——放在「系统」里会让人以为又是一项开关。 -->
-                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
-                        <Grid Margin="16,12,16,12">
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="外观" FontSize="13.5" FontWeight="SemiBold"
-                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                <TextBlock x:Name="TbAppearanceSummary" FontSize="10.5" Margin="0,4,0,0"
-                                           TextWrapping="Wrap" Foreground="{DynamicResource TextTertiaryBrush}"/>
-                            </StackPanel>
-                            <Button x:Name="BtnCustomTheme" Content="自定义配色…" Style="{StaticResource MiniAction}"
-                                    HorizontalAlignment="Right" VerticalAlignment="Center"
-                                    Click="BtnCustomTheme_Click"
-                                    ToolTip="选底色、放一张背景图、调叠色深浅、强制明暗"/>
-                        </Grid>
-                    </Border>
-
-                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
-                        <StackPanel>
-                            <Button x:Name="BtnFoldAdvanced" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
-                                <StackPanel Orientation="Horizontal">
-                                    <Path Data="M12 3l7 4v5c0 4-3 7-7 9-4-2-7-5-7-9V7z" Stroke="{DynamicResource TextTertiaryBrush}"
-                                          StrokeThickness="1.6" Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
-                                    <TextBlock Text="高级设置" FontSize="13.5" FontWeight="SemiBold" Margin="8,0,0,0"
-                                               Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="可选，日常不用改" FontSize="10.5" Margin="8,0,0,0"
-                                               Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </Button>
-                            <Grid x:Name="AdvancedBody" Margin="16,0,16,14" Visibility="Collapsed">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-
-                                <!-- v1.26：每一项一块自己的底。原来是一整片两列表格，
-                                     靠 6px 空白分行，在深色底上读起来是一整块文字墙。 -->
-
-                                <!-- v1.10 / G1：收益账本（默认关） -->
-                                <Border Grid.Row="8" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="收益账本" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="从 BGI 日志里累计摩拉/狗粮经验/拾取材料，队列结束时报一句" FontSize="10"
-                                                       Margin="0,3,10,0" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <ToggleButton x:Name="TgHarvest" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHarvest_Click"/>
-                                    </Grid>
-                                </Border>
-
-                                <!-- v1.14：日志规则入口。规则本体在独立窗口——
-                                     这张卡已经有 10 行了，再塞一个列表会把「高级设置」变成第二张主界面。 -->
-                                <Border Grid.Row="8" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="日志规则" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="日志出现某个词就提醒 / 留现场 / 停下队列；可先扫今天的日志试一次" FontSize="10"
-                                                       Margin="0,3,10,0" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <Button x:Name="BtnLogRules" Content="配置…" Style="{StaticResource MiniAction}"
-                                                HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                Click="BtnLogRules_Click"/>
-                                    </Grid>
-                                </Border>
-
-                                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <TextBlock Text="守护（存活/内存/截图）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgSentinel" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSentinel_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="崩溃后自动重启" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgAutoRestart" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoRestart_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <TextBlock Text="截图冻结检测" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgScreenshot" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgScreenshot_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="防打扰（定时等空闲）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgIdleGuard" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgIdleGuard_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <TextBlock Text="定时前清理残留进程" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgAutoKill" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoKill_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="失败也执行跑完动作" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgAfterRunOnFailure" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAfterRunOnFailure_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="3" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <TextBlock Text="失败策略" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ComboBox x:Name="CbFailStrategy" Style="{StaticResource ThemedCombo}" Width="120" Height="30"
-                                                  HorizontalAlignment="Right" SelectionChanged="CbFailStrategy_SelectionChanged">
-                                            <ComboBoxItem Content="跳过继续" Tag="Skip"/>
-                                            <ComboBoxItem Content="中止队列" Tag="Abort"/>
-                                        </ComboBox>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="3" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="工具间隔" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ComboBox x:Name="CbInterval" Style="{StaticResource ThemedCombo}" Width="120" Height="30"
-                                                  HorizontalAlignment="Right" SelectionChanged="CbInterval_SelectionChanged">
-                                            <ComboBoxItem Content="0 分钟" Tag="0"/>
-                                            <ComboBoxItem Content="2 分钟" Tag="2"/>
-                                            <ComboBoxItem Content="5 分钟" Tag="5"/>
-                                            <ComboBoxItem Content="10 分钟" Tag="10"/>
-                                        </ComboBox>
-                                    </Grid>
-                                </Border>
-
-                                <Border Grid.Row="4" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="挂机护航" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="队列运行时阻止系统睡眠、更新重启与屏保" FontSize="10"
-                                                       Margin="0,3,10,0" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <ToggleButton x:Name="TgKeepAwake" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgKeepAwake_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="4" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="夜间息屏" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="运行指定分钟数后关闭显示器，系统保持唤醒" FontSize="10"
-                                                       Margin="0,3,10,0" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                            <TextBox x:Name="TbNightMinutes" Style="{StaticResource InputBox}" Width="64" Height="30"
-                                                     Padding="4,0" FontSize="12" TextAlignment="Center"
-                                                     LostFocus="TbNightMinutes_LostFocus"/>
-                                            <TextBlock Text="分" FontSize="10.5" Margin="4,0,8,0" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                            <ToggleButton x:Name="TgNightScreen" Style="{StaticResource SwitchStyle}"
-                                                          VerticalAlignment="Center" Click="TgNightScreen_Click"/>
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="5" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="自动终止疑似挂起" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="默认只暂停队列等你处理；打开后结束进程并按失败策略继续" FontSize="10"
-                                                       Margin="0,3,10,0" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <ToggleButton x:Name="TgStallAutoKill" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStallAutoKill_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="5" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <TextBlock VerticalAlignment="Center" FontSize="10" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource TextTertiaryBrush}"
-                                               Text="挂起判定：进程存活，但 CPU 低于 5% 且日志不增长持续 3 分钟。"/>
-                                </Border>
-
-                                <Border Grid.Row="6" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="晨报" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="每天首次打开时用一句话汇报昨天跑了什么" FontSize="10"
-                                                       Margin="0,3,10,0" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <ToggleButton x:Name="TgMorningReport" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMorningReport_Click"/>
-                                    </Grid>
-                                </Border>
-
-                                <Border Grid.Row="6" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="周报" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="每周首次打开时汇报近七天：哪天跑得多、成功率、总耗时" FontSize="10"
-                                                       Margin="0,3,10,0" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        </StackPanel>
-                                        <ToggleButton x:Name="TgWeeklyReport" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgWeeklyReport_Click"/>
-                                    </Grid>
-                                </Border>
-
-                                <Border Grid.Row="7" Grid.ColumnSpan="2" Style="{StaticResource SettingCard}" Margin="0,0,0,4">
-                                    <StackPanel>
-                                        <TextBlock Text="事件推送（可选）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                        <TextBlock Margin="0,4,0,0" FontSize="10.5" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   Text="可选。BetterGI 设置 → 通知 → Webhook 填入下列地址可让完成事件更及时；不填软件会自动读取 BGI 日志识别进度。"/>
-                                        <Grid Margin="0,7,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox x:Name="TbEventUrl" Style="{StaticResource InputBox}" Height="30" IsReadOnly="True"/>
-                                            <Button Grid.Column="1" Content="复制地址" Style="{StaticResource MiniAction}" Margin="8,0,0,0"
-                                                    Click="BtnCopyWebhook_Click"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- ===== E 系统（折叠，默认收起；6 开关两列网格）===== -->
-                            <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0">
-                        <StackPanel>
-                            <Button x:Name="BtnFoldSystem" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
-                                <StackPanel Orientation="Horizontal">
-                                    <Path Data="M3 5h18v14H3z M3 9h18" Stroke="{DynamicResource TextTertiaryBrush}"
-                                          StrokeThickness="1.75" StrokeStartLineCap="Round" StrokeLineJoin="Round"
-                                          Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
-                                    <TextBlock Text="系统" FontSize="13.5" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </Button>
-                            <Grid x:Name="SystemBody" Margin="16,0,16,14" Visibility="Collapsed">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-
-                                <!-- v1.26：每一项一块自己的底（见 SettingCard 样式的注释）。 -->
-                                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <TextBlock Text="开机自动启动" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgAutoStart" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoStart_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="软件启动后自动跑" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgAutoRun" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoRun_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <TextBlock Text="关闭时驻留托盘" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgStayTray" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStayTray_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="度假模式（暂停所有定时）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgVacation" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgVacation_Click"/>
-                                    </Grid>
-                                </Border>
-
-                                <!-- v1.21 内存方案 B：默认关。理由写在这里，省得以后有人以为是漏了默认开。 -->
-                                <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="收进托盘时释放窗口" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                            <ToggleButton x:Name="TgTrimToTray" Style="{StaticResource SwitchStyle}"
-                                                          HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgTrimToTray_Click"/>
-                                        </Grid>
-                                        <TextBlock x:Name="TbTrimHint" FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,3,0,0"
-                                                   Text="实测只省 3.7 MB，但再打开一次要多等 1 秒多。想腾内存再开。"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="按键音效" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgSound" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSound_Click"/>
-                                    </Grid>
-                                </Border>
-
-                                <!-- v1.7 F6：本机控制 API（默认关，令牌可复制） -->
-                                <Border Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="本机控制 API" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                            <ToggleButton x:Name="TgControlApi" Style="{StaticResource SwitchStyle}"
-                                                          HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgControlApi_Click"/>
-                                        </Grid>
-                                        <TextBlock Text="让脚本和 AI 助手用自然语言以外的方式指挥它：开跑、停止、查状态。只监听 127.0.0.1，关着时连「有这个接口」都不会暴露。"
-                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
-                                        <Grid x:Name="ApiTokenRow" Margin="0,6,0,0" Visibility="Collapsed">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="令牌" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <Border Grid.Column="1" Background="{DynamicResource InsetBrush}" CornerRadius="6" Padding="8,5">
-                                                <TextBlock x:Name="TbApiToken" FontFamily="Consolas" FontSize="11.5"
-                                                           Foreground="{DynamicResource TextPrimaryBrush}"
-                                                           TextTrimming="CharacterEllipsis"/>
-                                            </Border>
-                                            <Button x:Name="BtnCopyToken" Grid.Column="2" Content="复制" Style="{StaticResource LinkButton}"
-                                                    Margin="8,0,0,0" VerticalAlignment="Center" Click="BtnCopyToken_Click"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- v1.7 F7：局域网只读面板（默认关，只读不给控制） -->
-                                <Border Grid.Row="4" Grid.ColumnSpan="2" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="手机看进度（局域网只读面板）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                            <ToggleButton x:Name="TgLanPanel" Style="{StaticResource SwitchStyle}"
-                                                          HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgLanPanel_Click"/>
-                                        </Grid>
-                                        <TextBlock x:Name="TbLanPanelHint"
-                                                   Text="打开后同一 Wi-Fi 下的手机浏览器可以看进度和最近一条事件，但没有任何按钮——只能看，不能指挥。"
-                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- v1.8 F9：全局热键（默认关，游戏反作弊容忍度不可控） -->
-                                <Border Grid.Row="5" Grid.ColumnSpan="2" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="全局热键（游戏里也能按）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                            <ToggleButton x:Name="TgHotkey" Style="{StaticResource SwitchStyle}"
-                                                          HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHotkey_Click"/>
-                                        </Grid>
-                                        <TextBlock Text="默认关：全局热键会霸占组合键，部分游戏的反作弊也会盯着这类注册，要不要用由你决定。"
-                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
-                                        <Grid x:Name="HotkeyRow" Margin="0,6,0,0" Visibility="Collapsed">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="开跑" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <TextBox x:Name="TbHotkeyStart" Grid.Column="1" Text="Ctrl+Alt+R" FontSize="11.5"
-                                                     LostFocus="TbHotkeyStart_LostFocus"/>
-                                            <TextBlock Grid.Column="2" Text="停止" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="12,0,8,0"/>
-                                            <TextBox x:Name="TbHotkeyStop" Grid.Column="3" Text="Ctrl+Alt+S" FontSize="11.5"
-                                                     LostFocus="TbHotkeyStop_LostFocus"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- v1.8 F11/F14：浮条与语音（都默认关） -->
-                                <Border Grid.Row="6" Grid.Column="0" Style="{StaticResource SettingCard}" Margin="0,0,7,8">
-                                    <Grid>
-                                        <TextBlock Text="迷你浮条（只显示进度）" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgMiniBar" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMiniBar_Click"/>
-                                    </Grid>
-                                </Border>
-                                <Border Grid.Row="6" Grid.Column="1" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <Grid>
-                                        <TextBlock Text="跑完说一句话" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <ToggleButton x:Name="TgSpeech" Style="{StaticResource SwitchStyle}"
-                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSpeech_Click"/>
-                                    </Grid>
-                                </Border>
-
-                                <!-- v1.17：备份与恢复（唯一一个「点一下会换掉现有东西」的入口，所以措辞刻意啰嗦） -->
-                                <Border Grid.Row="7" Grid.ColumnSpan="2" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="备份设置" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <Button x:Name="BtnBackupNow" Content="存一份" Style="{StaticResource MiniAction}"
-                                                        Height="26" Padding="10,0" Click="BtnBackupNow_Click"/>
-                                                <Button x:Name="BtnBackupRestore" Content="从包恢复" Style="{StaticResource MiniAction}"
-                                                        Height="26" Padding="10,0" Margin="6,0,0,0" Click="BtnBackupRestore_Click"/>
-                                                <Button x:Name="BtnBackupOpen" Content="打开文件夹" Style="{StaticResource MiniAction}"
-                                                        Height="26" Padding="10,0" Margin="6,0,0,0" Click="BtnBackupOpen_Click"/>
-                                            </StackPanel>
-                                        </Grid>
-                                        <TextBlock x:Name="TbBackupHint"
-                                                   Text="把设置、配置组常用、运行台账和个人收益记录打成一个 zip；一条龙配置要不要一起带上，在弹窗里选。恢复前会先把现在这份备份一次。"
-                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- v1.19：开跑前体检。放这里而不是队列卡标题行——那边已经有五个按钮，
-                                     再加一个就把标题压没了（v1.15 修过一次）。真正的拦截在「一键开跑」上，
-                                     这里只是一个能随时自己打开看的入口。 -->
-                                <Border Grid.Row="8" Grid.ColumnSpan="2" Style="{StaticResource SettingCard}" Margin="0,0,0,8">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="开跑前体检" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <Button x:Name="BtnPreflight" Content="检查一下" Style="{StaticResource MiniAction}"
-                                                        Height="26" Padding="10,0" Click="BtnPreflight_Click"/>
-                                            </StackPanel>
-                                        </Grid>
-                                        <TextBlock x:Name="TbPreflightHint"
-                                                   Text="看路径、队列、配置组、通知有没有没弄好的地方。只读，不改任何东西；开跑时也会自动查一遍，只有真挡路的才会拦你。"
-                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- v1.20：出门前看一眼。和体检同一套位置的道理——它是一年用一次的东西，
-                                     不该占主界面的固定面积。 -->
-                                <Border Grid.Row="9" Grid.ColumnSpan="2" Style="{StaticResource SettingCard}" Margin="0,0,0,0">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="出门前看一眼" FontSize="12.5" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <Button x:Name="BtnHandover" Content="看这几天会发生什么" Style="{StaticResource MiniAction}"
-                                                        Height="26" Padding="10,0" Click="BtnHandover_Click"/>
-                                            </StackPanel>
-                                        </Grid>
-                                        <TextBlock x:Name="TbHandoverHint"
-                                                   Text="先说要出几天，它把这段时间里会发生什么、哪几件会让这趟白跑，列成人话。只读。"
-                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,3,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- ===== F 通知（折叠，默认收起）=====
-                         v1.34：单列排第一排了。原来它和插件卡并排（Row 0 / Column 1），
-                         插件搬走后左边空着，它就该回到左边缘。 -->
-                            <Border x:Name="NotifyCard" Grid.Row="0" Style="{StaticResource Card}"
+                            <!-- ===== F 通知（折叠，默认收起）=====
+                                 v1.35：整块挪到第一排占满，后面四张卡按「守护 / 界面 / 节奏 / 接口」两两并排。 -->
+                            <Border x:Name="NotifyCard" Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource Card}"
                             Margin="0,0,0,0" Padding="0" VerticalAlignment="Top">
                         <StackPanel>
                             <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
@@ -2516,6 +2104,456 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+
+
+                            <!-- ===== 守护与恢复 ===== -->
+                            <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <Grid Margin="16,13,16,12">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
+                                                <Path Data="M12 3l7 4v5c0 4-3 7-7 9-4-2-7-5-7-9V7z"
+                                                      Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.5"
+                                                      StrokeLineJoin="Round"
+                                                      Width="14" Height="14" Stretch="Uniform"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="守护与恢复" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="跑的时候它盯着" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="守护（存活/内存/截图）"/>
+                                            <ToggleButton x:Name="TgSentinel" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSentinel_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="崩溃后自动重启"/>
+                                            <ToggleButton x:Name="TgAutoRestart" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoRestart_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="截图冻结检测"/>
+                                            <ToggleButton x:Name="TgScreenshot" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgScreenshot_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="自动终止疑似挂起"/>
+                                                <ToggleButton x:Name="TgStallAutoKill" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStallAutoKill_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="默认只暂停队列等你处理；打开后结束进程并按失败策略继续"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="定时前清理残留进程"/>
+                                                <ToggleButton x:Name="TgAutoKill" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoKill_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="开跑前先把上一局没退干净的进程收掉，免得它和新的抢同一份存档。"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRowLast}">
+                                        <TextBlock Style="{StaticResource SetHint}" Margin="0"
+                                                   Text="「挂起」的判定：进程还活着，但 CPU 低于 5% 且日志不增长，已经持续 3 分钟。"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- ===== 启动与界面 ===== -->
+                            <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource Card}" Margin="10,10,0,0" Padding="0" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <Grid Margin="16,13,16,12">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
+                                                <Path Data="M3,9.5 L10,3 L17,9.5 L17,16.5 L3,16.5 Z"
+                                                      Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.5"
+                                                      StrokeLineJoin="Round"
+                                                      Width="14" Height="14" Stretch="Uniform"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="启动与界面" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="平时怎么用" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="外观"/>
+                                                <Button x:Name="BtnCustomTheme" Content="自定义配色…" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                        Click="BtnCustomTheme_Click"
+                                                        ToolTip="选底色、放一张背景图、调叠色深浅、强制明暗"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TbAppearanceSummary" Style="{StaticResource SetHint}"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="开机自动启动"/>
+                                            <ToggleButton x:Name="TgAutoStart" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoStart_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="软件启动后自动跑"/>
+                                            <ToggleButton x:Name="TgAutoRun" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoRun_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="关闭时驻留托盘"/>
+                                            <ToggleButton x:Name="TgStayTray" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStayTray_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="度假模式（暂停所有定时）"/>
+                                            <ToggleButton x:Name="TgVacation" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgVacation_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="收进托盘时释放窗口"/>
+                                                <ToggleButton x:Name="TgTrimToTray" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgTrimToTray_Click"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TbTrimHint" Style="{StaticResource SetHint}"
+                                                       Text="实测只省 3.7 MB，但再打开一次要多等 1 秒多。想腾内存再开。"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="按键音效"/>
+                                            <ToggleButton x:Name="TgSound" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSound_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="迷你浮条（只显示进度）"/>
+                                            <ToggleButton x:Name="TgMiniBar" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMiniBar_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRowLast}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="跑完说一句话"/>
+                                            <ToggleButton x:Name="TgSpeech" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSpeech_Click"/>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- ===== 节奏与报告 ===== -->
+                            <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <Grid Margin="16,13,16,12">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
+                                                <Path Data="M3,13 L6.5,13 L9,6.5 L13,16 L15.5,11 L18,11"
+                                                      Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.6"
+                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                                      Width="14" Height="14" Stretch="Uniform"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="节奏与报告" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="怎么排、跑完说什么" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="防打扰（定时等空闲）"/>
+                                                <ToggleButton x:Name="TgIdleGuard" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgIdleGuard_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="到点了先看你还在不在用电脑，正在用就等一等。"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="失败策略"/>
+                                            <ComboBox x:Name="CbFailStrategy" Style="{StaticResource ThemedCombo}" Width="120" Height="30"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center" SelectionChanged="CbFailStrategy_SelectionChanged">
+                                                <ComboBoxItem Content="跳过继续" Tag="Skip"/>
+                                                <ComboBoxItem Content="中止队列" Tag="Abort"/>
+                                            </ComboBox>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="工具间隔"/>
+                                            <ComboBox x:Name="CbInterval" Style="{StaticResource ThemedCombo}" Width="120" Height="30"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center" SelectionChanged="CbInterval_SelectionChanged">
+                                                <ComboBoxItem Content="0 分钟" Tag="0"/>
+                                                <ComboBoxItem Content="2 分钟" Tag="2"/>
+                                                <ComboBoxItem Content="5 分钟" Tag="5"/>
+                                                <ComboBoxItem Content="10 分钟" Tag="10"/>
+                                            </ComboBox>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="失败也执行跑完动作"/>
+                                            <ToggleButton x:Name="TgAfterRunOnFailure" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAfterRunOnFailure_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="挂机护航"/>
+                                                <ToggleButton x:Name="TgKeepAwake" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgKeepAwake_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="队列运行时阻止系统睡眠、更新重启与屏保"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="夜间息屏"/>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                    <TextBox x:Name="TbNightMinutes" Style="{StaticResource InputBox}" Width="64" Height="30"
+                                                             Padding="4,0" FontSize="12" TextAlignment="Center"
+                                                             LostFocus="TbNightMinutes_LostFocus"/>
+                                                    <TextBlock Text="分" FontSize="10.5" Margin="4,0,8,0" VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                                    <ToggleButton x:Name="TgNightScreen" Style="{StaticResource SwitchStyle}"
+                                                                  VerticalAlignment="Center" Click="TgNightScreen_Click"/>
+                                                </StackPanel>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="运行指定分钟数后关闭显示器，系统保持唤醒"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="晨报"/>
+                                                <ToggleButton x:Name="TgMorningReport" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMorningReport_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="每天首次打开时用一句话汇报昨天跑了什么"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="周报"/>
+                                                <ToggleButton x:Name="TgWeeklyReport" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgWeeklyReport_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="每周首次打开时汇报近七天：哪天跑得多、成功率、总耗时"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="收益账本"/>
+                                                <ToggleButton x:Name="TgHarvest" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHarvest_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="从 BGI 日志里累计摩拉/狗粮经验/拾取材料，队列结束时报一句"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="日志规则"/>
+                                                <Button x:Name="BtnLogRules" Content="配置…" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                        Click="BtnLogRules_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="日志出现某个词就提醒 / 留现场 / 停下队列；可先扫今天的日志试一次"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- v1.35：本机事件推送地址。以前它埋在两列长表的一格里，
+                                         现在单独一行——它是「让 BGI 更及时地告诉我进度」的唯一入口，不该找不到。 -->
+                                    <Border Style="{StaticResource SetRowLast}">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="事件推送地址（可选）"/>
+                                            <TextBlock Style="{StaticResource SetHint}" Text="BetterGI 设置 → 通知 → Webhook 填这个地址，完成事件会更及时；不填也能靠读 BGI 日志识别进度。"/>
+                                            <Grid Margin="0,7,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="TbEventUrl" Style="{StaticResource InputBox}" Height="30" IsReadOnly="True"/>
+                                                <Button Grid.Column="1" Content="复制地址" Style="{StaticResource MiniAction}" Margin="8,0,0,0"
+                                                        Click="BtnCopyWebhook_Click"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- ===== 接口与维护 ===== -->
+                            <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource Card}" Margin="10,10,0,0" Padding="0" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <Grid Margin="16,13,16,12">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
+                                                <Path Data="M3,7 L10,7 L10,3.5 M17,13 L10,13 L10,16.5 M3,7 L3,17 L17,17 L17,3.5 L10,3.5"
+                                                      Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.5"
+                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                                      Width="14" Height="14" Stretch="Uniform"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="接口与维护" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="默认都关着" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="本机控制 API"/>
+                                                <ToggleButton x:Name="TgControlApi" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgControlApi_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}"
+                                                       Text="让脚本和 AI 助手用自然语言以外的方式指挥它：开跑、停止、查状态。只监听 127.0.0.1，关着时连「有这个接口」都不会暴露。"/>
+                                            <Grid x:Name="ApiTokenRow" Margin="0,8,0,0" Visibility="Collapsed">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="令牌" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"
+                                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                <Border Grid.Column="1" Background="{DynamicResource InsetBrush}" CornerRadius="6" Padding="8,5">
+                                                    <TextBlock x:Name="TbApiToken" FontFamily="Consolas" FontSize="11.5"
+                                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                </Border>
+                                                <Button x:Name="BtnCopyToken" Grid.Column="2" Content="复制" Style="{StaticResource LinkButton}"
+                                                        Margin="8,0,0,0" VerticalAlignment="Center" Click="BtnCopyToken_Click"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="手机看进度（局域网只读面板）"/>
+                                                <ToggleButton x:Name="TgLanPanel" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgLanPanel_Click"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TbLanPanelHint" Style="{StaticResource SetHint}"
+                                                       Text="打开后同一 Wi-Fi 下的手机浏览器可以看进度和最近一条事件，但没有任何按钮——只能看，不能指挥。"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="全局热键（游戏里也能按）"/>
+                                                <ToggleButton x:Name="TgHotkey" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHotkey_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource SetHint}"
+                                                       Text="默认关：全局热键会霸占组合键，部分游戏的反作弊也会盯着这类注册，要不要用由你决定。"/>
+                                            <Grid x:Name="HotkeyRow" Margin="0,8,0,0" Visibility="Collapsed">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="开跑" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"
+                                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                <TextBox x:Name="TbHotkeyStart" Grid.Column="1" Text="Ctrl+Alt+R" FontSize="11.5"
+                                                         Style="{StaticResource InputBox}" Height="28"
+                                                         LostFocus="TbHotkeyStart_LostFocus"/>
+                                                <TextBlock Grid.Column="2" Text="停止" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"
+                                                           VerticalAlignment="Center" Margin="12,0,8,0"/>
+                                                <TextBox x:Name="TbHotkeyStop" Grid.Column="3" Text="Ctrl+Alt+S" FontSize="11.5"
+                                                         Style="{StaticResource InputBox}" Height="28"
+                                                         LostFocus="TbHotkeyStop_LostFocus"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="备份设置"/>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                    <Button x:Name="BtnBackupNow" Content="存一份" Style="{StaticResource MiniAction}"
+                                                            Height="26" Padding="10,0" Click="BtnBackupNow_Click"/>
+                                                    <Button x:Name="BtnBackupRestore" Content="从包恢复" Style="{StaticResource MiniAction}"
+                                                            Height="26" Padding="10,0" Margin="6,0,0,0" Click="BtnBackupRestore_Click"/>
+                                                    <Button x:Name="BtnBackupOpen" Content="打开文件夹" Style="{StaticResource MiniAction}"
+                                                            Height="26" Padding="10,0" Margin="6,0,0,0" Click="BtnBackupOpen_Click"/>
+                                                </StackPanel>
+                                            </Grid>
+                                            <TextBlock x:Name="TbBackupHint" Style="{StaticResource SetHint}"
+                                                       Text="把设置、配置组常用、运行台账和个人收益记录打成一个 zip；一条龙配置要不要一起带上，在弹窗里选。恢复前会先把现在这份备份一次。"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="开跑前体检"/>
+                                                <Button x:Name="BtnPreflight" Content="检查一下" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Center" Click="BtnPreflight_Click"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TbPreflightHint" Style="{StaticResource SetHint}"
+                                                       Text="看路径、队列、配置组、通知有没有没弄好的地方。只读，不改任何东西；开跑时也会自动查一遍，只有真挡路的才会拦你。"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRowLast}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="出门前看一眼"/>
+                                                <Button x:Name="BtnHandover" Content="看这几天会发生什么" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Center" Click="BtnHandover_Click"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TbHandoverHint" Style="{StaticResource SetHint}"
+                                                       Text="先说要出几天，它把这段时间里会发生什么、哪几件会让这趟白跑，列成人话。只读。"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
                         </Grid>
                     </ScrollViewer>
 
@@ -2622,22 +2660,23 @@
                         </Border>
 
                         <StackPanel x:Name="NavItemsHost" Orientation="Horizontal">
-                        <!-- 日志：一本翻开的书。
+                        <!-- 日志：一页带折角的纸 + 三行字。
                              v1.34 之前叫「运行」——那说的是「状态」，可这一页放的全是已经发生过的事：
-                             刚才跑了什么、时间账、决定清单。「日志」才对得上里面的内容。 -->
+                             刚才跑了什么、时间账、决定清单。「日志」才对得上里面的内容。
+                             v1.35：原来画的是「左右两半页」，在 18px 下两条竖边糊成一个方框，
+                             用户看不出那是书。现在用折角 + 三行字：纸的形状一眼认得出，三行字是「有内容」。
+                             行数用 3 而不是 4：18px 里 4 行线会连成一块灰。 -->
                         <RadioButton x:Name="SegPageRun" Tag="0"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="刚才跑了什么、今天的时间账">
                             <StackPanel>
-                                <Grid Width="18" Height="18" HorizontalAlignment="Center">
-                                    <!-- 左半页 + 右半页，中间留一道书脊 -->
-                                    <Path Data="M2,4.2 L8.4,3 L8.4,15 L2,16.2 Z"
-                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                                          StrokeThickness="1.4" StrokeLineJoin="Round" Stretch="Uniform"/>
-                                    <Path Data="M18,4.2 L11.6,3 L11.6,15 L18,16.2 Z"
-                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                                          StrokeThickness="1.4" StrokeLineJoin="Round" Stretch="Uniform"/>
-                                </Grid>
+                                <!-- 外框带折角，里面三行 -->
+                                <Path Data="M4,2.5 L11.5,2.5 L16,7 L16,17.5 L4,17.5 Z M11.5,2.5 L11.5,7 L16,7 M6.5,10 L13.5,10 M6.5,13 L13.5,13 M6.5,16 L10.5,16"
+                                      Width="18" Height="18" Stretch="Uniform"
+                                      HorizontalAlignment="Center"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                      StrokeThickness="1.4" StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                 <TextBlock Text="日志" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                             </StackPanel>

@@ -364,16 +364,9 @@ public class AppSettings
     /// </summary>
     public bool TrimToTrayEnabled { get; set; } = false;
 
-    /// <summary>
-    /// v1.28：这台机器上已经说过一次「关窗口不等于退出」。
-    ///
-    /// 那句话只在第一次有用：第一次是告知（人不知道窗口不见了程序还在），
-    /// 第二次就是啰嗦——每关一次弹一次，谁都会觉得这软件在耍赖。
-    /// 存进设置而不是只放内存，是因为「第一次」按机器算，不按进程算：
-    /// 每次重开程序都算第一次的话，这提示就永远弹不完。
-    /// </summary>
-    public bool TrayNoticeShown { get; set; } = false;
-
+    // v1.35：TrayNoticeShown 跟着「关窗口还在后台」那条提示一起删了。
+    // 那提示本身就绕过了用户意愿——它在人正看着屏幕的时候弹一条系统通知，
+    // 说的还是「你自己刚做的事」。老配置里多出来的这个键，System.Text.Json 会忽略。
     /// <summary>
     /// 跑完说一句话（默认关）。走 Windows 自带 SAPI，零依赖。
     /// 默认关是因为「突然出声」比「没有声音」更让人反感。

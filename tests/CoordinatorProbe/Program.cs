@@ -3029,11 +3029,14 @@ internal static class Program
 
         // 设置页：v1.34 起四块全占整行（米游社搬成插件、插件搬去独立一页，没有并排的了）。
         // 位置由 Grid.Row/Column 决定，跟标签在文件里的先后没关系——判标签顺序会自找麻烦。
-        Check("设置页/单列不再分左右", !mainXaml.Contains("<ColumnDefinition Width=\"2*\"/>"));
-        Check("设置页/四块都不再跨列", !mainXaml.Contains("Grid.ColumnSpan=\"2\" Style=\"{StaticResource Card}\""));
-        Check("设置页/通知排在第一排", mainXaml.Contains("x:Name=\"NotifyCard\" Grid.Row=\"0\""));
-        Check("设置页/高级设置占到第三排", mainXaml.Contains("<Border Grid.Row=\"2\" Style=\"{StaticResource Card}\""));
-        Check("设置页/系统在最后一排", mainXaml.Contains("<Border Grid.Row=\"3\" Style=\"{StaticResource Card}\""));
+        // v1.35：设置页从「四条等宽长条」改成两列卡片墙。判据跟着换：
+        // 不再看 Row 序号（卡会挪），只看「两列存在 + 四张卡两两并排 + 通知占满第一排」。
+        Check("设置页/两列卡片墙", mainXaml.Contains("<ColumnDefinition Width=\"*\"") && SliceBetween(mainXaml, "x:Name=\"PageSettings\"", "</Grid.ColumnDefinitions>").Contains("<ColumnDefinition Width=\"*\""));
+        Check("设置页/通知占满第一排", mainXaml.Contains("x:Name=\"NotifyCard\" Grid.Row=\"0\" Grid.ColumnSpan=\"2\""));
+        Check("设置页/守护与界面并排", mainXaml.Contains("<Border Grid.Row=\"1\" Grid.Column=\"0\"") && mainXaml.Contains("<Border Grid.Row=\"1\" Grid.Column=\"1\""));
+        Check("设置页/节奏与接口并排", mainXaml.Contains("<Border Grid.Row=\"2\" Grid.Column=\"0\"") && mainXaml.Contains("<Border Grid.Row=\"2\" Grid.Column=\"1\""));
+        Check("设置页/四张卡各有标题", new[] { "守护与恢复", "启动与界面", "节奏与报告", "接口与维护" }.All(t => mainXaml.Contains("Text=\"" + t + "\"")));
+        Check("设置页/不再是一条条浅底方块", !mainXaml.Contains("SetRow\"><Border Style=\"{StaticResource SettingCard}"));
         Check("设置页/米游社那张已经搬走", !mainXaml.Contains("BtnMiyousheLogin") && !mainXaml.Contains("BtnMiyousheSign"));
 
         // ---- 11h) v1.33 导航栏点得动了 + 主题开关 + 引导页不塞满 ----
@@ -3056,7 +3059,18 @@ internal static class Program
         Check("主题/投影用蓝色不用黑", mainXaml.Contains("Color=\"#FF1B3A6B\""));
         Check("主题/点图标能切", mainCs.Contains("Array.FindIndex(ThemeModes"));
         Check("主题/拖动也能切", mainCs.Contains("ThemeSlotAt(_themeThumbX)"));
-        Check("主题/切的时候图标分两层走", mainCs.Contains("private void PlayThemeParallax") && mainCs.Contains("Push(SunRays, -12, 0, ms, 20);"));
+        // v1.35：原来连图标本体一起推（IconDark/MoonPath 各 -7，嵌套叠加成 14px），
+        // 人看到的是「整组图标跟着气泡飞」。现在只推星星与光芒，距离 2~4px。
+        Check("主题/切的时候只有附件轻微错开",
+            mainCs.Contains("private void PlayThemeParallax") &&
+            mainCs.Contains("Push(SunRays, -4, 0, ms, 30);") &&
+            mainCs.Contains("Push(Star1, -4, -1.5, ms, 30);"));
+        // 本体一步都不许动：这两行只要回来，图标就又会被气泡拖着走。
+        Check("主题/本体不跟着气泡跑",
+            !mainCs.Contains("Push(IconDark,") &&
+            !mainCs.Contains("Push(MoonPath,") &&
+            !mainCs.Contains("Push(IconLight,") &&
+            !mainCs.Contains("Push(SunCore,"));
         // 「点了没反应」的根治：标题栏那层挂着 DragMove，按下必须在这一层吃掉，否则窗口跟着手跑
         Check("主题/按下不把窗口拖走", SliceBetween(mainCs, "private void ThemeSwitch_MouseLeftButtonDown", "\n    }").Contains("e.Handled = true;"));
         Check("主题/松开也不把窗口拖走", SliceBetween(mainCs, "private void ThemeSwitch_MouseLeftButtonUp", "\n    }").Contains("e.Handled = true;"));
@@ -3076,7 +3090,7 @@ internal static class Program
         Check("导航/同步认得第四页", mainCs.Contains("(SegPagePlugins, 3)"));
         Check("导航/「运行」改叫「日志」", mainXaml.Contains("Text=\"日志\"") && !mainXaml.Contains("Text=\"运行\""));
         Check("导航/「启动」改叫「主页」", mainXaml.Contains("Text=\"主页\"") && !mainXaml.Contains("Text=\"启动\""));
-        Check("导航/日志用的是翻开的书", mainXaml.Contains("M2,4.2 L8.4,3 L8.4,15 L2,16.2 Z"));
+        // v1.35：日志图标从「两半页」改成「带折角的纸 + 三行字」，具体在下面的 11m 段逐条盯着。
         Check("导航/插件用的是拼图", mainXaml.Contains("A1.6,1.6 0 0 1 11,3"));
         Check("导航/外壳是玻璃不是实色块", mainXaml.Contains("#D9181C22") && mainXaml.Contains("BlurRadius=\"22\""));
         Check("分页/一共四页", Pager.Count == 4);
@@ -3095,8 +3109,60 @@ internal static class Program
         Check("米游社/本体里没有那段签到了", !mainCs.Contains("MiyousheService.SignNowAsync"));
         Check("米游社/设置里不再有那八个字段", !appStateCs.Contains("MiyousheAutoSign"));
 
-        // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
+        // ---- 11j) v1.35 配置按钮挪到卡中间 + 插件文件夹挪到 exe 旁边 ----
+        // 它原来缩在标题行那一排 26 高的小按钮里，而它是这张卡最主要的动作。
+        // 现在占 Row 2（*，吃掉剩余高度），在标题下面、按日计划上面的中间空白里。
+        Check("托管配置/「配置」在卡中间不在标题行",
+            mainXaml.Contains("<Grid Grid.Row=\"2\" Margin=\"0,10,0,10\">") &&
+            mainXaml.Contains("x:Name=\"BtnOpenTrayConfig\" Style=\"{StaticResource LaunchGhost}\""));
+        // 标题行那一排现在只剩「看一眼 / 定规矩」的五个小按钮。
+        string titleRow = SliceBetween(mainXaml, "<StackPanel Grid.Column=\"1\" Orientation=\"Horizontal\" HorizontalAlignment=\"Right\"", "</StackPanel>");
+        Check("托管配置/标题行不再有它", titleRow.Length > 0 && !titleRow.Contains("BtnOpenTrayConfig"));
+        Check("托管配置/按钮比小按钮大一号",
+            mainXaml.Contains("x:Name=\"BtnOpenTrayConfig\" Style=\"{StaticResource LaunchGhost}\"") &&
+            mainXaml.Contains("Height=\"38\" MinWidth=\"132\""));
 
+        // 插件目录：v1.35 起是 exe 旁边的「插件」，不是「所有配置\plugins」。
+        // 理由是这一项在导航里就叫「插件」，点进去却指向两级子文件夹里的 plugins。
+        Check("插件目录/在 exe 旁边叫插件", pathCs.Contains("public static string PluginsDir => Path.Combine(AppContext.BaseDirectory, \"插件\");"));
+        Check("插件目录/第一次启动就建好", SliceBetween(pathCs, "public static void Prepare()", "\n    }").Contains("Directory.CreateDirectory(PluginsDir);"));
+        Check("插件目录/老位置的内容会搬过来", pathCs.Contains("MoveDir(Path.Combine(ConfigRoot, \"plugins\"), PluginsDir, flatten: true);"));
+
+
+        // ---- 11m) v1.35 设置页卡片墙 + 日志图标 + 鼠标拖动换页 ----
+        // 设置页：两列四卡，每张卡有图标标题副标题，行与行之间只靠留白和一条极淡的分隔线。
+        // 判据全部落在「结构属性」上，不看标签在文件里的先后（v1.32 在这里绊过一跤）。
+        string settingsPane = SliceBetween(mainXaml, "x:Name=\"PageSettings\"", "</Grid>\n                    </ScrollViewer>");
+        Check("设置页/四张卡两列摆开",
+            settingsPane.Contains("<Border Grid.Row=\"1\" Grid.Column=\"0\"")
+            && settingsPane.Contains("<Border Grid.Row=\"1\" Grid.Column=\"1\"")
+            && settingsPane.Contains("<Border Grid.Row=\"2\" Grid.Column=\"0\"")
+            && settingsPane.Contains("<Border Grid.Row=\"2\" Grid.Column=\"1\""));
+        Check("设置页/每张卡都有图标和副标题",
+            System.Text.RegularExpressions.Regex.Matches(settingsPane, "<Border Width=\"26\" Height=\"26\" CornerRadius=\"8\" Background=\"\\{DynamicResource BrandSoftBrush\\}\">").Count == 4);
+        Check("设置页/行用 SetRow 而不是每行套一块浅底",
+            settingsPane.Contains("Style=\"{StaticResource SetRow}\"")
+            && !settingsPane.Contains("Style=\"{StaticResource SettingCard}\""));
+        Check("设置页/最后一行不画分隔线", settingsPane.Contains("Style=\"{StaticResource SetRowLast}\""));
+        Check("设置页/通知卡整块占满第一排", settingsPane.Contains("x:Name=\"NotifyCard\" Grid.Row=\"0\" Grid.ColumnSpan=\"2\""));
+        Check("设置页/还认得出四张卡叫什么",
+            settingsPane.Contains("守护与恢复") && settingsPane.Contains("启动与界面")
+            && settingsPane.Contains("节奏与报告") && settingsPane.Contains("接口与维护"));
+        Check("设置页/不再有 AdvancedBody 和 SystemBody", !mainXaml.Contains("AdvancedBody") && !mainXaml.Contains("SystemBody"));
+
+        // 日志图标：v1.35 从「左右两半页」换成「一页带折角 + 三行字」，18px 下也认得出是张纸。
+        string logItem = SliceBetween(mainXaml, "x:Name=\"SegPageRun\"", "</RadioButton>");
+        Check("日志图标/是一张带折角的纸", logItem.Contains("M4,2.5 L11.5,2.5 L16,7 L16,17.5 L4,17.5 Z"));
+        Check("日志图标/纸上有三行字", logItem.Contains("M6.5,10 L13.5,10") && logItem.Contains("M6.5,13 L13.5,13") && logItem.Contains("M6.5,16 L10.5,16"));
+        Check("日志图标/不是两半页了", !logItem.Contains("M2,4.2 L8.4,3"));
+
+        // 鼠标拖动换页：按下不抢，横向 40px 才夺鼠标，松手按 Pager.Swipe 判。
+        Check("换页/鼠标按下只记坐标不抢", mainCs.Contains("PageClip_PreviewMouseLeftButtonDown"));
+        Check("换页/横向 40px 才算想换页", mainCs.Contains("PageDragStart = 40"));
+        Check("换页/竖着划得多就让位给滚动", mainCs.Contains("Math.Abs(dy) > Math.Abs(dx)"));
+        Check("换页/别人抓着鼠标就不掺和", mainCs.Contains("Mouse.Captured != null && !ReferenceEquals(Mouse.Captured, PageClip)"));
+        Check("换页/拖动时四页跟着走", mainCs.Contains("DragPages(dx * 0.85)"));
+        Check("换页/松手按同一套阈值判", SliceBetween(mainCs, "private void PageClip_PreviewMouseLeftButtonUp", "\n    }").Contains("Pager.Swipe(_page, _pageDragShift, PageClip.ActualWidth)"));
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）
         Check("接线/移除菜单真的删", mainCs.Contains("() => RemoveToolCompletely(toolId)"));
@@ -6132,15 +6198,24 @@ internal static class Program
         const string Main = "Dragon Butler/MainWindow.xaml";
         string main = ReadRepoSources(Main);
         Check("主窗默认宽度仍是 980", main.Contains("Width=\"980\"", StringComparison.Ordinal));
-        // 区块不能变多：折叠卡的行数就是「界面有没有变臃肿」的硬指标
-        int advRows = CountRowsBefore(main, "\"AdvancedBody\"", 3000);
-        int sysRows = CountRowsBefore(main, "\"SystemBody\"", 3000);
-        Check("高级设置仍是 10 行", advRows == 10, advRows.ToString());
-        // v1.17：系统区从 7 行变 8 行（「备份设置」）；v1.19 再变 9 行（「开跑前体检」）。
-        // 这一条不是随手放行的数字：加行的人必须同时改这里，改的时候会想一想
-        // 「这一行真的非加不可吗」——这就是它存在的意义。
-        // 加行的人必须同时改这里——改的时候会想一想这一行真的非加不可吗。
-        Check("系统区 10 行（v1.17 备份 + v1.19 体检 + v1.20 交接单）", sysRows == 10, sysRows.ToString());
+        // v1.35：高级设置与系统不再是两张折叠长表，而是拆成「守护与恢复 / 启动与界面 / 节奏与报告 / 接口与维护」
+        // 四张卡两两并排。所以「某个 Body 里有几行」这个判据本身失效了。
+        // 换成守「一个都不能丢」：这些开关必须还在界面上，而且必须在新卡里——加行的人照样要来这里改数字。
+        string keepGuard = SliceBetween(main, "守护与恢复", "节奏与报告");
+        string keepRhythm = SliceBetween(main, "节奏与报告", "接口与维护");
+        string keepApi = SliceBetween(main, "接口与维护", "</Grid>\n                    </ScrollViewer>");
+        Check("设置页/原来的高级设置还在新卡里",
+            keepGuard.Contains("TgSentinel") && keepGuard.Contains("TgStallAutoKill") && keepGuard.Contains("TgAutoKill"),
+            "守护与恢复");
+        Check("设置页/节奏与报告装下了失败策略和两份报告",
+            keepRhythm.Contains("CbFailStrategy") && keepRhythm.Contains("CbInterval")
+            && keepRhythm.Contains("TgMorningReport") && keepRhythm.Contains("TgWeeklyReport")
+            && keepRhythm.Contains("BtnLogRules"),
+            "节奏与报告");
+        Check("设置页/接口与维护装下了 API、面板、热键、备份、体检、交接单",
+            keepApi.Contains("TgControlApi") && keepApi.Contains("TgLanPanel") && keepApi.Contains("TgHotkey")
+            && keepApi.Contains("BtnBackupNow") && keepApi.Contains("BtnPreflight") && keepApi.Contains("BtnHandover"),
+            "接口与维护");
         Check("系统区有交接单一行", main.Contains("BtnHandover"), "MainWindow.xaml");
         Check("系统区有备份一行",
             main.Contains("x:Name=\"BtnBackupNow\"", StringComparison.Ordinal)
@@ -6221,18 +6296,23 @@ internal static class Program
         Check("向导/完成时也存一次",
             System.Text.RegularExpressions.Regex.IsMatch(wizardCs, @"SavePaths\(\);\s+SaveNotifyChoice\(\);"));
 
-        // v1.28：关窗口那句「还在后台」以前是硬弹气泡，绕开了「不推送」——
-        // 在向导里选了不推送的人，一关窗口照样挨一下。这三条钉住它别再漏回去。
-        Check("关窗提示走统一闸门（不硬调 ShowBalloon）",
-            mainCs.Contains("NotifyService.ShowTrayNote(", StringComparison.Ordinal)
-            && !mainCs.Contains("ShowBalloon(NotifyLevel.Info, \"一条龙管家\",", StringComparison.Ordinal));
-        Check("关窗提示：不推送就一条都不弹",
-            notifyCs.Contains("ParseChannel(AppState.Settings.NotifyMode) == PushChannel.Off", StringComparison.Ordinal));
-        Check("关窗提示：这台机器只说一次（存进设置，不按进程算）",
-            notifyCs.Contains("AppState.Settings.TrayNoticeShown", StringComparison.Ordinal)
-            && !notifyCs.Contains("private static bool _trayNoteShown", StringComparison.Ordinal));
-        Check("关窗提示：重新打开开关会再给一次机会",
-            mainCs.Contains("NotifyService.ResetTrayNote();", StringComparison.Ordinal));
+        // v1.35：关窗口那句「还在后台」整条删了，不是换条路弹。
+        //
+        // v1.28 给它加过闸，但闸的判据是「通知渠道 != 不推送」——
+        // 而「关窗口」跟「跑完了要不要通知我」是两件事：选了 Windows 通知的人，
+        // 在意的是跑完的结果，不是每次关窗都被系统弹一次「还在后台」。
+        // 这一刻用户就坐在屏幕前、看着窗口消失，他知道自己关了什么。
+        Check("关窗提示/整条删了，不是绕道弹",
+            !mainCs.Contains("NotifyService.ShowTrayNote(", StringComparison.Ordinal)
+            && !notifyCs.Contains("public static void ShowTrayNote(", StringComparison.Ordinal)
+            && !notifyCs.Contains("public static void ResetTrayNote(", StringComparison.Ordinal));
+        Check("关窗提示/那三个字段与调用一起清了",
+            !notifyCs.Contains("TrayNoticeShown", StringComparison.Ordinal)
+            && !mainCs.Contains("ResetTrayNote(", StringComparison.Ordinal));
+        // 收进托盘这个动作本身要留着（窗口隐藏、托盘图标还在），只是不再说话。
+        Check("关窗提示/仍然收进托盘不退出",
+            mainCs.Contains("if (App.ForceExit || !AppState.Settings.StayInTray) return;", StringComparison.Ordinal)
+            && mainCs.Contains("        Hide();", StringComparison.Ordinal));
 
         Console.WriteLine($"RESULT uirules fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;

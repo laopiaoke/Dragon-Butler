@@ -10,8 +10,10 @@ namespace DragonButler;
 /// 第一次打开的人看到的是一堆不知道哪来的目录。现在收成两个：
 ///
 ///   exe 旁\
-///     所有配置\         ← 要备份、要带走的东西：设置、台账、工具档案、插件、图标缓存、音效
+///     所有配置\         ← 要备份、要带走的东西：设置、台账、工具档案、图标缓存、音效
 ///     全部日志\         ← 只用来看、可以删的东西：运行日志、崩溃转储、截图、现场包
+///     插件\             ← 用户自己往里放东西的地方（v1.35 从「所有配置」里挪出来，
+///                          因为「所有配置」听起来像程序自己的，没人会想到往那儿放插件）
 ///
 /// 为什么缓存和音效也算「配置」：它们都是程序自己生成、删了下次会重建的东西，
 /// 但重建要读配置（图标是从档案里的路径提取的，音效版本号存在配置里）。
@@ -42,8 +44,16 @@ public static class Paths
     /// <summary>工具档案目录。</summary>
     public static string ToolsDir => Path.Combine(ConfigRoot, "tools");
 
-    /// <summary>插件目录。</summary>
-    public static string PluginsDir => Path.Combine(ConfigRoot, "plugins");
+    /// <summary>
+    /// 插件目录：exe 旁边的「插件」文件夹。
+    ///
+    /// v1.35：原来放在 <c>所有配置\plugins</c> 里面。那个位置的问题是——
+    /// 插件是用户要自己往里丢东西的地方，而「所有配置」听起来像程序自己的东西，
+    /// 没人会想到要去那儿放东西。而且导航第四项就叫「插件」，点进去却说
+    /// 「打开插件目录」，结果目录藏在两级子文件夹里。
+    /// 放在 exe 旁边，「插件」两个字明摆着，跟导航那一项对得上。
+    /// </summary>
+    public static string PluginsDir => Path.Combine(AppContext.BaseDirectory, "插件");
 
     /// <summary>图标缓存目录。</summary>
     public static string CacheDir => Path.Combine(ConfigRoot, "cache", "icons");
@@ -73,6 +83,9 @@ public static class Paths
         {
             Directory.CreateDirectory(ConfigRoot);
             Directory.CreateDirectory(LogRoot);
+            // 插件目录也在这里建：第一次运行时它就该存在，
+            // 而不是等用户点「打开插件目录」才被建出来。
+            Directory.CreateDirectory(PluginsDir);
         }
         catch { /* 建不出目录就等各服务自己再试，不在这里挡路 */ }
 
@@ -92,6 +105,10 @@ public static class Paths
         MoveDir(Path.Combine(baseDir, "config"), ConfigRoot, flatten: true);
         MoveDir(Path.Combine(baseDir, "tools"), ToolsDir);
         MoveDir(Path.Combine(baseDir, "plugins"), PluginsDir);
+        // v1.35：插件目录从「所有配置\plugins」搬到 exe 旁边的「插件」。
+        // 搬的是内容（flatten 到「插件」根），不是整个目录——那边原来就叫 plugins，
+        // 搬过去会变成 插件\plugins\，多看一层。
+        MoveDir(Path.Combine(ConfigRoot, "plugins"), PluginsDir, flatten: true);
         MoveDir(Path.Combine(baseDir, "cache"), Path.Combine(ConfigRoot, "cache"));
         MoveDir(Path.Combine(baseDir, "sounds"), SoundsDir);
         MoveDir(Path.Combine(baseDir, "备份"), BackupDir);
