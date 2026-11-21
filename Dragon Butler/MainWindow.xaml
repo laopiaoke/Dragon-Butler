@@ -1405,11 +1405,7 @@
                                         <TextBlock Text="托管配置" FontSize="13.5" FontWeight="SemiBold" Margin="8,0,0,0"
                                                    TextTrimming="CharacterEllipsis"
                                                    Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        <Border x:Name="VacationBadge" Visibility="Collapsed" Margin="8,0,0,0" Padding="6,1"
-                                                CornerRadius="5" Background="{DynamicResource InsetBrush}"
-                                                BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1">
-                                            <TextBlock Text="🏖 度假中" FontSize="10" Foreground="{DynamicResource WarningBrush}"/>
-                                        </Border>
+                                        <!-- v1.38：这里原来有个「🏖 度假中」小徽章，随度假模式一起删了。 -->
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right"
                                                 VerticalAlignment="Center" Margin="8,0,0,0">
@@ -2236,22 +2232,17 @@
 
                                     <Border Style="{StaticResource SetRow}">
                                         <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="软件启动后自动跑"/>
-                                            <ToggleButton x:Name="TgAutoRun" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoRun_Click"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <Grid>
                                             <TextBlock Style="{StaticResource SetLabel}" Text="关闭时驻留托盘"/>
                                             <ToggleButton x:Name="TgStayTray" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStayTray_Click"/>
                                         </Grid>
                                     </Border>
 
+                                    <!-- v1.38：开机自启之后，启动时直接收进托盘、不弹窗口。
+                                         自启的意思是「开机它就在」，不是「开机在你脸上开一扇窗」。 -->
                                     <Border Style="{StaticResource SetRow}">
                                         <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="度假模式（暂停所有定时）"/>
-                                            <ToggleButton x:Name="TgVacation" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgVacation_Click"/>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="启动时最小化到托盘"/>
+                                            <ToggleButton x:Name="TgStartMin" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStartMin_Click"/>
                                         </Grid>
                                     </Border>
 

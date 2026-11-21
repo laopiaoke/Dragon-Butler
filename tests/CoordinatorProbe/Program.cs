@@ -54,7 +54,6 @@ internal static class Program
             "timeoutanchor" => RunTimeoutAnchor(stub),
             "residual" => RunResidual(stub),
             "conflict" => RunConflict(stub),
-            "vacation" => RunVacation(),
             "afterrun" => RunAfterRun(),
             "template" => RunTemplate(),
             "bgiwrite" => RunBgiWrite(),
@@ -538,15 +537,8 @@ internal static class Program
         return r?.Skipped == true ? 0 : 1;
     }
 
-    /// <summary>度假模式：定时触发不跑。</summary>
-    private static int RunVacation()
-    {
-        AppState.Settings.VacationMode = true;
-        bool ran = QueueService.StartAsync(QueueTrigger.Timer).GetAwaiter().GetResult();
-        Console.WriteLine("RESULT vacation ran=" + ran);
-        AppState.Settings.VacationMode = false;
-        return ran ? 1 : 0;
-    }
+    // v1.38：度假模式整个功能删了，这个探针模式（"vacation"）也一起删。
+    // 留着它的话，它会一直报「ran=False 所以通过」——而那已经不是任何代码的性质了。
 
     /// <summary>
     /// v1.15：配置组合（多套「一条龙配置名 + 组名」反复用）。
@@ -3134,6 +3126,51 @@ internal static class Program
         Check("插件目录/老位置的内容会搬过来", pathCs.Contains("MoveDir(Path.Combine(ConfigRoot, \"plugins\"), PluginsDir, flatten: true);"));
 
 
+        // ---- 11o) v1.38 开机自启、删除度假模式与「启动后自动跑」 ----
+        // 开机自启这一项原来坏在「只写不校验」：写失败、路径失效、被任务管理器禁用，
+        // 三种情况界面上的勾子都还是亮的。所以断言要盯住「回读」这一个动作。
+        string autoCs = ReadRepoSources("Dragon Butler/AutoStartHelper.cs");
+        string scheduleCs = ReadRepoSources("Dragon Butler/SchedulePlanner.cs");
+        string appCsV138 = ReadRepoSources("Dragon Butler/App.xaml.cs");
+        Check("自启/写完立刻回读", SliceBetween(autoCs, "public static (bool Ok, string Message) Set(bool enable)", "\n    }").Contains("GetValue(ValueName)"));
+        Check("自启/指向别的 exe 就算没开", SliceBetween(autoCs, "public static bool IsSet()", "\n    }").Contains("OrdinalIgnoreCase"));
+        Check("自启/路径取不到就说清楚", autoCs.Contains("Assembly.GetEntryAssembly()?.Location"));
+        Check("自启/清掉任务管理器的禁用标记", autoCs.Contains("StartupApproved") && autoCs.Contains("ClearApprovedBlock"));
+        Check("自启/失败要带一句人话", SliceBetween(autoCs, "public static (bool Ok, string Message) Set(bool enable)", "\n    }").Contains("Message"));
+        Check("自启/启动时会对账", autoCs.Contains("public static string? Heal(bool wanted)"));
+        // 「想要自启」这个意图得自己记一份——注册表只答得出「现在有没有那条值」，
+        // 答不出「是不是被系统清掉了」。没有意图就没法判断该不该补写。
+        Check("自启/记下用户想要什么", appStateCs.Contains("public bool AutoStartOnBoot"));
+        Check("自启/启动时按意图对账", appCsV138.Contains("AutoStartHelper.Heal(AppState.Settings.AutoStartOnBoot)"));
+        Check("自启/写失败不记意图", SliceBetween(mainCs, "private void TgAutoStart_Click", "\n    }").Contains("return;"));
+
+        // 开关这边：拨不动的时候要把勾子拨回去，别让界面替失败圆场。
+        Check("自启/写失败把勾子拨回来", SliceBetween(mainCs, "private void TgAutoStart_Click", "\n    }").Contains("_suppressToggle"));
+        Check("自启/界面上说了结果", SliceBetween(mainCs, "private void TgAutoStart_Click", "\n    }").Contains("PublishLog("));
+
+        // 删掉的两个功能：字段、开关、徽章、调度参数、启动调用，一处都不该留。
+        Check("删除/没有度假模式这个字段", !appStateCs.Contains("VacationMode"));
+        Check("删除/没有启动后自动跑这个字段", !appStateCs.Contains("AutoRunOnLaunch"));
+        Check("删除/调度器不再收这个参数", !scheduleCs.Contains("bool vacation"));
+        // 判控件名，不判「度假」两个字——v1.38 的注释里正写着「这里原来有个度假徽章」，
+        // 那条注释是有用的记录，不该被断言逼着删。
+        Check("删除/界面上没有度假徽章", !mainXaml.Contains("x:Name=\"VacationBadge\""));
+        Check("删除/界面上没有那两个开关", !mainXaml.Contains("TgVacation") && !mainXaml.Contains("TgAutoRun"));
+        Check("删除/启动时不再自动开跑", !appCsV138.Contains("AutoRunOnLaunch"));
+
+        // 向导第 3 步换成了「开机自启 + 启动时最小化到托盘」，共五步。
+        Check("向导/一共五步", wizardCs.Contains("private const int TotalSteps = 5;"));
+        Check("向导/第 3 步问开机自启", wizardXaml.Contains("WizAutoStart") && wizardXaml.Contains("WizStartMin"));
+        Check("向导/自启页上说了不装服务", wizardXaml.Contains("不装服务"));
+        Check("向导/打开要留到最后一起写", SliceBetween(wizardCs, "private void WizAutoStart_Click", "\n    }").Contains("if (!on)"));
+        Check("向导/最小化到托盘顺手打开驻留", SliceBetween(wizardCs, "private void WizStartMin_Click", "\n    }").Contains("StayInTray = true"));
+        Check("向导/最后一步才真写注册表", SliceBetween(wizardCs, "private void ApplyAll()", "\n    }").Contains("AutoStartHelper.Set(true)"));
+
+        // 这一页的两个开关，设置页里也要有，而且要在同一张卡上。
+        Check("设置页/有启动时最小化这一行", mainXaml.Contains("x:Name=\"TgStartMin\""));
+        Check("设置页/最小化和驻留排在一起", mainXaml.IndexOf("x:Name=\"TgStayTray\"") > 0
+            && mainXaml.IndexOf("x:Name=\"TgStartMin\"") > mainXaml.IndexOf("x:Name=\"TgStayTray\""));
+
         // ---- 11n) v1.37 UI 任务书：首次运行别递刀 + 小按钮长大 + 一半没配要警示 ----
         // 任务书 P0-1：一个工具都没配好时，「一键开跑」点下去必然失败。
         // 处理是「禁用 + 压暗」，不是「整卡消失」——整卡消失会让下面的布局跳一下，
@@ -4426,42 +4463,44 @@ internal static class Program
         var fri0005 = new DateTime(2026, 11, 6, 0, 5, 0);
 
         // 1) 正好到点：该跑，但不是补跑。
-        var d1 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x7F, 120, null, fri0800);
+        var d1 = SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 120, null, fri0800);
         Check("到点该跑", d1.ShouldRun && !d1.IsCatchUp, d1.Reason);
         Check("到点 DueAt 对", d1.DueAt == fri0800, d1.DueAt?.ToString("yyyy-MM-dd HH:mm") ?? "null");
 
         // 2) 睡过头 72 分钟后才开机：窗口内，补跑。
         var slept = fri0800.AddMinutes(72);
-        var d2 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x7F, 120, null, slept);
+        var d2 = SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 120, null, slept);
         Check("窗口内补跑", d2.ShouldRun && d2.IsCatchUp, d2.Reason);
 
         // 3) 超出窗口：不跑，且理由要说明超了多久。
-        var d3 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x7F, 120, null, fri0800.AddMinutes(200));
+        var d3 = SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 120, null, fri0800.AddMinutes(200));
         Check("超出窗口不跑", !d3.ShouldRun && d3.DueAt == fri0800, d3.Reason);
 
         // 4) 该计划点已经跑过：不重复跑（哪怕还在窗口内）。
-        var d4 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x7F, 120, fri0800, fri0800.AddMinutes(30));
+        var d4 = SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 120, fri0800, fri0800.AddMinutes(30));
         Check("同计划点不重复", !d4.ShouldRun, d4.Reason);
 
         // 5) 补跑关闭 + 错过整分钟：不跑（老行为，本次修的就是这个）。
-        var d5 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x7F, 0, null, fri0800.AddMinutes(72));
+        var d5 = SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 0, null, fri0800.AddMinutes(72));
         Check("补跑关闭则错过", !d5.ShouldRun, d5.Reason);
 
         // 6) 补跑关闭 + 恰好命中那一分钟：跑。
-        var d6 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x7F, 0, null, fri0800.AddSeconds(30));
+        var d6 = SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 0, null, fri0800.AddSeconds(30));
         Check("补跑关闭仍认整分钟", d6.ShouldRun, d6.Reason);
 
         // 7) 没勾选今天（只勾周一，今天是周五）：不跑。
-        var d7 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x01, 120, null, fri0800.AddMinutes(10));
+        var d7 = SchedulePlanner.Decide(true, false, 8, 0, 0x01, 120, null, fri0800.AddMinutes(10));
         Check("未勾选的星期不跑", !d7.ShouldRun, d7.Reason);
 
-        // 8) 开关/度假/在跑：三种都不跑。
-        Check("定时关闭不跑", !SchedulePlanner.Decide(false, false, false, 8, 0, 0x7F, 120, null, fri0800).ShouldRun);
-        Check("度假模式不跑", !SchedulePlanner.Decide(true, true, false, 8, 0, 0x7F, 120, null, fri0800).ShouldRun);
-        Check("正在跑不叠加", !SchedulePlanner.Decide(true, false, true, 8, 0, 0x7F, 120, null, fri0800).ShouldRun);
+        // 8) 开关/在跑：两种都不跑。（v1.38 起度假模式没了，第三种没了）
+        Check("定时关闭不跑", !SchedulePlanner.Decide(false, false, 8, 0, 0x7F, 120, null, fri0800).ShouldRun);
+        Check("正在跑不叠加", !SchedulePlanner.Decide(true, true, 8, 0, 0x7F, 120, null, fri0800).ShouldRun);
+        // 定时开着、没在跑、正好到点：必须跑。这条是删掉度假模式之后的地基——
+        // 原来这格上放的是「度假模式不跑」，一删就漏出个洞，得有人站住。
+        Check("定时开着到点就跑", SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 120, null, fri0800).ShouldRun);
 
         // 9) 还没到点：不跑，且要给出下次时间。
-        var d9 = SchedulePlanner.Decide(true, false, false, 8, 0, 0x7F, 120, null, fri0005);
+        var d9 = SchedulePlanner.Decide(true, false, 8, 0, 0x7F, 120, null, fri0005);
         Check("未到点不跑", !d9.ShouldRun && d9.NextDue == fri0800, d9.Reason + " next=" + (d9.NextDue?.ToString("HH:mm") ?? "null"));
 
         // 10) 跨周：周五跑完，周一才该跑（掩码 bit0|bit4）。
@@ -6129,7 +6168,9 @@ internal static class Program
                 sched.ScheduleCatchUpMinutes = oldCatchUp;
             }
 
-            Check("补跑提示/度假模式不说话", RunVacationCheck(1 << yesterdayBit));
+            // v1.38：度假模式删了，原来这条「度假模式下晨报不说话」的断言也就没了对象。
+            // 现在该守的是相反的一件事：定时开着、今天没跑，晨报必须开口。
+            Check("补跑提示/定时开着就会说话", RunCatchUpSpeaksCheck(1 << yesterdayBit));
         }
         finally
         {
@@ -6171,23 +6212,25 @@ internal static class Program
         }
     }
 
-    /// <summary>度假模式下晨报开口了吗（应该不会）。</summary>
-    private static bool RunVacationCheck(int mask)
+    /// <summary>
+    /// v1.38：定时开着、今天该跑却还没跑时，晨报要开口说话。
+    /// 原来是反向的「度假模式下不说话」——那条分支已经不存在了，
+    /// 留着它只会永远通过，等于把一块地砖漆成绿色假装是草。
+    /// </summary>
+    private static bool RunCatchUpSpeaksCheck(int mask)
     {
         var s = AppState.Settings;
-        bool oldEnabled = s.ScheduleEnabled, oldVacation = s.VacationMode;
+        bool oldEnabled = s.ScheduleEnabled;
         int oldMask = s.ScheduleWeekdays;
         try
         {
             s.ScheduleEnabled = true;
             s.ScheduleWeekdays = mask;
-            s.VacationMode = true;
-            return MorningReportService.CatchUpNote() == "";
+            return MorningReportService.CatchUpNote() != "";
         }
         finally
         {
             s.ScheduleEnabled = oldEnabled;
-            s.VacationMode = oldVacation;
             s.ScheduleWeekdays = oldMask;
         }
     }
@@ -6322,14 +6365,15 @@ internal static class Program
         Check("向导有渠道胶囊样式（主窗 NotifyChip 拿不到）",
             wizard.Contains("x:Key=\"WizChip\"", StringComparison.Ordinal)
             && wizard.Contains("TargetType=\"RadioButton\"", StringComparison.Ordinal));
-        Check("向导说清是四步", wizard.Contains("共 4 步", StringComparison.Ordinal));
-        Check("向导有第 4 步（完成页）",
-            wizard.Contains("x:Name=\"Step4\"", StringComparison.Ordinal));
-        Check("向导第 3 步是推送选择",
+        // v1.38：中间插了「开机自启」那一页，推送选择从第 3 步挪到第 4 步、完成页到第 5 步。
+        Check("向导说清是五步", wizard.Contains("共 5 步", StringComparison.Ordinal));
+        Check("向导有第 5 步（完成页）",
+            wizard.Contains("x:Name=\"Step5\"", StringComparison.Ordinal));
+        Check("向导第 4 步是推送选择",
             wizard.Contains("x:Name=\"NotifyChipHost\"", StringComparison.Ordinal)
             && wizard.Contains("x:Name=\"TbNotifyField\"", StringComparison.Ordinal)
             && wizard.Contains("x:Name=\"BtnNotifyTest\"", StringComparison.Ordinal));
-        Check("向导渲染用例已改成四步", probe.Contains("step <= 4", StringComparison.Ordinal));
+        Check("向导渲染用例已改成五步", probe.Contains("step <= 5", StringComparison.Ordinal));
 
         // v1.25：换渠道必须把上一个渠道打在框里的字收走。
         // 不然从飞书切到企业微信，框里还是飞书的地址，手一滑就存成了企业微信的地址。

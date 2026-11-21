@@ -449,8 +449,8 @@ public partial class MainWindow : Window
         _suppressToggle = true;
         TgSchedule.IsChecked = s.ScheduleEnabled;
         TgAutoStart.IsChecked = AutoStartHelper.IsSet();
-        TgAutoRun.IsChecked = s.AutoRunOnLaunch;
         TgStayTray.IsChecked = s.StayInTray;
+        TgStartMin.IsChecked = s.StartMinimized;
         TgSound.IsChecked = s.SoundEnabled;
         TgSentinel.IsChecked = s.SentinelEnabled;
         TgAutoRestart.IsChecked = s.AutoRestartBgi;
@@ -478,7 +478,6 @@ public partial class MainWindow : Window
         RefreshHotkeyRow(s);
         TbNightMinutes.Text = Math.Clamp(s.NightScreenMinutes, 5, 120).ToString();
         TbNightMinutes.IsEnabled = s.NightScreenEnabled;
-        TgVacation.IsChecked = s.VacationMode;
         SelectComboByTag(CbAfterRun, s.AfterRunAction);
         RefreshAfterRunAppRow();
         SelectComboByTag(CbFailStrategy, s.FailStrategy);
@@ -490,7 +489,6 @@ public partial class MainWindow : Window
         UpdateTimeDisplay();
         SyncWeekdayChips();
         UpdateScheduleStatus();
-        VacationBadge.Visibility = s.VacationMode ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static void SelectComboByTag(ComboBox box, string? tag)
@@ -828,7 +826,6 @@ public partial class MainWindow : Window
             var s = AppState.Settings;
             var decision = SchedulePlanner.Decide(
                 s.ScheduleEnabled,
-                s.VacationMode,
                 QueueService.IsRunning,
                 s.ScheduleHour,
                 s.ScheduleMinute,
@@ -1027,14 +1024,14 @@ public partial class MainWindow : Window
         // v1.13 + v1.15：这一行只在「有话要说」时才出现。
         // 跑起来时下面那条实时条已经把组名、时长、预计结束都摆出来了；
         // 空闲时说「按顺序执行」也没人需要听——队列行上的字形已经说明了顺序。
-        // 保留的就两种：度假中（队列被停）、项间等待（下面会写下一项几点开始）。
+        // 保留的就一种：项间等待（下面会写下一项几点开始）。
+        //
+        // v1.38：原来还有第二种「度假中，定时已暂停」，随度假模式一起删了。
         bool waiting = !string.IsNullOrEmpty(_queueStatusText);
-        TbQueueStatus.Visibility = running || waiting || AppState.Settings.VacationMode
+        TbQueueStatus.Visibility = running || waiting
             ? Visibility.Visible
             : Visibility.Collapsed;
-        TbQueueStatus.Text = AppState.Settings.VacationMode
-            ? "度假中，定时已暂停"
-            : (running ? "" : _queueStatusText);
+        TbQueueStatus.Text = running ? "" : _queueStatusText;
     }
 
     /// <summary>
@@ -5090,15 +5087,23 @@ public partial class MainWindow : Window
     {
         if (_suppressToggle) return;
         bool on = TgAutoStart.IsChecked == true;
-        AutoStartHelper.Set(on);
-        AppState.PublishLog(on ? "✓ 已开启开机自动启动（当前用户）" : "已关闭开机自动启动（当前用户）");
-        LogService.LogEvent("开机自启（当前用户）" + (on ? "已开启" : "已关闭"));
-    }
-
-    private void TgAutoRun_Click(object sender, RoutedEventArgs e)
-    {
-        if (_suppressToggle) return;
-        AppState.Settings.AutoRunOnLaunch = TgAutoRun.IsChecked == true;
+        // v1.38：写完之后要听结果。原来这里不看返回值，注册表被拒 / 被安全软件改回去 /
+        // 路径没写对，界面上勾子照样亮着，用户只能在第二天早上发现「昨天开了但没自启」。
+        var (ok, msg) = AutoStartHelper.Set(on);
+        AppState.PublishLog((ok ? (on ? "✓ " : "") : "⚠ ") + msg);
+        LogService.LogEvent("开机自启：" + msg);
+        if (!ok)
+        {
+            // 没成功就把开关拨回去——勾子亮着但实际没生效，比没开更糟。
+            _suppressToggle = true;
+            TgAutoStart.IsChecked = !on;
+            _suppressToggle = false;
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", msg);
+            return;
+        }
+        // 只在真写成了之后才记下「用户想要自启」这个意图。
+        // 写失败还记意图，下次启动就会一直对着一个写不进去的值补写。
+        AppState.Settings.AutoStartOnBoot = on;
         AppState.SaveSettings();
     }
 
@@ -5108,6 +5113,28 @@ public partial class MainWindow : Window
         AppState.Settings.StayInTray = TgStayTray.IsChecked == true;
         // v1.35：ResetTrayNote 跟着那条提示一起删了——提示本就不该存在。
         AppState.SaveSettings();
+    }
+
+    /// <summary>
+    /// v1.38：启动时收进托盘。只在「关闭时驻留托盘」开着时有意义——
+    /// 不驻留托盘的话，收进去了就没有托盘图标可以点回来，等于启动即失踪。
+    /// </summary>
+    private void TgStartMin_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle) return;
+        bool on = TgStartMin.IsChecked == true;
+        if (on && !AppState.Settings.StayInTray)
+        {
+            _suppressToggle = true;
+            TgStartMin.IsChecked = false;
+            _suppressToggle = false;
+            NotifyService.Show(NotifyLevel.Warning, "龙管家",
+                "先打开「关闭时驻留托盘」。不然启动就收进托盘，你连托盘图标都没有，点不回来。");
+            return;
+        }
+        AppState.Settings.StartMinimized = on;
+        AppState.SaveSettings();
+        LogService.LogEvent("启动时收进托盘：" + (on ? "开" : "关"));
     }
 
     private void TgSound_Click(object sender, RoutedEventArgs e)
@@ -5134,25 +5161,8 @@ public partial class MainWindow : Window
         LogService.LogEvent("收进托盘释放窗口：" + (on ? "开" : "关"));
     }
 
-    private void TgVacation_Click(object sender, RoutedEventArgs e)
-    {
-        if (_suppressToggle) return;
-        bool on = TgVacation.IsChecked == true;
-        AppState.Settings.VacationMode = on;
-        AppState.SaveSettings();
-        VacationBadge.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-        UpdateQueueButtons();
-        if (on)
-        {
-            NotifyService.Show(NotifyLevel.Info, "龙管家", "度假模式已开启，定时任务已全部暂停（手动「一键开跑」不受影响）。");
-            LogService.LogEvent("度假模式：已开启");
-        }
-        else
-        {
-            AppState.PublishLog("度假模式已关闭，定时恢复");
-            LogService.LogEvent("度假模式：已关闭");
-        }
-    }
+    // v1.38：TgVacation_Click 删了。度假模式只有一个作用——让定时不跑，
+    // 而定时本身就有开关。两个开关做同一件事，只会让人在「到底哪个在拦我」上耗时间。
 
     private void TgSentinel_Click(object sender, RoutedEventArgs e)
     {

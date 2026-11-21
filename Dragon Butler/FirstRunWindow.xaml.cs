@@ -21,6 +21,9 @@ namespace DragonButler;
 public partial class FirstRunWindow : Window
 {
     private int _step = 1;
+
+    /// <summary>v1.38：向导共五步（原来是四步，中间插了「开机自启」那一页）。</summary>
+    private const int TotalSteps = 5;
     private readonly Dictionary<string, string> _found = new();
     private readonly Dictionary<string, CheckBox> _picks = new();
     private readonly Dictionary<string, RadioButton> _notifyPicks = new();
@@ -240,17 +243,19 @@ public partial class FirstRunWindow : Window
 
     private void UpdateUi()
     {
-        TbStep.Text = $"第 {_step} 步 / 共 4 步";
+        TbStep.Text = $"第 {_step} 步 / 共 {TotalSteps} 步";
         Step1.Visibility = _step == 1 ? Visibility.Visible : Visibility.Collapsed;
         Step2.Visibility = _step == 2 ? Visibility.Visible : Visibility.Collapsed;
         Step3.Visibility = _step == 3 ? Visibility.Visible : Visibility.Collapsed;
         Step4.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
+        Step5.Visibility = _step == 5 ? Visibility.Visible : Visibility.Collapsed;
         BtnBack.Visibility = _step == 1 ? Visibility.Collapsed : Visibility.Visible;
-        BtnNext.Content = _step == 4 ? "完成" : "下一步";
+        BtnNext.Content = _step == TotalSteps ? "完成" : "下一步";
 
         if (_step == 2) BuildFindRows();
-        if (_step == 3) SyncNotifyStep();
-        if (_step == 4) BuildDoneSummary();
+        if (_step == 3) SyncStartupStep();
+        if (_step == 4) SyncNotifyStep();
+        if (_step == 5) BuildDoneSummary();
     }
 
     private List<ToolProfile> SelectedProfiles()
@@ -581,8 +586,15 @@ public partial class FirstRunWindow : Window
 
         if (_step == 3)
         {
-            SaveNotifyChoice();
             _step = 4;
+            UpdateUi();
+            return;
+        }
+
+        if (_step == 4)
+        {
+            SaveNotifyChoice();
+            _step = 5;
             UpdateUi();
             return;
         }
@@ -678,7 +690,78 @@ public partial class FirstRunWindow : Window
         SaveSelection();
         SavePaths();
         SaveNotifyChoice();
+
+        // v1.38：开机自启留到最后一步才真写。
+        // 中途跳过的人不该在系统里留一条自己都不知道的启动项。
+        if (WizAutoStart.IsChecked == true)
+        {
+            var (ok, msg) = AutoStartHelper.Set(true);
+            LogService.LogEvent("首启向导：开机自启 " + msg);
+            AppState.Settings.AutoStartOnBoot = ok;
+            if (!ok) AppState.PublishLog("⚠ " + msg);
+        }
+        else
+        {
+            AutoStartHelper.Set(false);
+            AppState.Settings.AutoStartOnBoot = false;
+        }
+        AppState.Settings.StartMinimized = WizStartMin.IsChecked == true;
+        AppState.SaveSettings();
+
         LogService.LogEvent("首启向导：完成");
+    }
+
+    // ===== v1.38：第 3 步 开机自启 =====
+    //
+    // 为什么这一步要放在「选工具」之后而不是最前面：一个还没决定要用哪些工具的人，
+    // 问「要不要开机自启」是没有意义的——他不知道自己在让什么东西自启。
+    // 也不能放在最后，最后一步是「完成了，去点一键开跑」，再插一页设置就变成
+    // 「以为结束了，结果还要答一道题」。
+
+    /// <summary>进这一页时把当前注册表状态读回来，别让勾子显示一个想当然的值。</summary>
+    private void SyncStartupStep()
+    {
+        bool already = AutoStartHelper.IsSet();
+        WizAutoStart.IsChecked = already || AppState.Settings.StartMinimized;
+        WizStartMin.IsChecked = AppState.Settings.StartMinimized;
+        TbStartupNote.Text = already
+            ? "这条启动项已经在注册表里了，指向的就是现在这个位置。"
+            : "还没设。勾上会往当前用户的启动项里写一条，卸载时点掉这个勾就行。";
+    }
+
+    private void WizAutoStart_Click(object sender, RoutedEventArgs e)
+    {
+        bool on = WizAutoStart.IsChecked == true;
+        // 只在「关掉」时立刻动注册表；打开留到最后一步一起写——
+        // 用户在中途点了「跳过」，就不该已经在系统里留了一条。
+        if (!on)
+        {
+            var (ok, msg) = AutoStartHelper.Set(false);
+            if (ok) AppState.Settings.AutoStartOnBoot = false;
+            TbStartupNote.Text = msg;
+            if (!ok) WizAutoStart.IsChecked = true;
+            return;
+        }
+        TbStartupNote.Text = AutoStartHelper.IsSet()
+            ? "这条启动项已经在注册表里了。"
+            : "点「下一步」时会写进启动项。";
+    }
+
+    private void WizStartMin_Click(object sender, RoutedEventArgs e)
+    {
+        bool on = WizStartMin.IsChecked == true;
+        if (on)
+        {
+            // 收进托盘要有托盘图标才点得回来，所以顺手把驻留托盘也打开。
+            // 这里不弹窗拦人——向导是「一次决定一串默认值」的地方，
+            // 拦一次就多一次「你为什么问我这个」。
+            WizAutoStart.IsChecked = true;
+            AppState.Settings.StayInTray = true;
+        }
+        AppState.Settings.StartMinimized = on;
+        TbStartupNote.Text = on
+            ? "开机后它会待在托盘里。双击托盘图标就能打开。"
+            : "开机后会正常弹出窗口。";
     }
 
     private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

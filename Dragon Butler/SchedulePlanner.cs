@@ -35,7 +35,6 @@ public static class SchedulePlanner
     /// 判定此刻该不该因为定时而启动队列。
     /// </summary>
     /// <param name="enabled">定时总开关。</param>
-    /// <param name="vacation">度假模式（暂停所有定时）。</param>
     /// <param name="running">队列是否已在跑。</param>
     /// <param name="scheduleHour">计划时（0-23）。</param>
     /// <param name="scheduleMinute">计划分（0-59）。</param>
@@ -43,9 +42,13 @@ public static class SchedulePlanner
     /// <param name="catchUpMinutes">补跑窗口（分钟，0=关闭）。</param>
     /// <param name="lastRunAt">上一次「因定时而跑」的计划点（UTC 无关，本地时间）；null=从没跑过。</param>
     /// <param name="now">当前本地时间（显式传入，便于断言）。</param>
+    /// <remarks>
+    /// v1.38：原来第二个参数是 <c>vacation</c>（度假模式），整个功能删了，参数一起删。
+    /// 删参数是有意的——留一个恒为 false 的开关比删掉更糟，它会让后来读代码的人
+    /// 以为还有一条「暂停定时」的路。
+    /// </remarks>
     public static ScheduleDecision Decide(
         bool enabled,
-        bool vacation,
         bool running,
         int scheduleHour,
         int scheduleMinute,
@@ -55,7 +58,6 @@ public static class SchedulePlanner
         DateTime now)
     {
         if (!enabled) return No("定时未开启");
-        if (vacation) return No("度假模式生效");
         if (running) return No("队列正在运行");
 
         int mask = weekdayMask & 0x7F;

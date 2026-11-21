@@ -83,7 +83,6 @@ public static class MorningReportService
         {
             var s = AppState.Settings;
             if (!s.ScheduleEnabled) return "";
-            if (s.VacationMode) return "";
             if ((s.ScheduleWeekdays & 0x7F) == 0) return "";
 
             // 昨天最后一个可能的计划点 + 补跑窗口之后一分钟 = 必然已经错过的时刻
@@ -94,7 +93,7 @@ public static class MorningReportService
             if (probe >= DateTime.Now) probe = DateTime.Now; // 极端设置下别问到未来去
 
             var decision = SchedulePlanner.Decide(
-                s.ScheduleEnabled, s.VacationMode, false,
+                s.ScheduleEnabled, false,
                 s.ScheduleHour, s.ScheduleMinute, s.ScheduleWeekdays,
                 s.ScheduleCatchUpMinutes, null, probe);
 

@@ -51,6 +51,24 @@ public class AppSettings
     public string BgiPath { get; set; } = "";
     public string DragonConfigName { get; set; } = "";
     public bool StayInTray { get; set; } = true;
+
+    /// <summary>
+    /// v1.38：开机自启之后，启动时直接收进托盘、不弹主窗（默认关）。
+    ///
+    /// 这两件事得分开：自启的意思是「开机它就该在跑」，不是「开机在你脸上开一扇窗」。
+    /// 默认关是因为——第一次开的时候用户正盯着屏幕，窗口不出现会以为没启动。
+    /// </summary>
+    public bool StartMinimized { get; set; } = false;
+
+    /// <summary>
+    /// v1.38：用户「想要」开机自启的意图。
+    ///
+    /// 为什么不直接问注册表：注册表只记「现在有没有那条值」，它答不出「是不是被系统
+    /// 清理掉了」。启动时对账必须有这个意图——有意图、没值，才该补写；
+    /// 没意图、有值，那八成是用户手动加的，不该替他删。
+    /// </summary>
+    public bool AutoStartOnBoot { get; set; } = false;
+
     public string Theme { get; set; } = "System";
 
     // ===== 自定义主题（Theme=Custom 时生效）=====
@@ -94,7 +112,9 @@ public class AppSettings
     public int LastRunSeconds { get; set; }
     /// <summary>上次执行结果：true=完成，false=中止</summary>
     public bool LastRunOk { get; set; }
-    public bool AutoRunOnLaunch { get; set; } = false;
+    // v1.38：「软件启动后自动跑」整个删了。它和定时一条龙是叠在一起的两套触发，
+    // 用户说得对——开着定时又开着这个，早上那次跑完，晚上开机再跑一遍，账都算不清。
+    // 想让它一开机就跑，用「开机自启 + 定时」，那是同一件事且只算一次。
     public bool SentinelEnabled { get; set; } = true;
     public bool AutoRestartBgi { get; set; } = true;
     public bool ScreenshotCheckEnabled { get; set; } = true;
@@ -274,9 +294,6 @@ public class AppSettings
 
     /// <summary>定时触发时自动清理上次残留的工具进程（默认开）。</summary>
     public bool AutoKillResidual { get; set; } = true;
-
-    /// <summary>度假模式：所有定时触发暂停（手动不受限）。</summary>
-    public bool VacationMode { get; set; } = false;
 
     /// <summary>首启向导是否已完成（或跳过）。</summary>
     public bool FirstRunDone { get; set; } = false;

@@ -59,6 +59,19 @@ public partial class App : Application
 
         AppState.Init();
         KeepAwakeService.CompensateOnStartup();
+
+        // v1.38：开机自启对账。用户上次勾了「开机自启」，但那个值可能已经失效——
+        // 便携版文件夹被挪了（值还指着旧路径）、被任务管理器的「启动」页禁用过
+        // （StartupApproved 里留了 12 字节禁用标记）、或者被系统清理工具删了。
+        // 这三种情况下勾子都还是亮的，用户以为开着，实际开机什么都不会发生。
+        // 所以每次启动对一次账：只要用户要的是「开」，值不对就补写回去。
+        try
+        {
+            string? healNote = AutoStartHelper.Heal(AppState.Settings.AutoStartOnBoot);
+            if (healNote != null) LogService.LogEvent(healNote);
+        }
+        catch (Exception ex) { LogService.LogEvent("开机自启对账失败：" + ex.Message); }
+
         AppState.OnStatusChanged += _ => UpdateTrayMenu(); // 托盘菜单跟随运行状态
         Theme.ApplyFromSettings();
 
@@ -88,11 +101,17 @@ public partial class App : Application
 
         if (AppState.Settings.SentinelEnabled) SentinelService.Start();
 
-        // 软件启动后自动跑一条龙
-        if (AppState.Settings.AutoRunOnLaunch)
+        // v1.38：「软件启动后自动跑」删了。
+        //
+        // 它和定时一条龙是两套独立的触发：开着定时又开着这个，早上定时跑完，
+        // 晚上一开机再跑一遍，两次之间还会互相盖掉「上次跑过」的记录。
+        // 想开机就跑，正确组合是「开机自启 + 定时」——同一件事，只算一次。
+        //
+        // 开机自启时要不要把窗口收进托盘，由 StartMinimized 决定（见 BuildTray 之后）。
+        if (AppState.Settings.StartMinimized && AppState.Settings.StayInTray)
         {
-            LogService.LogEvent("开机选项：软件启动后自动开跑队列");
-            _ = QueueService.StartAsync(QueueTrigger.Manual);
+            LogService.LogEvent("启动时收进托盘（StartMinimized=开）");
+            _win.Hide();
         }
     }
 

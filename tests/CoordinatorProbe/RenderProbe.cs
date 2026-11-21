@@ -763,7 +763,11 @@ internal static class RenderProbe
                     if (mode == "wizard" || mode == "all")
                     {
                         SeedHeroState("ready");
-                        for (int step = 1; step <= 4; step++)
+                        // v1.38：加了第 3 步「开机自启」，现在一共五步。
+                        // 第 3 步是这一版新做的界面，必须拍到它真长什么样——
+                        // 那两个开关用的是窗口级资源，拿不到就会静默退回控件默认样子，
+                        // 那种「看起来没做完」的样子只有截图能看出来。
+                        for (int step = 1; step <= 5; step++)
                         {
                             var w = new FirstRunWindow();
                             // 步骤切换走私有方法，反射调它比自己摆一遍 Visibility 更接近真实

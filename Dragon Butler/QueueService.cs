@@ -138,12 +138,9 @@ public static class QueueService
 
         try
         {
-            // 度假模式：定时触发一律不跑（手动不受限）
-            if (trigger == QueueTrigger.Timer && AppState.Settings.VacationMode)
-            {
-                LogService.LogEvent("队列：度假模式生效，定时触发已跳过");
-                return false;
-            }
+            // v1.38：这里原来是「度假模式生效，定时触发一律不跑」。那个开关删了——
+            // 想临时不跑，把定时关掉就是了；多一个名字说同一件事，
+            // 只会让人在「我明明关了定时」和「它怎么又不跑」之间来回找原因。
 
             var items = BuildItems(trigger);
             if (items.Count == 0)

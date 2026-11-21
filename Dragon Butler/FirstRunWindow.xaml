@@ -239,6 +239,81 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- v1.38：第 3 步（开机自启）用到的四个样式。
+             窗口级资源拿不到主窗那份——这条坑踩过好几次了：拿不到时 WPF 不报错，
+             只会静默退回控件默认样子（浅色底、方角），在这一窗里显得像另一个软件。 -->
+        <Style x:Key="SetRow" TargetType="Border">
+            <Setter Property="Padding" Value="0,11,0,11"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+        <Style x:Key="SetRowLast" TargetType="Border" BasedOn="{StaticResource SetRow}">
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style x:Key="SetLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="Margin" Value="0,0,12,0"/>
+        </Style>
+        <Style x:Key="SetHint" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,4,0,0"/>
+            <Setter Property="LineHeight" Value="16"/>
+        </Style>
+
+        <Style x:Key="SwitchStyle" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Width" Value="38"/>
+            <Setter Property="Height" Value="21"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid Width="38" Height="21">
+                            <Border x:Name="OffBg" CornerRadius="12" Background="{DynamicResource ControlBgBrush}"
+                                    BorderBrush="{DynamicResource BorderStrongBrush}" BorderThickness="1"/>
+                            <Border x:Name="OnBg" CornerRadius="12" Background="{DynamicResource BrandBrush}" Opacity="0"/>
+                            <Ellipse x:Name="Knob" Width="15" Height="15" Fill="{DynamicResource TextPrimaryBrush}"
+                                     HorizontalAlignment="Left" Margin="3,0,3,0">
+                                <Ellipse.RenderTransform>
+                                    <TranslateTransform x:Name="KnobT" X="0"/>
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="OnBg" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                                            <DoubleAnimation Storyboard.TargetName="KnobT" Storyboard.TargetProperty="X" To="17" Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="OnBg" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                                            <DoubleAnimation Storyboard.TargetName="KnobT" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.12">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border Margin="16" CornerRadius="14" Background="{DynamicResource CardBgBrush}"
@@ -256,9 +331,9 @@
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0">
-                <TextBlock Text="第一次使用，四步就好" FontSize="16" FontWeight="SemiBold"
+                    <TextBlock Text="第一次使用，五步就好" FontSize="16" FontWeight="SemiBold"
                            Foreground="{DynamicResource TextPrimaryBrush}"/>
-                <TextBlock x:Name="TbStep" Text="第 1 步 / 共 4 步" FontSize="11" Margin="0,5,0,0"
+                    <TextBlock x:Name="TbStep" Text="第 1 步 / 共 5 步" FontSize="11" Margin="0,5,0,0"
                            Foreground="{DynamicResource TextTertiaryBrush}"/>
             </StackPanel>
 
@@ -289,9 +364,46 @@
                            Foreground="{DynamicResource TextTertiaryBrush}"/>
             </StackPanel>
 
-            <!-- 步骤 3：完成 -->
-            <!-- 步骤 3：跑完怎么告诉你 -->
+            <!-- 步骤 3：开机自启 -->
             <StackPanel x:Name="Step3" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
+                <TextBlock FontSize="12.5" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           Text="要不要让它跟着电脑一起起来。这两项都在设置里能改。"/>
+
+                <StackPanel Margin="0,14,0,0">
+                    <Border Style="{StaticResource SetRow}">
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SetLabel}" Text="开机自启动"/>
+                                <TextBlock Style="{StaticResource SetHint}"
+                                           Text="系统启动时程序自动运行。不装服务、不写系统目录，只往当前用户的启动项里加一条。"/>
+                            </StackPanel>
+                            <ToggleButton x:Name="WizAutoStart" Style="{StaticResource SwitchStyle}"
+                                          HorizontalAlignment="Right" VerticalAlignment="Center"
+                                          Click="WizAutoStart_Click"/>
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SetRowLast}">
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SetLabel}" Text="启动时最小化到托盘"/>
+                                <TextBlock Style="{StaticResource SetHint}"
+                                           Text="开机后它自己在托盘里待着，不弹窗口——自启的意思是「它就在」，不是「在你脸上开一扇窗」。"/>
+                            </StackPanel>
+                            <ToggleButton x:Name="WizStartMin" Style="{StaticResource SwitchStyle}"
+                                          HorizontalAlignment="Right" VerticalAlignment="Center"
+                                          Click="WizStartMin_Click"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <TextBlock x:Name="TbStartupNote" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+            </StackPanel>
+
+            <!-- 步骤 4：跑完怎么告诉你 -->
+            <StackPanel x:Name="Step4" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
                 <TextBlock FontSize="12.5" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextSecondaryBrush}"
                            Text="跑完之后要不要提醒你，怎么提醒。默认什么都不弹——挂机时每跑完一个工具就弹一次，比不提醒更烦。"/>
@@ -320,8 +432,8 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- 步骤 4：完成 -->
-            <StackPanel x:Name="Step4" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
+            <!-- 步骤 5：完成 -->
+            <StackPanel x:Name="Step5" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
                 <TextBlock Text="现在就绪了。" FontSize="14" FontWeight="SemiBold"
                            Foreground="{DynamicResource TextPrimaryBrush}"/>
                 <TextBlock Margin="0,8,0,0" FontSize="12.5" TextWrapping="Wrap"
