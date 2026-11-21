@@ -119,6 +119,40 @@ public static class QueueService
     /// <summary>测试用：覆盖工具间隔（null=按设置）。</summary>
     public static TimeSpan? IntervalOverride { get; set; }
 
+    // ===== v1.41 / M3-7：「跳过这次」 =====
+
+    /// <summary>
+    /// 这一次不想跑的工具有哪些（工具 id）。只活到这一趟队列结束——
+    /// 它和 <see cref="QueueEntry.Enabled"/> 是两件事：后者是把这项从队列里关掉，
+    /// 得人手动开回来；这里只是「这一趟先别跑它」，下一趟定时照旧。
+    /// </summary>
+    private static readonly HashSet<string> _skipOnce = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>这个工具是否被标成「这次不跑」。</summary>
+    public static bool IsSkippedOnce(string toolId)
+    {
+        if (string.IsNullOrWhiteSpace(toolId)) return false;
+        lock (Gate) return _skipOnce.Contains(toolId);
+    }
+
+    /// <summary>翻转「这次不跑」。返回翻转之后是不是「不跑」。</summary>
+    public static bool ToggleSkipOnce(string toolId)
+    {
+        if (string.IsNullOrWhiteSpace(toolId)) return false;
+        lock (Gate)
+        {
+            if (_skipOnce.Contains(toolId)) { _skipOnce.Remove(toolId); return false; }
+            _skipOnce.Add(toolId);
+            return true;
+        }
+    }
+
+    /// <summary>队列跑完就把「这次不跑」清空——它是给这一趟用的，不跨趟。</summary>
+    private static void ClearSkipOnce()
+    {
+        lock (Gate) _skipOnce.Clear();
+    }
+
     /// <summary>
     /// 启动整条队列。返回 true 表示跑完（含被停止），false 表示没有可执行项。
     /// </summary>
@@ -369,6 +403,26 @@ public static class QueueService
             {
                 if (_stopRequested) break;
                 var profile = items[i];
+
+                // v1.41 / M3-7：右键点了「跳过这次」。放在最前面判断，
+                // 连 CurrentToolId 都不改——界面上不该闪一下「运行中」再说跳过。
+                // 也不写台账：跳过不算跑过，下次接着跑仍要尝试（同 RunJournal 的立场）。
+                if (IsSkippedOnce(profile.ToolId))
+                {
+                    LogService.LogEvent($"队列：{profile.DisplayName} 被标为「这次不跑」，跳过");
+                    DecisionLog.Add(DecisionSource.Queue, $"跳过 {profile.DisplayName}", "你在桌面上点了「这次不跑」");
+                    LastResults.Add(new QueueItemResult
+                    {
+                        ToolId = profile.ToolId,
+                        DisplayName = profile.DisplayName,
+                        State = ToolRunState.Idle,
+                        Reason = "这次不跑",
+                        Skipped = true,
+                    });
+                    RaiseState();
+                    continue;
+                }
+
                 CurrentToolId = profile.ToolId;
                 CurrentToolStartedAt = DateTime.Now;
                 RaiseState();
@@ -1224,6 +1278,9 @@ public static class QueueService
             HasFailure = anyFailed,
             Stopped = _stopRequested,
         });
+
+        // v1.41 / M3-7：「这次不跑」只活一趟，队列结束就清空。
+        ClearSkipOnce();
     }
 
     /// <summary>

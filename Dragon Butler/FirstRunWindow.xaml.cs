@@ -11,12 +11,17 @@ using Microsoft.Win32;
 namespace DragonButler;
 
 /// <summary>
-/// 首启向导：选工具 → 自动寻找路径 → 跑完怎么提醒 → 完成。
+/// 首启向导：选工具 → 找路径 → 每天几点跑 → 跑完怎么提醒 → 完成。
 /// 只在"首次运行且没有任何已配置工具"时由主界面弹出，可随时跳过。
 ///
 /// v1.25 加了第 3 步（推送渠道）。原因是通知默认从「Windows 通知」改成了「不推送」：
 /// 默认改安静之后，得在第一次打开的地方把选择权交出去，否则「默认不推送」就变成
 /// 「这软件没有通知」——两件事不一样，前者是选择，后者是缺陷。
+///
+/// v1.41（任务书 M2）：步骤改成 工具 / 路径 / 时间 / 通知 / 完成。
+/// 「每天几点跑」提到第 3 步，是因为定时是这个软件的入口——装了不用定时的人，
+/// 每次都要自己点一下，那不叫自动化。开机自启两项挪到完成页收尾，
+/// 它俩是「顺手」而不是「必经」，摆在中间会让人以为不答就过不去。
 /// </summary>
 public partial class FirstRunWindow : Window
 {
@@ -33,6 +38,12 @@ public partial class FirstRunWindow : Window
 
     /// <summary>上一次 SyncNotifyStep 时显示的是哪个渠道，用来在切换前把当前输入收起来。</summary>
     private string _notifyShownMode = "";
+
+    /// <summary>已经自动找过的工具：第 2 步只自动跑一次，来回翻页不该反复扫盘。</summary>
+    private readonly HashSet<string> _autoTried = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>点了「完成并试跑一次」之后置 true，由主窗读它决定要不要立刻跑第一个工具。</summary>
+    public bool TrialRequested { get; private set; }
 
     /// <summary>向导里能配的渠道：只放「填一个地址就能用」的。
     /// Telegram 要两个字段、邮件要七行，塞进向导会把这一页撑成表单，
@@ -56,13 +67,62 @@ public partial class FirstRunWindow : Window
             "POST JSON：source / level / title / message / timestamp"),
     };
 
+    /// <summary>v1.41 / M2-8：渠道分三组。分组的意义是让人先判断「我要发到哪儿」，
+    /// 再去认具体是哪个软件——九个胶囊平铺时，找「飞书」和找「Bark」一样费劲。</summary>
+    private static readonly (string Group, string[] Modes)[] NotifyGroups =
+    {
+        ("本机", new[] { "Toast", "Balloon" }),
+        ("IM", new[] { "Wecom", "Feishu", "DingTalk" }),
+        ("手机", new[] { "Bark", "Xxtui", "Webhook" }),
+    };
+
+    /// <summary>v1.41 / M2-1：第 3 步的时间预设。</summary>
+    private static readonly (int Hour, int Minute)[] TimePresets =
+    {
+        (8, 0), (12, 0), (23, 30),
+    };
+
+    /// <summary>「我自己挑」这一档的 Tag。</summary>
+    private const string CustomTimeTag = "custom";
+
     public FirstRunWindow()
     {
         InitializeComponent();
         BuildToolPicks();
         ApplyQueueSelection();
         BuildNotifyPicks();
+        BuildTimePicks();
         UpdateUi();
+        Loaded += (_, _) => FitToOwner();
+    }
+
+    /// <summary>
+    /// v1.41 / M3-1：主页那张「三步就能开始」的清单会跳到这里来。
+    /// 不新建一个「只问时间」的小窗——那等于把向导拆成两套步骤逻辑，
+    /// 以后加一步要改两处。
+    /// </summary>
+    public void JumpToStep(int step)
+    {
+        _step = Math.Clamp(step, 1, TotalSteps);
+        UpdateUi();
+    }
+
+    /// <summary>
+    /// v1.41 / M2-10：向导不再是一张飘在桌面上的小卡，而是压在主窗上的一层遮罩。
+    /// 窗口本身铺满主窗，中间那张 760 宽的卡才是内容。
+    /// </summary>
+    private void FitToOwner()
+    {
+        try
+        {
+            if (Owner == null) return;
+            var o = Owner;
+            Left = o.Left;
+            Top = o.Top;
+            Width = o.ActualWidth > 0 ? o.ActualWidth : o.Width;
+            Height = o.ActualHeight > 0 ? o.ActualHeight : o.Height;
+        }
+        catch { }
     }
 
     /// <summary>
@@ -114,6 +174,18 @@ public partial class FirstRunWindow : Window
         RefreshPickSummary();
     }
 
+    /// <summary>v1.41 / M2-7：命令行类工具的图标画成 <c>&gt;_</c>。</summary>
+    private static bool LooksLikeCommandLine(ToolProfile profile)
+    {
+        string name = profile.DisplayName ?? "";
+        if (name.Contains("命令行", StringComparison.Ordinal)
+            || name.Contains("CLI", StringComparison.OrdinalIgnoreCase)) return true;
+
+        var known = ToolCatalog.Find(profile.ToolId);
+        string shortName = known?.ShortName ?? "";
+        return shortName.Contains("CLI", StringComparison.OrdinalIgnoreCase);
+    }
+
     private UIElement BuildPickRow(ToolProfile profile)
     {
         var known = ToolCatalog.Find(profile.ToolId);
@@ -153,6 +225,20 @@ public partial class FirstRunWindow : Window
                 Source = bitmap,
                 Stretch = Stretch.Uniform,
                 Margin = new Thickness(5),
+            };
+        }
+        else if (LooksLikeCommandLine(profile))
+        {
+            // M2-7：命令行工具用一个终端提示符当图标，一眼能和图形界面的那几个分开。
+            icon.Child = new TextBlock
+            {
+                Text = ">_",
+                FontFamily = new FontFamily("Consolas, Cascadia Mono, Courier New"),
+                FontSize = 17,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = (Brush?)TryFindResource("TextSecondaryBrush") ?? Brushes.Gray,
             };
         }
         else
@@ -249,13 +335,39 @@ public partial class FirstRunWindow : Window
         Step3.Visibility = _step == 3 ? Visibility.Visible : Visibility.Collapsed;
         Step4.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
         Step5.Visibility = _step == 5 ? Visibility.Visible : Visibility.Collapsed;
-        BtnBack.Visibility = _step == 1 ? Visibility.Collapsed : Visibility.Visible;
-        BtnNext.Content = _step == TotalSteps ? "完成" : "下一步";
+
+        // v1.41 / M2-6：五段进度条。当前那段高亮，走过的填充，没到的留灰。
+        var done = (Brush?)TryFindResource("BrandBrush") ?? Brushes.Green;
+        var current = (Brush?)TryFindResource("BrandBrush") ?? Brushes.Green;
+        var todo = (Brush?)TryFindResource("BorderStrongBrush") ?? Brushes.Gray;
+        var bars = new[] { Prog1, Prog2, Prog3, Prog4, Prog5 };
+        for (int i = 0; i < bars.Length; i++)
+        {
+            bars[i].Background = i + 1 < _step ? done : i + 1 == _step ? current : todo;
+            bars[i].Opacity = i + 1 == _step ? 1.0 : 0.85;
+        }
+
+        // v1.41 / M2-4：最后一步不留「跳过」和「上一步」——那时候该问的已经问完了，
+        // 再摆一个退出口只会让人怀疑自己漏了什么。
+        bool last = _step == TotalSteps;
+        BtnSkip.Visibility = last ? Visibility.Collapsed : Visibility.Visible;
+        BtnBack.Visibility = _step > 1 && !last ? Visibility.Visible : Visibility.Collapsed;
+        BtnDoneLater.Visibility = last ? Visibility.Visible : Visibility.Collapsed;
+        BtnNext.Content = last ? "完成并试跑一次" : "下一步";
+
+        TbNextPreview.Text = _step switch
+        {
+            1 => "下一步：给它们找主程序，多数情况下会自动找到。",
+            2 => "下一步：定个每天几点跑。",
+            3 => "下一步：选跑完之后要不要提醒你。",
+            4 => "下一步：看一眼总结，然后就能开跑了。",
+            _ => "",
+        };
 
         if (_step == 2) BuildFindRows();
-        if (_step == 3) SyncStartupStep();
+        if (_step == 3) SyncTimeStep();
         if (_step == 4) SyncNotifyStep();
-        if (_step == 5) BuildDoneSummary();
+        if (_step == 5) { BuildDoneSummary(); SyncStartupStep(); }
     }
 
     private List<ToolProfile> SelectedProfiles()
@@ -275,12 +387,15 @@ public partial class FirstRunWindow : Window
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             row.Children.Add(new TextBlock
             {
                 Text = profile.DisplayName,
                 FontSize = 12.5,
                 VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 88,
+                TextTrimming = TextTrimming.CharacterEllipsis,
                 Foreground = (Brush?)TryFindResource("TextPrimaryBrush") ?? Brushes.Black,
             });
 
@@ -291,13 +406,48 @@ public partial class FirstRunWindow : Window
                 // 而点「下一步」存的是 _found——看得见和存得下的不是同一个东西。
                 Text = _found.TryGetValue(profile.ToolId, out var kept) ? kept : profile.ExecutablePath,
                 Height = 30,
-                IsReadOnly = true,
+                // v1.41 / M2-3：改成可编辑。有人的程序装在很偏的地方，浏览器一点点翻
+                // 比直接粘一条路径慢得多；自动找到时它照样是填好的。
+                IsReadOnly = false,
                 Style = TryFindResource("InputBox") as Style,
                 Margin = new Thickness(0, 0, 8, 0),
                 Tag = profile.ToolId,
             };
-            Grid.SetColumn(box, 1);
-            row.Children.Add(box);
+
+            var placeholder = new TextBlock
+            {
+                Text = "比如 D:\\Games\\BetterGI\\BetterGI.exe",
+                FontSize = 11.5,
+                Margin = new Thickness(11, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false,
+                Foreground = (Brush?)TryFindResource("TextTertiaryBrush") ?? Brushes.Gray,
+                Visibility = string.IsNullOrWhiteSpace(box.Text) ? Visibility.Visible : Visibility.Collapsed,
+            };
+            box.TextChanged += (_, _) =>
+            {
+                placeholder.Visibility = string.IsNullOrWhiteSpace(box.Text) ? Visibility.Visible : Visibility.Collapsed;
+                _found[profile.ToolId] = box.Text ?? "";
+            };
+
+            var boxHost = new Grid();
+            boxHost.Children.Add(box);
+            boxHost.Children.Add(placeholder);
+            Grid.SetColumn(boxHost, 1);
+            row.Children.Add(boxHost);
+
+            // v1.41 / M2-3：找到之后留一个绿勾，让人不用去读路径也能确认这一步过了。
+            var tick = new TextBlock
+            {
+                Text = "✓",
+                FontSize = 12,
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = (Brush?)TryFindResource("SuccessBrush") ?? Brushes.Green,
+                Visibility = string.IsNullOrWhiteSpace(box.Text) ? Visibility.Collapsed : Visibility.Visible,
+            };
+            Grid.SetColumn(tick, 2);
+            row.Children.Add(tick);
 
             var find = new Button
             {
@@ -308,8 +458,8 @@ public partial class FirstRunWindow : Window
                 Tag = profile.ToolId,
                 Margin = new Thickness(0, 0, 6, 0),
             };
-            find.Click += (_, _) => AutoFind(profile, box);
-            Grid.SetColumn(find, 2);
+            find.Click += (_, _) => AutoFind(profile, box, tick);
+            Grid.SetColumn(find, 3);
             row.Children.Add(find);
 
             var browse = new Button
@@ -320,26 +470,38 @@ public partial class FirstRunWindow : Window
                 MinWidth = 64,
                 Tag = profile.ToolId,
             };
-            browse.Click += (_, _) => Browse(profile, box);
-            Grid.SetColumn(browse, 3);
+            browse.Click += (_, _) =>
+            {
+                Browse(profile, box);
+                tick.Visibility = string.IsNullOrWhiteSpace(box.Text) ? Visibility.Collapsed : Visibility.Visible;
+            };
+            Grid.SetColumn(browse, 4);
             row.Children.Add(browse);
 
             FindHost.Children.Add(row);
+
+            // M2-3：进这一步就先替你找一遍。找得到的人只用点「下一步」，一次都不用手动选。
+            if (_autoTried.Add(profile.ToolId))
+                AutoFind(profile, box, tick);
         }
+
         TbFindSummary.Text = "提示：多数情况下点「自动寻找」就能命中；如果没找到，选到工具的 exe 即可。";
     }
 
-    private void AutoFind(ToolProfile profile, TextBox box)
+    private void AutoFind(ToolProfile profile, TextBox box, TextBlock? tick = null)
     {
         var found = ToolDiscovery.TryAutoDiscover(profile, out string source);
         if (string.IsNullOrWhiteSpace(found))
         {
+            // 没找到就说没找到，并把框留空、提示照旧——别猜一个官方安装位置填进去。
             TbFindSummary.Text = $"{profile.DisplayName}：未自动找到，请手动选择文件夹。";
+            if (tick != null && string.IsNullOrWhiteSpace(box.Text)) tick.Visibility = Visibility.Collapsed;
             return;
         }
         box.Text = found;
         _found[profile.ToolId] = found;
-        TbFindSummary.Text = $"{profile.DisplayName}：已找到（{source}），点「下一步」生效。";
+        if (tick != null) tick.Visibility = Visibility.Visible;
+        TbFindSummary.Text = $"{profile.DisplayName}：已自动找到（{source}），可直接下一步。";
     }
 
     private void Browse(ToolProfile profile, TextBox box)
@@ -354,19 +516,223 @@ public partial class FirstRunWindow : Window
         _found[profile.ToolId] = dlg.FileName;
     }
 
+    // ===== 第 3 步：每天几点跑（v1.41 / M2-1）=====
+    //
+    // 时间写在 AppState.Settings.ScheduleHour / ScheduleMinute 上——和主页那张
+    // 「每天自动跑一条龙」卡是同一份数据，不另存一份。两份时间最后一定会不一致，
+    // 而用户只会看到「向导里设的 8 点，主页显示 23:30」。
+
+    private void BuildTimePicks()
+    {
+        TimeChipHost.Children.Clear();
+        foreach (var (hour, minute) in TimePresets)
+        {
+            var chip = new RadioButton
+            {
+                Content = $"{hour:00}:{minute:00}",
+                Tag = $"{hour:00}:{minute:00}",
+                Style = TryFindResource("WizChip") as Style,
+                GroupName = "WizTime",
+            };
+            chip.Checked += (_, _) =>
+            {
+                CustomTimeHost.Visibility = Visibility.Collapsed;
+                RefreshTimeSummary();
+            };
+            TimeChipHost.Children.Add(chip);
+        }
+
+        var custom = new RadioButton
+        {
+            Content = "我自己挑",
+            Tag = CustomTimeTag,
+            Style = TryFindResource("WizChip") as Style,
+            GroupName = "WizTime",
+        };
+        custom.Checked += (_, _) =>
+        {
+            CustomTimeHost.Visibility = Visibility.Visible;
+            if (string.IsNullOrWhiteSpace(TbTimeHour.Text)) TbTimeHour.Text = AppState.Settings.ScheduleHour.ToString("00");
+            if (string.IsNullOrWhiteSpace(TbTimeMinute.Text)) TbTimeMinute.Text = AppState.Settings.ScheduleMinute.ToString("00");
+            TbTimeHour.Focus();
+            TbTimeHour.SelectAll();
+            RefreshTimeSummary();
+        };
+        TimeChipHost.Children.Add(custom);
+    }
+
+    /// <summary>进这一页时把当前设置回显：已经是 08:00 就选中 08:00，不在预设里就落到「我自己挑」。</summary>
+    private void SyncTimeStep()
+    {
+        int h = AppState.Settings.ScheduleHour;
+        int m = AppState.Settings.ScheduleMinute;
+
+        string hit = "";
+        foreach (var (hour, minute) in TimePresets)
+            if (hour == h && minute == m) hit = $"{hour:00}:{minute:00}";
+
+        bool presetHit = false;
+        foreach (var child in TimeChipHost.Children)
+        {
+            if (child is not RadioButton chip) continue;
+            string tag = chip.Tag as string ?? "";
+            if (tag == CustomTimeTag)
+            {
+                chip.IsChecked = !presetHit && hit.Length == 0;
+            }
+            else
+            {
+                bool on = tag == hit;
+                chip.IsChecked = on;
+                if (on) presetHit = true;
+            }
+        }
+
+        TbTimeHour.Text = h.ToString("00");
+        TbTimeMinute.Text = m.ToString("00");
+        CustomTimeHost.Visibility = (presetHit || hit.Length > 0) ? Visibility.Collapsed : Visibility.Visible;
+        RefreshTimeSummary();
+    }
+
+    /// <summary>当前选中的时间（小时，分钟）。没选或填得不像时间就退回设置里现有的值。</summary>
+    private (int Hour, int Minute) SelectedTime()
+    {
+        foreach (var child in TimeChipHost.Children)
+        {
+            if (child is not RadioButton chip || chip.IsChecked != true) continue;
+            string tag = chip.Tag as string ?? "";
+            if (tag == CustomTimeTag) break;
+            var parts = tag.Split(':');
+            if (parts.Length == 2
+                && int.TryParse(parts[0], out int ph) && ph is >= 0 and <= 23
+                && int.TryParse(parts[1], out int pm) && pm is >= 0 and <= 59)
+                return (ph, pm);
+        }
+
+        int hh = int.TryParse((TbTimeHour.Text ?? "").Trim(), out int a) && a is >= 0 and <= 23 ? a : AppState.Settings.ScheduleHour;
+        int mm = int.TryParse((TbTimeMinute.Text ?? "").Trim(), out int b) && b is >= 0 and <= 59 ? b : AppState.Settings.ScheduleMinute;
+        return (hh, mm);
+    }
+
+    private void RefreshTimeSummary()
+    {
+        var (h, m) = SelectedTime();
+        TbTimeSummary.Text = $"到点（每天 {h:00}:{m:00}）自动拉起选中的工具跑一遍。想改随时改，主页那张卡就是它。";
+        TbTimeNote.Text = "24 小时制，0–23 点";
+    }
+
+    private void TbTimeField_LostFocus(object sender, RoutedEventArgs e)
+    {
+        // 只收两位数字。填成 25 点这种明显不像时间的，留给人自己看，不偷偷改成 8 点。
+        if (sender is TextBox box)
+        {
+            string raw = (box.Text ?? "").Trim();
+            if (raw.Length == 0) return;
+            if (!int.TryParse(raw, out int v))
+            {
+                TbTimeNote.Text = "填数字，比如 08";
+                return;
+            }
+            int max = ReferenceEquals(box, TbTimeHour) ? 23 : 59;
+            if (v < 0 || v > max)
+            {
+                TbTimeNote.Text = ReferenceEquals(box, TbTimeHour) ? "小时是 0–23" : "分钟是 0–59";
+                return;
+            }
+            box.Text = v.ToString("00");
+            TbTimeNote.Text = "24 小时制，0–23 点";
+        }
+        RefreshTimeSummary();
+    }
+
+    /// <summary>把向导里选的时间落进定时配置——和主页定时卡共用一份。</summary>
+    private void SaveTimeChoice()
+    {
+        var (h, m) = SelectedTime();
+        var s = AppState.Settings;
+        bool changed = s.ScheduleHour != h || s.ScheduleMinute != m;
+        s.ScheduleHour = h;
+        s.ScheduleMinute = m;
+        s.ScheduleEnabled = true;
+        AppState.SaveSettings();
+        if (changed)
+            LogService.LogEvent($"首启向导：定时设为每天 {h:00}:{m:00}");
+    }
+
+    // ===== 第 5 步：完成（v1.41 / M2-4、M2-5）=====
+
     private void BuildDoneSummary()
     {
-        var lines = new List<string>();
+        DoneSummaryHost.Children.Clear();
+        string? firstBrokenTool = null;
+
         foreach (var profile in SelectedProfiles())
         {
             bool ok = !string.IsNullOrWhiteSpace(profile.ExecutablePath);
-            lines.Add($"{profile.DisplayName}：{(ok ? "已就绪" : "还没设置路径（可稍后在工具卡里设置）")}");
+            if (!ok && firstBrokenTool == null) firstBrokenTool = profile.ToolId;
+
+            var row = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 3, 0, 0),
+            };
+            row.Children.Add(new TextBlock
+            {
+                Text = ok
+                    ? $"{profile.DisplayName}：已就绪"
+                    : $"{profile.DisplayName}：还没设置路径（可稍后在工具卡里设置）",
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (Brush?)TryFindResource(ok ? "TextPrimaryBrush" : "WarningBrush")
+                             ?? Brushes.Gray,
+            });
+
+            // M2-5：没办完的事就地给个入口，不用关掉向导再去找。
+            if (!ok)
+            {
+                var link = new Button
+                {
+                    Content = "现在去设置",
+                    Style = TryFindResource("WizLink") as Style,
+                    Margin = new Thickness(8, 0, 0, 0),
+                    Tag = 2,
+                };
+                link.Click += (_, _) => { _step = 2; UpdateUi(); };
+                row.Children.Add(link);
+            }
+            DoneSummaryHost.Children.Add(row);
         }
-        lines.Add("跑完提醒：" + DescribeNotifySelection());
-        TbDoneSummary.Text = string.Join("\n", lines);
+
+        // 定时这一行永远有值（第 3 步一定选过一个），所以不给「现在去设置」，
+        // 只把将要发生的事说清楚。
+        var (h, m) = SelectedTime();
+        DoneSummaryHost.Children.Add(new TextBlock
+        {
+            Text = $"每天 {h:00}:{m:00}：自动跑一遍",
+            FontSize = 12,
+            Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = (Brush?)TryFindResource("TextPrimaryBrush") ?? Brushes.White,
+        });
+
+        var notifyRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 3, 0, 0),
+        };
+        notifyRow.Children.Add(new TextBlock
+        {
+            Text = "跑完提醒：" + DescribeNotifySelection(),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = (Brush?)TryFindResource("TextPrimaryBrush") ?? Brushes.White,
+        });
+        DoneSummaryHost.Children.Add(notifyRow);
     }
 
-    // ===== 第 3 步：推送渠道（v1.25）=====
+    // ===== 第 4 步：推送渠道（v1.25）=====
 
     /// <summary>
     /// 建渠道胶囊。渠道清单直接来自 <see cref="NotifyChoices"/>，
@@ -375,10 +741,11 @@ public partial class FirstRunWindow : Window
     /// </summary>
     private void BuildNotifyPicks()
     {
-        NotifyChipHost.Children.Clear();
+        NotifyTopHost.Children.Clear();
+        NotifyGroupsHost.Children.Clear();
         _notifyPicks.Clear();
 
-        foreach (var (mode, label, _, _) in NotifyChoices)
+        RadioButton MakeChip(string mode, string label)
         {
             var chip = new RadioButton
             {
@@ -389,13 +756,37 @@ public partial class FirstRunWindow : Window
             };
             chip.Checked += (_, _) => SyncNotifyStep();
             _notifyPicks[mode] = chip;
-            NotifyChipHost.Children.Add(chip);
+            return chip;
+        }
+
+        // M2-8：「不推送」不是一个渠道，是「不选渠道」，所以单独置顶。
+        var off = NotifyChoices.First(c => c.Mode == "Off");
+        NotifyTopHost.Children.Add(MakeChip(off.Mode, off.Label));
+
+        foreach (var (group, modes) in NotifyGroups)
+        {
+            var head = new TextBlock
+            {
+                Text = group,
+                Style = TryFindResource("WizGroupLabel") as Style,
+            };
+            NotifyGroupsHost.Children.Add(head);
+
+            var wrap = new WrapPanel();
+            foreach (string mode in modes)
+            {
+                var choice = NotifyChoices.FirstOrDefault(c => c.Mode == mode);
+                if (choice.Label == null) continue;
+                wrap.Children.Add(MakeChip(choice.Mode, choice.Label));
+            }
+            NotifyGroupsHost.Children.Add(wrap);
         }
 
         // 预选当前设置。老配置升级上来是 Off（见 AppState.LoadSettings 的迁移），
         // 所以默认停在「不推送」——和这个程序平时的行为一致，不吓人。
         string hit = NormalizeMode(AppState.Settings.NotifyMode);
         if (_notifyPicks.TryGetValue(hit, out var picked)) picked.IsChecked = true;
+        else if (_notifyPicks.TryGetValue("Off", out var fallback)) fallback.IsChecked = true;
     }
 
     /// <summary>设置里的值 → 向导里有的那几档。没列进向导的（Telegram/邮件/WebSocket）落到最近的一档。</summary>
@@ -560,6 +951,8 @@ public partial class FirstRunWindow : Window
         finally { BtnNotifyTest.IsEnabled = true; }
     }
 
+    // ===== 按钮 =====
+
     private void BtnNext_Click(object sender, RoutedEventArgs e)
     {
         if (_step == 1)
@@ -567,7 +960,7 @@ public partial class FirstRunWindow : Window
             SaveSelection();
             if (SelectedProfiles().Count == 0)
             {
-                TbFindSummary.Text = "";
+                TbPickSummary.Text = "";
                 NotifyService.Show(NotifyLevel.Warning, "龙管家", "至少勾选一个工具，或点「跳过」稍后再设置。");
                 return;
             }
@@ -586,6 +979,7 @@ public partial class FirstRunWindow : Window
 
         if (_step == 3)
         {
+            SaveTimeChoice();
             _step = 4;
             UpdateUi();
             return;
@@ -599,8 +993,7 @@ public partial class FirstRunWindow : Window
             return;
         }
 
-        ApplyAll();
-        Close();
+        Finish(trial: true);
     }
 
     private void BtnBack_Click(object sender, RoutedEventArgs e)
@@ -610,10 +1003,48 @@ public partial class FirstRunWindow : Window
         UpdateUi();
     }
 
+    /// <summary>
+    /// 中途跳过：只留已经选好的工具，别的一概不写。
+    /// v1.41 / M2-12：这种情况不算「走完了五步」，OnboardingCompleted 保持 false——
+    /// 下次首页该给的还是那张引导卡，而不是「昨晚没跑」。
+    /// </summary>
     private void BtnSkip_Click(object sender, RoutedEventArgs e)
     {
         SaveSelection();
         Close();
+    }
+
+    private void BtnDoneLater_Click(object sender, RoutedEventArgs e) => Finish(trial: false);
+
+    /// <summary>v1.41 / M2-4：两个完成按钮共用的收尾。区别只有一个：要不要马上去跑一次。</summary>
+    private void Finish(bool trial)
+    {
+        ApplyAll();
+        TrialRequested = trial;
+        Close();
+    }
+
+    // ===== v1.41 / M2-11：键盘 =====
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            // 等同旧的「跳过」：不留二次确认。向导是随时能重开的东西，
+            // 弹一个「真的要跳过吗」只会让人觉得被拦住了。
+            e.Handled = true;
+            SaveSelection();
+            Close();
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            // 输入框里按回车是「确认这一格」，不是「翻页」。
+            if (Keyboard.FocusedElement is TextBox) return;
+            e.Handled = true;
+            BtnNext_Click(this, new RoutedEventArgs());
+        }
     }
 
     private void SaveSelection()
@@ -677,6 +1108,7 @@ public partial class FirstRunWindow : Window
     {
         foreach (var kv in _found)
         {
+            if (string.IsNullOrWhiteSpace(kv.Value)) continue;
             var profile = ProfileRegistry.Get(kv.Key);
             profile.ExecutablePath = kv.Value;
             if (string.Equals(kv.Key, "bettergi", StringComparison.OrdinalIgnoreCase))
@@ -690,6 +1122,7 @@ public partial class FirstRunWindow : Window
         SaveSelection();
         SavePaths();
         SaveNotifyChoice();
+        SaveTimeChoice();
 
         // v1.38：开机自启留到最后一步才真写。
         // 中途跳过的人不该在系统里留一条自己都不知道的启动项。
@@ -706,17 +1139,19 @@ public partial class FirstRunWindow : Window
             AppState.Settings.AutoStartOnBoot = false;
         }
         AppState.Settings.StartMinimized = WizStartMin.IsChecked == true;
+
+        // v1.41 / M2-12：这两个按钮就是「走完了五步」的证据。
+        AppState.Settings.OnboardingCompleted = true;
         AppState.SaveSettings();
 
         LogService.LogEvent("首启向导：完成");
     }
 
-    // ===== v1.38：第 3 步 开机自启 =====
+    // ===== 第 5 步：开机自启（v1.38，v1.41 从第 3 步挪过来）=====
     //
-    // 为什么这一步要放在「选工具」之后而不是最前面：一个还没决定要用哪些工具的人，
+    // 为什么这两项不再单独占一步：一个还没决定要用哪些工具的人，
     // 问「要不要开机自启」是没有意义的——他不知道自己在让什么东西自启。
-    // 也不能放在最后，最后一步是「完成了，去点一键开跑」，再插一页设置就变成
-    // 「以为结束了，结果还要答一道题」。
+    // 放在完成页下方当「顺手两项」，不勾也能过，才是它该有的分量。
 
     /// <summary>进这一页时把当前注册表状态读回来，别让勾子显示一个想当然的值。</summary>
     private void SyncStartupStep()
@@ -732,8 +1167,8 @@ public partial class FirstRunWindow : Window
     private void WizAutoStart_Click(object sender, RoutedEventArgs e)
     {
         bool on = WizAutoStart.IsChecked == true;
-        // 只在「关掉」时立刻动注册表；打开留到最后一步一起写——
-        // 用户在中途点了「跳过」，就不该已经在系统里留了一条。
+        // 只在「关掉」时立刻动注册表；打开留到最后一起写——
+        // 用户在中途关掉向导，就不该已经在系统里留了一条。
         if (!on)
         {
             var (ok, msg) = AutoStartHelper.Set(false);
@@ -744,7 +1179,7 @@ public partial class FirstRunWindow : Window
         }
         TbStartupNote.Text = AutoStartHelper.IsSet()
             ? "这条启动项已经在注册表里了。"
-            : "点「下一步」时会写进启动项。";
+            : "点完成时会写进启动项。";
     }
 
     private void WizStartMin_Click(object sender, RoutedEventArgs e)
@@ -762,10 +1197,5 @@ public partial class FirstRunWindow : Window
         TbStartupNote.Text = on
             ? "开机后它会待在托盘里。双击托盘图标就能打开。"
             : "开机后会正常弹出窗口。";
-    }
-
-    private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        try { DragMove(); } catch { }
     }
 }

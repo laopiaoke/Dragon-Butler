@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:DragonButler"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="一条龙管家" Width="980" Height="780" MinWidth="900" MinHeight="480"
+        Title="一条龙管家" Width="1080" Height="720" MinWidth="880" MinHeight="600"
         WindowStyle="None" ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBgBrush}"
@@ -306,6 +306,18 @@
             <Setter Property="Margin" Value="0,0,12,0"/>
         </Style>
 
+        <!-- ===== v1.41 / M6-2 与 M6-4：新增界面的间距与字号 =====
+             这一版新做的东西（日志视图、设置一级入口卡、向导的时间页与进度条、
+             首访引导卡、日报的差异 pill）按下面这套来：
+               间距  8 / 12 / 16 / 24 / 32（8 的倍数），不出现 7、13、19 这种数；
+               圆角  卡片 12、按钮 6、chip 全圆角胶囊；
+               字号  主标题 18–20/600、卡片标题 15–16/600、正文 14/400（行高 22）、
+                     辅助 13/400（透明度降 20%）、按钮 14/600；
+               数字  一律 tabular-nums，时长和条数上下要对得齐。
+             为什么只约束「新增」：老的界面是三年里一格一格调出来的，
+             整体重刷会把这些年攒下的手感一起抹掉，也不在这次的改动范围里。
+             现有 Card 样式仍是圆角 14、MiniAction 仍是 30 高 11.5 号字——
+             这些没在这次改动的界面里，保持原样（见待人工确认清单）。 -->
         <!-- 一行设置的补充说明：只在真的需要解释时才写，写完就收嘴 -->
         <Style x:Key="SetHint" TargetType="TextBlock">
             <Setter Property="FontSize" Value="10.5"/>
@@ -313,6 +325,17 @@
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="Margin" Value="0,4,0,0"/>
             <Setter Property="LineHeight" Value="16"/>
+        </Style>
+        <!-- v1.41：卡内滚动条。
+             以前每张卡都跟着内容长高，四张卡谁也不一样高、滚到底还得猜「下面还有没有」。
+             现在卡是固定高度，内容多的那几张自己滚——滚的是这张卡，不是整页。
+             内层滚动条不吃滚轮，所以要把滚轮自己转回外层（见 SetCardBody_MouseWheel）。 -->
+        <Style x:Key="SetCardBody" TargetType="ScrollViewer">
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="Padding" Value="0,0,2,0"/>
+            <Setter Property="Focusable" Value="False"/>
+            <EventSetter Event="PreviewMouseWheel" Handler="SetCardBody_MouseWheel"/>
         </Style>
 
         <!-- 开关（§4：38×21，轨道圆角 12，滑块 15，切换 120ms 缓动） -->
@@ -1076,59 +1099,12 @@
                      这样每页自己总是撑满 PageClip，尺寸由布局给，不靠算。 -->
                 <Grid x:Name="PageHost">
 
-                    <!-- ===== 左页：运行 =====
-                         这一页回答一个问题：「刚才到底怎么样了」。
-                         以前这些答案散在「今日」窗口、日志、托盘提示里，要自己去找；
-                         现在一左滑就在眼前，三句话说完，想追细节再点按钮。 -->
-                    <ScrollViewer x:Name="ScrollRun" VerticalScrollBarVisibility="Auto" ScrollChanged="PageScrollChanged"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <ScrollViewer.RenderTransform>
-                            <TranslateTransform x:Name="ShiftRun" X="-980"/>
-                        </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageRun" Margin="14,10,14,22">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-
-                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16,18,16">
-                                <StackPanel>
-                                    <TextBlock Text="刚才跑了什么" FontSize="13.5" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                    <TextBlock x:Name="TbRunState" Text="" FontSize="19" FontWeight="SemiBold"
-                                               Margin="0,10,0,0" TextWrapping="Wrap" HorizontalAlignment="Left"
-                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                    <TextBlock x:Name="TbRunDetail" Text="" FontSize="12.5" Margin="0,8,0,0"
-                                               TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <StackPanel x:Name="RunDecisionHost" Margin="0,14,0,0"/>
-                                    <WrapPanel Margin="0,16,0,0">
-                                        <Button Style="{StaticResource LaunchGhost}" Height="32" Content="今日详情"
-                                                Click="BtnRunToday_Click"
-                                                ToolTip="每组跑了多久、哪一项没成、它替你做了哪些决定"/>
-                                        <Button Style="{StaticResource LaunchGhost}" Height="32" Content="打开日志"
-                                                Margin="8,0,0,0" Click="BtnRunLog_Click"/>
-                                        <Button Style="{StaticResource LaunchGhost}" Height="32" Content="出门前看一眼"
-                                                Margin="8,0,0,0" Click="BtnRunHandover_Click"
-                                                ToolTip="接下来几天它会做什么、哪些兜不住"/>
-                                    </WrapPanel>
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
-                                <StackPanel>
-                                    <TextBlock Text="时间账" FontSize="13.5" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                    <TextBlock x:Name="TbRunBank" Text="" FontSize="12.5" Margin="0,8,0,0"
-                                               TextWrapping="Wrap" HorizontalAlignment="Left"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBlock x:Name="TbRunBaseline" Text="" FontSize="12.5" Margin="0,6,0,0"
-                                               TextWrapping="Wrap" HorizontalAlignment="Left" Visibility="Collapsed"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </ScrollViewer>
+                    <!-- ===== v1.41 / M1-1：这里原来是最左边那一页「日志」=====
+                         它不再占一个 Tab：日志答的是「刚才到底怎么样」，
+                         而这个问题几乎每次都是从别处冒出来的——从主页的告警、从某张工具卡、
+                         从日报的某一行。与其让人先切到日志页再自己找，不如让他从那个点直接进来，
+                         一进来就已经筛好了（M1-2 的四个入口 + M1-3 的「全部日志」兜底）。
+                         原页面上的两张卡一个字没删，整块搬进了下面的日志视图——它是那一页的正文。 -->
 
                     <!-- ===== 中页：启动 =====
                          「接下来几点跑、跑哪些」。打开程序就停在这一页。 -->
@@ -1167,6 +1143,11 @@
                                 <StackPanel x:Name="HomeRecap" Margin="0,14,0,0" Visibility="Collapsed"/>
                                 <!-- 引导三步：只在「什么都没配」时出现，配好之后整块不占地方 -->
                                 <StackPanel x:Name="HomeHeroSteps" Margin="0,16,0,0" Visibility="Collapsed"/>
+                                <!-- v1.41 / M3-1：首访引导卡。和上面那三步不是一回事：
+                                     三步是「一个工具都没配好」时的引导（HomeState.FirstRun 决定）；
+                                     这块是「压根没走完开荒」时出现的清单，带勾选状态和跳转。
+                                     没走完五步的人不该看到「昨晚没跑」和告警——他昨天还没装。 -->
+                                <StackPanel x:Name="HomeFirstVisit" Margin="0,14,0,0" Visibility="Collapsed"/>
                                 <!-- v1.16：有新版本时才出现。点一下开浏览器，不自动下载。 -->
                                 <TextBlock x:Name="TbUpdateHint" Text="" FontSize="11.5" Margin="0,10,0,0"
                                            Foreground="{DynamicResource BrandTextBrush}" Cursor="Hand"
@@ -1189,8 +1170,11 @@
                          看起来像「叠在一起」。10px 与横向卡片间距（7+7=14）取同一数量级。 -->
                     <Grid Grid.Row="1" Margin="0,10,0,0">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="1.02*"/>
-                            <ColumnDefinition Width="1*"/>
+                            <!-- v1.41 / M6-3：左定时卡 : 右任务清单卡 = 5 : 7。
+                                 左边回答「什么时候跑」，就一个数字加一句话；右边是要干活的清单，
+                                 条目会长。以前 1.02:1 是「肉眼看着差不多」，内容一变就歪。 -->
+                            <ColumnDefinition Width="5*"/>
+                            <ColumnDefinition Width="7*"/>
                         </Grid.ColumnDefinitions>
                         <!-- A-1 定时卡：概览页 / 编辑页 双页切换（手机式推入动画） -->
                         <Border x:Name="ScheduleCard" Grid.Column="0" Style="{StaticResource Card}" Padding="0" Margin="0,0,7,0">
@@ -1408,7 +1392,7 @@
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Path Data="M4 5h11M4 10h11M4 15h7" Stroke="{DynamicResource BrandBrush}" StrokeThickness="1.9"
                                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="14" Height="14" Stretch="Uniform"/>
-                                        <TextBlock Text="托管配置" FontSize="13.5" FontWeight="SemiBold" Margin="8,0,0,0"
+                                        <TextBlock Text="任务清单" FontSize="13.5" FontWeight="SemiBold" Margin="8,0,0,0"
                                                    TextTrimming="CharacterEllipsis"
                                                    Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                                         <!-- v1.38：这里原来有个「🏖 度假中」小徽章，随度假模式一起删了。 -->
@@ -1424,24 +1408,43 @@
                                         <!-- v1.35：「配置」从标题行搬到卡片中间那块空白里（见下面 Grid.Row="2"）。
                                              它会占掉整张卡最显眼的位置，而标题行那一排全是 26 高的小按钮——
                                              把这张卡最主要的动作做成其中最不起眼的一个，是反的。 -->
-                                        <Button x:Name="BtnWeeklyPlan" Content="计划" Style="{StaticResource MiniAction}"
-                                                Margin="10,0,0,0" Click="BtnWeeklyPlan_Click"
-                                                ToolTip="按星期配置每天跑哪些工具（只影响定时触发）"/>
-                                        <Button x:Name="BtnCalendar" Content="日历" Style="{StaticResource MiniAction}"
-                                                Margin="8,0,0,0" Click="BtnCalendar_Click"
-                                                ToolTip="过去一年哪天跑了、跑成没成（方格墙）"/>
-                                        <Button x:Name="BtnToday" Content="今日" Style="{StaticResource MiniAction}"
-                                                Margin="8,0,0,0" Click="BtnToday_Click"
-                                                ToolTip="今天每组花了多久、比往常快还是慢、哪个工具没跑成"/>
-                                        <!-- v1.12：前两个是「看一眼」，后两个是「定规矩」，
-                                             中间一道 1px 竖线把两类分开，省得四个按钮排成一串看不出区别 -->
-                                        <Border Width="1" Margin="8,3,2,3" Background="{DynamicResource BorderBrush}"/>
-                                        <Button x:Name="BtnDepends" Content="依赖" Style="{StaticResource MiniAction}"
-                                                Margin="0,0,0,0" Click="BtnDepends_Click"
-                                                ToolTip="配置「谁必须等谁跑完成」——写明白了就按依赖顺序跑，没跑成不放行"/>
-                                        <Button x:Name="BtnGroupSlice" Content="配置组" Style="{StaticResource MiniAction}"
-                                                Margin="8,0,0,0" Click="BtnGroupSlice_Click"
-                                                ToolTip="让某一项只跑指定的几个 BGI 配置组（不设就沿用上面的全局勾选）"/>
+                                        <!-- v1.41 / M3-3：原来这里是五个并列的 chip，每个都是一扇门。
+                                             五个门并排放，读完才能知道哪个是自己要的；改成现在这样——
+                                             平时只说「现在在看什么」，要点开才列全。
+                                             五个入口一个没少，只是从「并排」变成「收进一个下拉」。 -->
+                                        <Button x:Name="BtnQueueView" Style="{StaticResource MiniAction}"
+                                                Margin="10,0,0,0" Click="BtnQueueView_Click"
+                                                ToolTip="换一种看法：计划、日历、今日、依赖、配置组">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock x:Name="TbQueueViewName" Text="配置组" VerticalAlignment="Center"/>
+                                                <TextBlock Text="▾" FontSize="9" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <Button.ContextMenu>
+                                                <ContextMenu x:Name="QueueViewMenu">
+                                                    <!-- 顺序按「从粗到细」：先看整年的日历，再看今天，最后才动配置。 -->
+                                                    <MenuItem Header="计划" Click="BtnWeeklyPlan_Click"
+                                                              ToolTip="按星期配置每天跑哪些工具（只影响定时触发）"/>
+                                                    <MenuItem Header="日历" Click="BtnCalendar_Click"
+                                                              ToolTip="过去一年哪天跑了、跑成没成（方格墙）"/>
+                                                    <MenuItem Header="今日" Click="BtnToday_Click"
+                                                              ToolTip="今天每组花了多久、比往常快还是慢、哪个工具没跑成"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="依赖" Click="BtnDepends_Click"
+                                                              ToolTip="配置「谁必须等谁跑完成」——写明白了就按依赖顺序跑，没跑成不放行"/>
+                                                    <MenuItem Header="配置组" Click="BtnGroupSlice_Click"
+                                                              ToolTip="让某一项只跑指定的几个 BGI 配置组（不设就沿用上面的全局勾选）"/>
+                                                </ContextMenu>
+                                            </Button.ContextMenu>
+                                        </Button>
+                                        <!-- 原来那五个按钮在后台代码里仍按名字引用（RefreshTodayChip 之类），
+                                             挪进菜单后名字不能丢；这里留一组不可见的占位承接事件绑定。 -->
+                                        <StackPanel Visibility="Collapsed">
+                                            <Button x:Name="BtnWeeklyPlan" Click="BtnWeeklyPlan_Click"/>
+                                            <Button x:Name="BtnCalendar" Click="BtnCalendar_Click"/>
+                                            <Button x:Name="BtnToday" Click="BtnToday_Click"/>
+                                            <Button x:Name="BtnDepends" Click="BtnDepends_Click"/>
+                                            <Button x:Name="BtnGroupSlice" Click="BtnGroupSlice_Click"/>
+                                        </StackPanel>
                                     </StackPanel>
                                 </Grid>
 
@@ -1591,7 +1594,9 @@
                                         <TextBlock Text="跑完后" FontSize="11.5" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextSecondaryBrush}"/>
                                         <ComboBox x:Name="CbAfterRun" Style="{StaticResource ThemedCombo}" Width="150"
-                                                  HorizontalAlignment="Right" Height="30" SelectionChanged="CbAfterRun_SelectionChanged">
+                                                  HorizontalAlignment="Right" Height="30" SelectionChanged="CbAfterRun_SelectionChanged"
+                                                  MaxDropDownHeight="320"
+                                                  ToolTip="跑完之后机器会怎样。五项都在下拉里，没有藏在别处的">
                                             <ComboBoxItem Content="仅通知" Tag="Notify"/>
                                             <ComboBoxItem Content="再跑一轮" Tag="RunAgain"/>
                                             <ComboBoxItem Content="打开程序" Tag="OpenApp"/>
@@ -1877,260 +1882,63 @@
                             <TranslateTransform x:Name="ShiftSettings" X="980"/>
                         </ScrollViewer.RenderTransform>
                         <Grid x:Name="PageSettings" Margin="14,10,14,22">
-                            <!-- v1.35：设置页从「一摞等宽长条」改成两列卡片墙。
-                                 一张卡一件事：卡里有图标、有副标题、有一根细线把标题和内容分开，
-                                 行与行之间靠留白与极淡分隔线区分，不再每一行套一个方块。
-                                 左列是「跑的时候怎么兜底」，右列是「平时怎么用」——
-                                 两列长短天然不一样；一样长反而说明分组是凑出来的。
-                                 通知整块占满第一排：它里面有一排渠道胶囊、各自的地段表单，半宽会挤成三行。 -->
+                            <!-- v1.41 / M4-1：设置页分成两层。
+                                 一级只有五张入口卡（守护 / 定时 / 通知 / 接口 / 界面与启动），
+                                 点哪张进哪张，二级里才是真正的开关。
+                                 以前所有开关平铺在两列卡片墙上，找一个开关得先记住它在哪张卡里；
+                                 现在先问「你要改的是哪一类事」，答案只有五个。
+                                 M4-3 预留：将来改成「长页滚动 + 左侧锚点」时，
+                                 只需要把 SettingsSection 换成锚点布局，入口卡退化成书签，路由结构不用动。 -->
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
 
-                            <!-- ===== F 通知（折叠，默认收起）=====
-                                 v1.35：整块挪到第一排占满，后面四张卡按「守护 / 界面 / 节奏 / 接口」两两并排。 -->
-                            <Border x:Name="NotifyCard" Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource Card}"
-                            Margin="0,0,0,0" Padding="0" VerticalAlignment="Top">
-                        <StackPanel>
-                            <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
-                                <StackPanel Orientation="Horizontal">
-                                    <Path Data="M6 9a6 6 0 1 1 12 0c0 4 2 5 2 5H4s2-1 2-5z M10 21h4"
-                                          Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.75"
-                                          StrokeStartLineCap="Round" StrokeLineJoin="Round"
-                                          Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
-                                    <TextBlock Text="通知" FontSize="13.5" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </Button>
-                            <StackPanel x:Name="NotifyBody" Margin="16,0,16,14" Visibility="Collapsed">
-                                <Grid>
-                                    <TextBlock Text="推送渠道" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBlock x:Name="TbNotifyChannelState" HorizontalAlignment="Right" FontSize="10.5"
-                                               Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Center"/>
-                                </Grid>
-                                <WrapPanel Margin="0,6,0,0">
-                                    <RadioButton x:Name="ChipOff" Content="不推送" Tag="Off" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipToast" Content="Windows 通知" Tag="Toast" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipBalloon" Content="托盘气泡" Tag="Balloon" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipWecom" Content="企业微信" Tag="Wecom" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipFeishu" Content="飞书" Tag="Feishu" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipDing" Content="钉钉" Tag="DingTalk" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipTelegram" Content="Telegram" Tag="Telegram" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipBark" Content="Bark" Tag="Bark" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipEmail" Content="邮件" Tag="Email" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipXxtui" Content="xxtui" Tag="Xxtui" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipWebhook" Content="自定义 Webhook" Tag="Webhook" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                    <RadioButton x:Name="ChipWebSocket" Content="WebSocket" Tag="WebSocket" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
-                                </WrapPanel>
-                                <TextBlock x:Name="TbNotifyHint" FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                                           Margin="0,2,0,0" TextWrapping="Wrap"/>
+                            <!-- ===== 一级：五张入口卡 ===== -->
+                            <StackPanel x:Name="SettingsHome">
+                                <TextBlock Text="想改哪一类？" FontSize="12" Margin="2,0,0,10"
+                                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                <WrapPanel x:Name="SettingsEntryHost"/>
 
-                                <!-- 本地渠道说明 -->
-                                <StackPanel x:Name="NpLocal" Visibility="Collapsed" Margin="0,8,0,0">
-                                    <TextBlock x:Name="TbLocalHint" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-
-                                <!-- 企业微信 -->
-                                <StackPanel x:Name="NpWecom" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <TextBlock Text="企业微信群机器人 Webhook" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBox x:Name="TbNotifyWecom" Tag="NotifyWecomUrl" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    <TextBlock Text="群设置 → 群机器人 → 添加机器人 → 复制 Webhook 地址"
-                                               FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
-                                </StackPanel>
-
-                                <!-- 飞书 -->
-                                <StackPanel x:Name="NpFeishu" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <TextBlock Text="飞书自定义机器人 Webhook" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBox x:Name="TbNotifyFeishu" Tag="NotifyFeishuUrl" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    <TextBlock Text="签名校验密钥（可选；机器人开启「签名校验」时填写）"
-                                               FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,0"/>
-                                    <TextBox x:Name="TbNotifyFeishuSecret" Tag="NotifyFeishuSecret" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                </StackPanel>
-
-                                <!-- 钉钉 -->
-                                <StackPanel x:Name="NpDing" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <TextBlock Text="钉钉自定义机器人 Webhook" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBox x:Name="TbNotifyDing" Tag="NotifyDingUrl" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    <TextBlock Text="加签密钥（可选；安全设置选「加签」时填写）"
-                                               FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,0"/>
-                                    <TextBox x:Name="TbNotifyDingSecret" Tag="NotifyDingSecret" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                </StackPanel>
-
-                                <!-- Telegram -->
-                                <Grid x:Name="NpTelegram" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="160"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Row="0" Grid.Column="0">
-                                        <TextBlock Text="Bot Token" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbNotifyTelegramToken" Tag="NotifyTelegramToken" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Row="0" Grid.Column="2">
-                                        <TextBlock Text="Chat ID" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbNotifyTelegramChat" Tag="NotifyTelegramChat" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" FontSize="10" Margin="0,4,0,0"
-                                               Foreground="{DynamicResource TextTertiaryBrush}"
-                                               Text="找 @BotFather 建机器人拿 Token；Chat ID 可先给机器人发消息，再访问 getUpdates 获取"/>
-                                </Grid>
-
-                                <!-- Bark -->
-                                <StackPanel x:Name="NpBark" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <TextBlock Text="Bark 推送地址（含设备 Key）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBox x:Name="TbNotifyBark" Tag="NotifyBarkUrl" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    <TextBlock Text="示例：https://api.day.app/你的Key（可填自建服务器地址）"
-                                               FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
-                                </StackPanel>
-
-                                <!-- 邮件 -->
-                                <Grid x:Name="NpEmail" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Row="0" Grid.Column="0">
-                                        <TextBlock Text="SMTP 服务器" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbEmailHost" Tag="NotifyEmailHost" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Row="0" Grid.Column="2">
-                                        <TextBlock Text="端口（465/587）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbEmailPort" Tag="NotifyEmailPort" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,8,0,0">
-                                        <TextBlock Text="SMTP 用户名" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbEmailUser" Tag="NotifyEmailUser" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,8,0,0">
-                                        <TextBlock Text="密码 / 授权码" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbEmailPass" Tag="NotifyEmailPass" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,8,0,0">
-                                        <TextBlock Text="发件人（留空=用户名）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbEmailFrom" Tag="NotifyEmailFrom" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,8,0,0">
-                                        <TextBlock Text="收件人（多个用分号）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBox x:Name="TbEmailTo" Tag="NotifyEmailTo" Style="{StaticResource InputBox}"
-                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    </StackPanel>
-                                </Grid>
-
-                                <!-- xxtui -->
-                                <StackPanel x:Name="NpXxtui" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <TextBlock Text="xxtui API 地址或 API Key" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBox x:Name="TbNotifyXxtui" Tag="NotifyXxtuiUrl" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    <TextBlock Text="只填 Key 会自动补全为 https://www.xxtui.com/xxtui/Key"
-                                               FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
-                                </StackPanel>
-
-                                <!-- 自定义 Webhook -->
-                                <StackPanel x:Name="NpWebhook" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <TextBlock Text="自定义 Webhook 地址" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBox x:Name="TbNotifyWebhook" Tag="NotifyWebhookUrl" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    <TextBlock Text="POST JSON：source / level / title / message / timestamp"
-                                               FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
-                                </StackPanel>
-
-                                <!-- WebSocket -->
-                                <StackPanel x:Name="NpWebSocket" Visibility="Collapsed" Margin="0,10,0,0">
-                                    <TextBlock Text="WebSocket 地址（ws:// 或 wss://）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <TextBox x:Name="TbNotifyWebSocket" Tag="NotifyWebSocketUrl" Style="{StaticResource InputBox}"
-                                             Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
-                                    <TextBlock Text="连接成功后发送一条 JSON 即关闭（与 BetterGI 的 WebSocket 行为一致）"
-                                               FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
-                                </StackPanel>
-
-                                <!-- 推送频率 -->
-                                <Grid Margin="0,12,0,0">
-                                    <StackPanel VerticalAlignment="Center">
-                                        <TextBlock Text="只推送异常" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                        <TextBlock Text="开启后「一条龙启动/完成」不推送，只推异常与卡死"
-                                                   FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                    <ToggleButton x:Name="TgNotifyOnlyImportant" Style="{StaticResource SwitchStyle}"
-                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                  Click="TgNotifyOnlyImportant_Click"/>
-                                </Grid>
-
-                                <!-- 测试 -->
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Button x:Name="BtnTestWebhook" Content="发送测试消息" Style="{StaticResource FlatButton}"
-                                            Height="30" Padding="12,0" Click="BtnTestWebhook_Click"/>
-                                    <TextBlock Grid.Column="1" x:Name="TbNotifyTestResult" FontSize="11" Margin="10,0,0,0"
-                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                               Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                </Grid>
-
-                                <!-- v1.15 / L6：跑完那条通知，正文可以改一句话 -->
-                                <StackPanel Margin="0,12,0,0">
-                                    <TextBlock Text="跑完通知的正文" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                    <Grid Margin="0,5,0,0">
-                                        <TextBox x:Name="TbQueueTemplate" Style="{StaticResource InputBox}"
-                                                 LostFocus="TbQueueTemplate_LostFocus"
-                                                 TextChanged="TbQueueTemplate_TextChanged"/>
-                                        <!-- 空框里放一句灰字：不填也要让人知道这格能填什么 -->
-                                        <TextBlock x:Name="TbQueueTemplateWatermark" Text="留空用默认正文"
-                                                   FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"
-                                                   IsHitTestVisible="False"
-                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                    </Grid>
-                                    <TextBlock x:Name="TbQueueTemplateHint" FontSize="10" Margin="0,4,0,0"
-                                               Foreground="{DynamicResource TextTertiaryBrush}" TextWrapping="Wrap"/>
-                                </StackPanel>
-
-                                <!-- 可选：BGI Webhook（不填也能自动识别配置组） -->
-                                <Border Margin="0,12,0,0" Padding="10,8" CornerRadius="9"
-                                        Background="{DynamicResource CardBg2Brush}" BorderBrush="{DynamicResource BorderBrush}"
-                                        BorderThickness="1">
-                                    <StackPanel>
-                                        <TextBlock Text="进度识别（可选）" FontSize="11" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <TextBlock x:Name="TbBgiWebhookHint" FontSize="10.5" Margin="0,4,0,0"
-                                                   Foreground="{DynamicResource TextTertiaryBrush}" TextWrapping="Wrap"/>
-                                        <Button x:Name="BtnCopyWebhook" Content="复制地址" Style="{StaticResource FlatButton}"
-                                                HorizontalAlignment="Left" Margin="0,8,0,0" Height="26" Padding="10,0"
-                                                Click="BtnCopyWebhook_Click"/>
-                                    </StackPanel>
-                                </Border>
+                                <!-- v1.41 / M2-12：没走完五步的人，这里指一下向导还在。
+                                     走完了就把这句收起来——已经不需要了。 -->
+                                <TextBlock x:Name="TbSettingsWizardHint" Margin="2,14,0,0" FontSize="11"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource TextTertiaryBrush}"
+                                           Text="还没走完首次使用那五步。想补上，去主页点引导卡里的任意一项就行。"
+                                           Visibility="Collapsed"/>
                             </StackPanel>
-                        </StackPanel>
-                    </Border>
 
+                            <!-- ===== 二级：某一类的全部开关 ===== -->
+                            <StackPanel x:Name="SettingsSection" Grid.Row="1" Visibility="Collapsed">
+                                <Button x:Name="BtnSettingsBack" Click="BtnSettingsBack_Click" Margin="0,0,0,10"
+                                        HorizontalAlignment="Left" Cursor="Hand"
+                                        Background="Transparent" BorderThickness="0" Padding="2,4,8,4">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path Data="M9 4 L4 9 L9 14" Stroke="{DynamicResource TextSecondaryBrush}"
+                                              StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                              Width="12" Height="12" Stretch="Uniform" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TbSettingsSectionName" Text="全部设置" FontSize="12"
+                                                   Margin="6,0,0,0" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    </StackPanel>
+                                </Button>
 
+                            <Grid x:Name="SettingsCards">
+                            <!-- ===== 五个二级分区 =====
+                                 一级只有五张入口卡，点进来才铺开这个分区的全部开关。
+                                 分区的分工按「你什么时候会想改它」切，不按代码里的类：
+                                 守护 = 跑的时候出事怎么办；定时 = 几点跑、跑完睡不睡；
+                                 通知 = 跑完怎么告我；接口 = 给外面的东西开口；界面与启动 = 平时怎么用。 -->
+                            <StackPanel x:Name="SecGuard" Visibility="Collapsed" Margin="0,0,0,4">
                             <!-- ===== 守护与恢复 ===== -->
-                            <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Grid Margin="16,13,16,12">
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="0" VerticalAlignment="Top">
+                                    <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="16,13,16,12">
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                             <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
                                                 <Path Data="M12 3l7 4v5c0 4-3 7-7 9-4-2-7-5-7-9V7z"
@@ -2145,7 +1953,9 @@
                                         <TextBlock Text="跑的时候它盯着" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextTertiaryBrush}"/>
                                     </Grid>
-                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <ScrollViewer Grid.Row="2" Style="{StaticResource SetCardBody}" ScrollChanged="PageScrollChanged">
+                                        <StackPanel>
 
                                     <Border Style="{StaticResource SetRow}">
                                         <Grid>
@@ -2188,108 +1998,39 @@
                                         </StackPanel>
                                     </Border>
 
+                                        <Border Style="{StaticResource SetRow}">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <TextBlock Style="{StaticResource SetLabel}" Text="日志规则"/>
+                                                    <Button x:Name="BtnLogRules" Content="配置…" Style="{StaticResource MiniAction}"
+                                                            Height="26" Padding="10,0"
+                                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                            Click="BtnLogRules_Click"/>
+                                                </Grid>
+                                                <TextBlock Style="{StaticResource SetHint}" Text="日志出现某个词就提醒 / 留现场 / 停下队列；可先扫今天的日志试一次"/>
+                                            </StackPanel>
+                                        </Border>
+
                                     <Border Style="{StaticResource SetRowLast}">
                                         <TextBlock Style="{StaticResource SetHint}" Margin="0"
                                                    Text="「挂起」的判定：进程还活着，但 CPU 低于 5% 且日志不增长，已经持续 3 分钟。"/>
                                     </Border>
-                                </StackPanel>
-                            </Border>
-
-                            <!-- ===== 启动与界面 ===== -->
-                            <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource Card}" Margin="10,10,0,0" Padding="0" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Grid Margin="16,13,16,12">
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
-                                                <Path Data="M3,9.5 L10,3 L17,9.5 L17,16.5 L3,16.5 Z"
-                                                      Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.5"
-                                                      StrokeLineJoin="Round"
-                                                      Width="14" Height="14" Stretch="Uniform"
-                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                            </Border>
-                                            <TextBlock Text="启动与界面" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
-                                                       Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                        <TextBlock Text="平时怎么用" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    </ScrollViewer>
                                     </Grid>
-                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <StackPanel>
-                                            <Grid>
-                                                <TextBlock Style="{StaticResource SetLabel}" Text="外观"/>
-                                                <Button x:Name="BtnCustomTheme" Content="自定义配色…" Style="{StaticResource MiniAction}"
-                                                        Height="26" Padding="10,0"
-                                                        HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                        Click="BtnCustomTheme_Click"
-                                                        ToolTip="选底色、放一张背景图、调叠色深浅、强制明暗"/>
-                                            </Grid>
-                                            <TextBlock x:Name="TbAppearanceSummary" Style="{StaticResource SetHint}"/>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="开机自动启动"/>
-                                            <ToggleButton x:Name="TgAutoStart" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoStart_Click"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="关闭时驻留托盘"/>
-                                            <ToggleButton x:Name="TgStayTray" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStayTray_Click"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <!-- v1.38：开机自启之后，启动时直接收进托盘、不弹窗口。
-                                         自启的意思是「开机它就在」，不是「开机在你脸上开一扇窗」。 -->
-                                    <Border Style="{StaticResource SetRow}">
-                                        <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="启动时最小化到托盘"/>
-                                            <ToggleButton x:Name="TgStartMin" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStartMin_Click"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <StackPanel>
-                                            <Grid>
-                                                <TextBlock Style="{StaticResource SetLabel}" Text="收进托盘时释放窗口"/>
-                                                <ToggleButton x:Name="TgTrimToTray" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgTrimToTray_Click"/>
-                                            </Grid>
-                                            <TextBlock x:Name="TbTrimHint" Style="{StaticResource SetHint}"
-                                                       Text="实测只省 3.7 MB，但再打开一次要多等 1 秒多。想腾内存再开。"/>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="按键音效"/>
-                                            <ToggleButton x:Name="TgSound" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSound_Click"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="迷你浮条（只显示进度）"/>
-                                            <ToggleButton x:Name="TgMiniBar" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMiniBar_Click"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRowLast}">
-                                        <Grid>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="跑完说一句话"/>
-                                            <ToggleButton x:Name="TgSpeech" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSpeech_Click"/>
-                                        </Grid>
-                                    </Border>
-                                </StackPanel>
                             </Border>
+                            </StackPanel>
 
-                            <!-- ===== 节奏与报告 ===== -->
-                            <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="0" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Grid Margin="16,13,16,12">
+                            <StackPanel x:Name="SecTiming" Visibility="Collapsed" Margin="0,0,0,4">
+                            <!-- v1.41 / M4-1：原来叫「节奏与报告」，报告那一半搬去「通知」了，这里只剩「几点跑、中间歇多久、跑的时候别睡」。 -->
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="0" VerticalAlignment="Top">
+                                    <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="16,13,16,12">
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                             <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
                                                 <Path Data="M3,13 L6.5,13 L9,6.5 L13,16 L15.5,11 L18,11"
@@ -2298,13 +2039,15 @@
                                                       Width="14" Height="14" Stretch="Uniform"
                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
-                                            <TextBlock Text="节奏与报告" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
+                                            <TextBlock Text="定时与节奏" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
                                                        Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                                         </StackPanel>
-                                        <TextBlock Text="怎么排、跑完说什么" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        <TextBlock Text="几点跑、中间歇多久" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextTertiaryBrush}"/>
                                     </Grid>
-                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <ScrollViewer Grid.Row="2" Style="{StaticResource SetCardBody}" ScrollChanged="PageScrollChanged">
+                                        <StackPanel>
 
                                     <Border Style="{StaticResource SetRow}">
                                         <StackPanel>
@@ -2374,74 +2117,337 @@
                                             <TextBlock Style="{StaticResource SetHint}" Text="运行指定分钟数后关闭显示器，系统保持唤醒"/>
                                         </StackPanel>
                                     </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <StackPanel>
-                                            <Grid>
-                                                <TextBlock Style="{StaticResource SetLabel}" Text="晨报"/>
-                                                <ToggleButton x:Name="TgMorningReport" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMorningReport_Click"/>
-                                            </Grid>
-                                            <TextBlock Style="{StaticResource SetHint}" Text="每天首次打开时用一句话汇报昨天跑了什么"/>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <StackPanel>
-                                            <Grid>
-                                                <TextBlock Style="{StaticResource SetLabel}" Text="周报"/>
-                                                <ToggleButton x:Name="TgWeeklyReport" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgWeeklyReport_Click"/>
-                                            </Grid>
-                                            <TextBlock Style="{StaticResource SetHint}" Text="每周首次打开时汇报近七天：哪天跑得多、成功率、总耗时"/>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <StackPanel>
-                                            <Grid>
-                                                <TextBlock Style="{StaticResource SetLabel}" Text="收益账本"/>
-                                                <ToggleButton x:Name="TgHarvest" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHarvest_Click"/>
-                                            </Grid>
-                                            <TextBlock Style="{StaticResource SetHint}" Text="从 BGI 日志里累计摩拉/狗粮经验/拾取材料，队列结束时报一句"/>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <Border Style="{StaticResource SetRow}">
-                                        <StackPanel>
-                                            <Grid>
-                                                <TextBlock Style="{StaticResource SetLabel}" Text="日志规则"/>
-                                                <Button x:Name="BtnLogRules" Content="配置…" Style="{StaticResource MiniAction}"
-                                                        Height="26" Padding="10,0"
-                                                        HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                        Click="BtnLogRules_Click"/>
-                                            </Grid>
-                                            <TextBlock Style="{StaticResource SetHint}" Text="日志出现某个词就提醒 / 留现场 / 停下队列；可先扫今天的日志试一次"/>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <!-- v1.35：本机事件推送地址。以前它埋在两列长表的一格里，
-                                         现在单独一行——它是「让 BGI 更及时地告诉我进度」的唯一入口，不该找不到。 -->
-                                    <Border Style="{StaticResource SetRowLast}">
-                                        <StackPanel>
-                                            <TextBlock Style="{StaticResource SetLabel}" Text="事件推送地址（可选）"/>
-                                            <TextBlock Style="{StaticResource SetHint}" Text="BetterGI 设置 → 通知 → Webhook 填这个地址，完成事件会更及时；不填也能靠读 BGI 日志识别进度。"/>
-                                            <Grid Margin="0,7,0,0">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
-                                                <TextBox x:Name="TbEventUrl" Style="{StaticResource InputBox}" Height="30" IsReadOnly="True"/>
-                                                <Button Grid.Column="1" Content="复制地址" Style="{StaticResource MiniAction}" Margin="8,0,0,0"
-                                                        Click="BtnCopyWebhook_Click"/>
-                                            </Grid>
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
+                                    </StackPanel>
+                                    </ScrollViewer>
+                                    </Grid>
                             </Border>
+                            </StackPanel>
 
+                            <StackPanel x:Name="SecNotify" Visibility="Collapsed" Margin="0,0,0,4">
+                            <!-- ===== 通知（折叠，默认收起）=====
+                                 v1.35：整块挪到第一排占满，后面四张卡按「守护 / 界面 / 节奏 / 接口」两两并排。 -->
+                            <Border x:Name="NotifyCard" Style="{StaticResource Card}"
+                            Margin="0,0,0,0" Padding="0" VerticalAlignment="Top">
+                        <StackPanel>
+                            <Button x:Name="BtnFoldNotify" Style="{StaticResource FoldHeader}" Click="FoldHeader_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="M6 9a6 6 0 1 1 12 0c0 4 2 5 2 5H4s2-1 2-5z M10 21h4"
+                                          Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.75"
+                                          StrokeStartLineCap="Round" StrokeLineJoin="Round"
+                                          Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
+                                    <TextBlock Text="通知" FontSize="13.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                            <StackPanel x:Name="NotifyBody" Margin="16,0,16,14" Visibility="Collapsed">
+                                <ScrollViewer x:Name="NotifyScroll" Style="{StaticResource SetCardBody}" MaxHeight="330">
+                                    <StackPanel>
+                                        <Grid>
+                                        <TextBlock Text="推送渠道" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBlock x:Name="TbNotifyChannelState" HorizontalAlignment="Right" FontSize="10.5"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    <WrapPanel Margin="0,6,0,0">
+                                        <RadioButton x:Name="ChipOff" Content="不推送" Tag="Off" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipToast" Content="Windows 通知" Tag="Toast" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipBalloon" Content="托盘气泡" Tag="Balloon" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipWecom" Content="企业微信" Tag="Wecom" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipFeishu" Content="飞书" Tag="Feishu" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipDing" Content="钉钉" Tag="DingTalk" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipTelegram" Content="Telegram" Tag="Telegram" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipBark" Content="Bark" Tag="Bark" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipEmail" Content="邮件" Tag="Email" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipXxtui" Content="xxtui" Tag="Xxtui" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipWebhook" Content="自定义 Webhook" Tag="Webhook" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                        <RadioButton x:Name="ChipWebSocket" Content="WebSocket" Tag="WebSocket" Style="{StaticResource NotifyChip}" Checked="NotifyChip_Checked"/>
+                                    </WrapPanel>
+                                    <TextBlock x:Name="TbNotifyHint" FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                                               Margin="0,2,0,0" TextWrapping="Wrap"/>
+
+                                    <!-- 本地渠道说明 -->
+                                    <StackPanel x:Name="NpLocal" Visibility="Collapsed" Margin="0,8,0,0">
+                                        <TextBlock x:Name="TbLocalHint" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <!-- 企业微信 -->
+                                    <StackPanel x:Name="NpWecom" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <TextBlock Text="企业微信群机器人 Webhook" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBox x:Name="TbNotifyWecom" Tag="NotifyWecomUrl" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        <TextBlock Text="群设置 → 群机器人 → 添加机器人 → 复制 Webhook 地址"
+                                                   FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- 飞书 -->
+                                    <StackPanel x:Name="NpFeishu" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <TextBlock Text="飞书自定义机器人 Webhook" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBox x:Name="TbNotifyFeishu" Tag="NotifyFeishuUrl" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        <TextBlock Text="签名校验密钥（可选；机器人开启「签名校验」时填写）"
+                                                   FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,0"/>
+                                        <TextBox x:Name="TbNotifyFeishuSecret" Tag="NotifyFeishuSecret" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                    </StackPanel>
+
+                                    <!-- 钉钉 -->
+                                    <StackPanel x:Name="NpDing" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <TextBlock Text="钉钉自定义机器人 Webhook" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBox x:Name="TbNotifyDing" Tag="NotifyDingUrl" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        <TextBlock Text="加签密钥（可选；安全设置选「加签」时填写）"
+                                                   FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,0"/>
+                                        <TextBox x:Name="TbNotifyDingSecret" Tag="NotifyDingSecret" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                    </StackPanel>
+
+                                    <!-- Telegram -->
+                                    <Grid x:Name="NpTelegram" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="160"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Row="0" Grid.Column="0">
+                                            <TextBlock Text="Bot Token" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbNotifyTelegramToken" Tag="NotifyTelegramToken" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="2">
+                                            <TextBlock Text="Chat ID" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbNotifyTelegramChat" Tag="NotifyTelegramChat" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Row="1" Grid.ColumnSpan="3" FontSize="10" Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   Text="找 @BotFather 建机器人拿 Token；Chat ID 可先给机器人发消息，再访问 getUpdates 获取"/>
+                                    </Grid>
+
+                                    <!-- Bark -->
+                                    <StackPanel x:Name="NpBark" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <TextBlock Text="Bark 推送地址（含设备 Key）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBox x:Name="TbNotifyBark" Tag="NotifyBarkUrl" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        <TextBlock Text="示例：https://api.day.app/你的Key（可填自建服务器地址）"
+                                                   FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- 邮件 -->
+                                    <Grid x:Name="NpEmail" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Row="0" Grid.Column="0">
+                                            <TextBlock Text="SMTP 服务器" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbEmailHost" Tag="NotifyEmailHost" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="2">
+                                            <TextBlock Text="端口（465/587）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbEmailPort" Tag="NotifyEmailPort" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,8,0,0">
+                                            <TextBlock Text="SMTP 用户名" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbEmailUser" Tag="NotifyEmailUser" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,8,0,0">
+                                            <TextBlock Text="密码 / 授权码" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbEmailPass" Tag="NotifyEmailPass" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,8,0,0">
+                                            <TextBlock Text="发件人（留空=用户名）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbEmailFrom" Tag="NotifyEmailFrom" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,8,0,0">
+                                            <TextBlock Text="收件人（多个用分号）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBox x:Name="TbEmailTo" Tag="NotifyEmailTo" Style="{StaticResource InputBox}"
+                                                     Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- xxtui -->
+                                    <StackPanel x:Name="NpXxtui" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <TextBlock Text="xxtui API 地址或 API Key" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBox x:Name="TbNotifyXxtui" Tag="NotifyXxtuiUrl" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        <TextBlock Text="只填 Key 会自动补全为 https://www.xxtui.com/xxtui/Key"
+                                                   FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- 自定义 Webhook -->
+                                    <StackPanel x:Name="NpWebhook" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <TextBlock Text="自定义 Webhook 地址" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBox x:Name="TbNotifyWebhook" Tag="NotifyWebhookUrl" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        <TextBlock Text="POST JSON：source / level / title / message / timestamp"
+                                                   FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- WebSocket -->
+                                    <StackPanel x:Name="NpWebSocket" Visibility="Collapsed" Margin="0,10,0,0">
+                                        <TextBlock Text="WebSocket 地址（ws:// 或 wss://）" FontSize="11.5" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <TextBox x:Name="TbNotifyWebSocket" Tag="NotifyWebSocketUrl" Style="{StaticResource InputBox}"
+                                                 Margin="0,5,0,0" LostFocus="NotifyField_LostFocus"/>
+                                        <TextBlock Text="连接成功后发送一条 JSON 即关闭（与 BetterGI 的 WebSocket 行为一致）"
+                                                   FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <!-- 推送频率 -->
+                                    <Grid Margin="0,12,0,0">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="只推送异常" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                            <TextBlock Text="开启后「一条龙启动/完成」不推送，只推异常与卡死"
+                                                       FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <ToggleButton x:Name="TgNotifyOnlyImportant" Style="{StaticResource SwitchStyle}"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                      Click="TgNotifyOnlyImportant_Click"/>
+                                    </Grid>
+
+                                    <!-- 测试 -->
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="BtnTestWebhook" Content="发送测试消息" Style="{StaticResource FlatButton}"
+                                                Height="30" Padding="12,0" Click="BtnTestWebhook_Click"/>
+                                        <TextBlock Grid.Column="1" x:Name="TbNotifyTestResult" FontSize="11" Margin="10,0,0,0"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+
+                                    <!-- v1.15 / L6：跑完那条通知，正文可以改一句话 -->
+                                    <StackPanel Margin="0,12,0,0">
+                                        <TextBlock Text="跑完通知的正文" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <Grid Margin="0,5,0,0">
+                                            <TextBox x:Name="TbQueueTemplate" Style="{StaticResource InputBox}"
+                                                     LostFocus="TbQueueTemplate_LostFocus"
+                                                     TextChanged="TbQueueTemplate_TextChanged"/>
+                                            <!-- 空框里放一句灰字：不填也要让人知道这格能填什么 -->
+                                            <TextBlock x:Name="TbQueueTemplateWatermark" Text="留空用默认正文"
+                                                       FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"
+                                                       IsHitTestVisible="False"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        </Grid>
+                                        <TextBlock x:Name="TbQueueTemplateHint" FontSize="10" Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <!-- 可选：BGI Webhook（不填也能自动识别配置组） -->
+                                    <Border Margin="0,12,0,0" Padding="10,8" CornerRadius="9"
+                                            Background="{DynamicResource CardBg2Brush}" BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock Text="进度识别（可选）" FontSize="11" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBlock x:Name="TbBgiWebhookHint" FontSize="10.5" Margin="0,4,0,0"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}" TextWrapping="Wrap"/>
+                                            <Button x:Name="BtnCopyWebhook" Content="复制地址" Style="{StaticResource FlatButton}"
+                                                    HorizontalAlignment="Left" Margin="0,8,0,0" Height="26" Padding="10,0"
+                                                    Click="BtnCopyWebhook_Click"/>
+                                        </StackPanel>
+                                    </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>                               <!-- v1.41 / M4-1：报告从「节奏与报告」里拆出来，归到通知这一类——这两件事都是「跑完怎么告我」。 -->
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="0" VerticalAlignment="Top">
+                                    <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="16,13,16,12">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
+                                                <Path Data="M4,3 L16,3 A1,1 0 0 1 17,4 L17,16 A1,1 0 0 1 16,17 L4,17 A1,1 0 0 1 3,16 L3,4 A1,1 0 0 1 4,3 M6.5,7 L13.5,7 M6.5,10.5 L13.5,10.5 M6.5,14 L10.5,14"
+                                                      Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.6"
+                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                                      Width="14" Height="14" Stretch="Uniform"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="报告" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="跑完怎么告诉你" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <ScrollViewer Grid.Row="2" Style="{StaticResource SetCardBody}" ScrollChanged="PageScrollChanged">
+                                        <StackPanel>
+                                        <Border Style="{StaticResource SetRow}">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <TextBlock Style="{StaticResource SetLabel}" Text="晨报"/>
+                                                    <ToggleButton x:Name="TgMorningReport" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMorningReport_Click"/>
+                                                </Grid>
+                                                <TextBlock Style="{StaticResource SetHint}" Text="每天首次打开时用一句话汇报昨天跑了什么"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Style="{StaticResource SetRow}">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <TextBlock Style="{StaticResource SetLabel}" Text="周报"/>
+                                                    <ToggleButton x:Name="TgWeeklyReport" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgWeeklyReport_Click"/>
+                                                </Grid>
+                                                <TextBlock Style="{StaticResource SetHint}" Text="每周首次打开时汇报近七天：哪天跑得多、成功率、总耗时"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Style="{StaticResource SetRow}">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <TextBlock Style="{StaticResource SetLabel}" Text="收益账本"/>
+                                                    <ToggleButton x:Name="TgHarvest" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgHarvest_Click"/>
+                                                </Grid>
+                                                <TextBlock Style="{StaticResource SetHint}" Text="从 BGI 日志里累计摩拉/狗粮经验/拾取材料，队列结束时报一句"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- v1.35：本机事件推送地址。以前它埋在两列长表的一格里，
+                                             现在单独一行——它是「让 BGI 更及时地告诉我进度」的唯一入口，不该找不到。 -->
+                                        <Border Style="{StaticResource SetRowLast}">
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="事件推送地址（可选）"/>
+                                                <TextBlock Style="{StaticResource SetHint}" Text="BetterGI 设置 → 通知 → Webhook 填这个地址，完成事件会更及时；不填也能靠读 BGI 日志识别进度。"/>
+                                                <Grid Margin="0,7,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox x:Name="TbEventUrl" Style="{StaticResource InputBox}" Height="30" IsReadOnly="True"/>
+                                                    <Button Grid.Column="1" Content="复制地址" Style="{StaticResource MiniAction}" Margin="8,0,0,0"
+                                                            Click="BtnCopyWebhook_Click"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                    </ScrollViewer>
+                                    </Grid>
+                            </Border>
+                            </StackPanel>
+
+                            <StackPanel x:Name="SecApi" Visibility="Collapsed" Margin="0,0,0,4">
                             <!-- ===== 接口与维护 ===== -->
-                            <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource Card}" Margin="10,10,0,0" Padding="0" VerticalAlignment="Top">
-                                <StackPanel>
-                                    <Grid Margin="16,13,16,12">
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="0" VerticalAlignment="Top">
+                                    <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="16,13,16,12">
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                             <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
                                                 <Path Data="M3,7 L10,7 L10,3.5 M17,13 L10,13 L10,16.5 M3,7 L3,17 L17,17 L17,3.5 L10,3.5"
@@ -2456,7 +2462,9 @@
                                         <TextBlock Text="默认都关着" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextTertiaryBrush}"/>
                                     </Grid>
-                                    <Border Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <ScrollViewer Grid.Row="2" Style="{StaticResource SetCardBody}" ScrollChanged="PageScrollChanged">
+                                        <StackPanel>
 
                                     <Border Style="{StaticResource SetRow}">
                                         <StackPanel>
@@ -2568,9 +2576,116 @@
                                                        Text="先说要出几天，它把这段时间里会发生什么、哪几件会让这趟白跑，列成人话。只读。"/>
                                         </StackPanel>
                                     </Border>
-                                </StackPanel>
+                                    </StackPanel>
+                                    </ScrollViewer>
+                                    </Grid>
                             </Border>
-                        </Grid>
+                            </StackPanel>
+
+                            <StackPanel x:Name="SecUi" Visibility="Collapsed" Margin="0,0,0,4">
+                            <!-- ===== 启动与界面 ===== -->
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="0" VerticalAlignment="Top">
+                                    <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="16,13,16,12">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="8" Background="{DynamicResource BrandSoftBrush}">
+                                                <Path Data="M3,9.5 L10,3 L17,9.5 L17,16.5 L3,16.5 Z"
+                                                      Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.5"
+                                                      StrokeLineJoin="Round"
+                                                      Width="14" Height="14" Stretch="Uniform"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="启动与界面" FontSize="13.5" FontWeight="SemiBold" Margin="9,0,0,0"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="平时怎么用" FontSize="10.5" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}"/>
+                                    <ScrollViewer Grid.Row="2" Style="{StaticResource SetCardBody}" ScrollChanged="PageScrollChanged">
+                                        <StackPanel>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="外观"/>
+                                                <Button x:Name="BtnCustomTheme" Content="自定义配色…" Style="{StaticResource MiniAction}"
+                                                        Height="26" Padding="10,0"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                        Click="BtnCustomTheme_Click"
+                                                        ToolTip="选底色、放一张背景图、调叠色深浅、强制明暗"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TbAppearanceSummary" Style="{StaticResource SetHint}"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="开机自动启动"/>
+                                            <ToggleButton x:Name="TgAutoStart" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgAutoStart_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="关闭时驻留托盘"/>
+                                            <ToggleButton x:Name="TgStayTray" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStayTray_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- v1.38：开机自启之后，启动时直接收进托盘、不弹窗口。
+                                         自启的意思是「开机它就在」，不是「开机在你脸上开一扇窗」。 -->
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="启动时最小化到托盘"/>
+                                            <ToggleButton x:Name="TgStartMin" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgStartMin_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource SetLabel}" Text="收进托盘时释放窗口"/>
+                                                <ToggleButton x:Name="TgTrimToTray" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgTrimToTray_Click"/>
+                                            </Grid>
+                                            <TextBlock x:Name="TbTrimHint" Style="{StaticResource SetHint}"
+                                                       Text="实测只省 3.7 MB，但再打开一次要多等 1 秒多。想腾内存再开。"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="按键音效"/>
+                                            <ToggleButton x:Name="TgSound" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSound_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRow}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="迷你浮条（只显示进度）"/>
+                                            <ToggleButton x:Name="TgMiniBar" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgMiniBar_Click"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRowLast}">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource SetLabel}" Text="跑完说一句话"/>
+                                            <ToggleButton x:Name="TgSpeech" Style="{StaticResource SwitchStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="TgSpeech_Click"/>
+                                        </Grid>
+                                    </Border>
+                                    </StackPanel>
+                                    </ScrollViewer>
+                                    </Grid>
+                            </Border>
+                            </StackPanel>
+                        </Grid><!-- /SettingsCards -->
+                            </StackPanel><!-- /SettingsSection -->
+                        </Grid><!-- /PageSettings -->
                     </ScrollViewer>
 
                     <!-- ===== 第四页：插件（v1.34）=====
@@ -2644,8 +2759,14 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
+                            <!-- ===== 第 1 块：今天一共跑了多久 =====
+                                 v1.41 / M5-5：合计行下面多一句「较昨日」。
+                                 没有昨天的数就整句不出现——「昨天没跑」和「昨天跑了 0 秒」
+                                 不是一回事，硬凑一句会让人以为对比过了。 -->
                             <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16,18,16">
                                 <StackPanel>
                                     <Grid>
@@ -2668,6 +2789,9 @@
                                     <TextBlock x:Name="TbReportTotal" Text="还没跑过" FontSize="30" FontWeight="SemiBold"
                                                Margin="0,12,0,0" HorizontalAlignment="Left"
                                                Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock x:Name="TbReportTrend" Text="" FontSize="11.5" TextWrapping="Wrap"
+                                               Margin="0,4,0,0" HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextTertiaryBrush}"/>
                                     <TextBlock x:Name="TbReportHint" Text="" FontSize="11.5" TextWrapping="Wrap"
                                                Margin="0,6,0,0" LineHeight="18" MaxWidth="560"
                                                HorizontalAlignment="Left"
@@ -2680,27 +2804,54 @@
                                     <TextBlock x:Name="TbReportBarsHint" Text="" FontSize="10.5"
                                                Margin="0,4,0,0" HorizontalAlignment="Left"
                                                Foreground="{DynamicResource TextTertiaryBrush}"/>
+
+                                    <!-- v1.41 / M5-2：「较上次」到底跟什么比，得写出来一次。
+                                         不写的话，人会拿它去跟昨天比，然后觉得数字不对。 -->
+                                    <TextBlock x:Name="TbReportComparedNote" Text=""
+                                               FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"
+                                               HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextTertiaryBrush}"/>
                                 </StackPanel>
                             </Border>
 
+                            <!-- ===== 第 2 块：异常与处理（v1.41 / M5-4，放最前）=====
+                                 这一块只写「出过事、并且管家真做了什么」。
+                                 动作全部来自日志里真实写过的那几句，一条也不许编——
+                                 宁可写「没有需要你操心的事」，也不要写一个没发生过的处理。 -->
                             <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
                                 <StackPanel>
                                     <Grid>
-                                        <TextBlock Text="每个工具" FontSize="13.5" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                        <TextBlock x:Name="TbReportToolHint" Text="" FontSize="10.5"
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Path Data="M12,3 L20,6.2 L20,12 C20,16 16.4,19.4 12,21 C7.6,19.4 4,16 4,12 L4,6.2 Z"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.8"
+                                                  StrokeLineJoin="Round"
+                                                  Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <TextBlock Text="异常与处理" FontSize="13.5" FontWeight="SemiBold"
+                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        </StackPanel>
+                                        <TextBlock x:Name="TbReportAnomalyHint" Text="" FontSize="10.5"
                                                    HorizontalAlignment="Right" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextTertiaryBrush}"/>
                                     </Grid>
-                                    <StackPanel x:Name="ReportToolHost" Margin="0,10,0,0"/>
+                                    <StackPanel x:Name="ReportAnomalyHost" Margin="0,10,0,0"/>
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                            <!-- ===== 第 3 块：配置组执行（v1.41 / M5-1）=====
+                                 绝对耗时是普通字，差异值才是彩色 pill。
+                                 两个都染上颜色，人会以为耗时本身也分好坏——
+                                 跑得慢不等于出错，只是慢。 -->
+                            <Border x:Name="ReportGroupCard" Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
                                 <StackPanel>
                                     <Grid>
-                                        <TextBlock Text="按配置组" FontSize="13.5" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Path Data="M4,6 L4,4.5 A1.5,1.5 0 0 1 5.5,3 L8.5,3 A1.5,1.5 0 0 1 10,4.5 L10,6 M5,6 L19,6 A1,1 0 0 1 20,7 L20,19 A1,1 0 0 1 19,20 L5,20 A1,1 0 0 1 4,19 L4,7 A1,1 0 0 1 5,6"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.8"
+                                                  StrokeLineJoin="Round"
+                                                  Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <TextBlock Text="配置组执行" FontSize="13.5" FontWeight="SemiBold"
+                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        </StackPanel>
                                         <TextBlock x:Name="TbReportGroupHint" Text="" FontSize="10.5"
                                                    HorizontalAlignment="Right" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextTertiaryBrush}"/>
@@ -2709,7 +2860,35 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                            <!-- ===== 第 4 块：每个工具 ===== -->
+                            <Border x:Name="ReportToolCard" Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                                <StackPanel>
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Path Data="M4,7 L9,7 L11,4 L20,4 L20,19 L4,19 Z"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.8"
+                                                  StrokeLineJoin="Round"
+                                                  Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <TextBlock Text="每个工具" FontSize="13.5" FontWeight="SemiBold"
+                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        </StackPanel>
+                                        <TextBlock x:Name="TbReportToolHint" Text="" FontSize="10.5"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <StackPanel x:Name="ReportToolHost" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- ===== 第 5 块：空分区合并（v1.41 / M5-3）=====
+                                 两个以上分区都只有「暂无」时，合成这一行放在末尾。
+                                 空分区名由代码填，不写死——写死的话新加一个分区就会漏。 -->
+                            <TextBlock x:Name="TbReportEmptyMerge" Text="" Grid.Row="4"
+                                       FontSize="11.5" TextWrapping="Wrap" LineHeight="18"
+                                       Margin="2,12,0,0" Visibility="Collapsed"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+
+                            <Border Grid.Row="5" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
                                 <StackPanel>
                                     <TextBlock Text="这个数是哪来的" FontSize="13.5" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextPrimaryBrush}"/>
@@ -2726,6 +2905,122 @@
                 </Grid>
             </Border>
 
+
+            <!-- ===== 日志视图（v1.41 / M1-2）=====
+                 它不再是底栏的一页，而是一层「带着问题进来」的覆盖视图：
+                 进来时带 {runId?, toolId?, date?} 三个过滤条件，多个条件取交集。
+                 顶部那行「正在看：…」把当前条件明写出来——不然筛过之后
+                 少了几行，人会以为日志丢了。
+                 关掉它就回到原来那一页，底栏四项不变。 -->
+            <Grid x:Name="LogLayer" Grid.Row="1" Panel.ZIndex="15" Visibility="Collapsed"
+                  Background="{DynamicResource InsetBrush}">
+                <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto"
+                              ScrollChanged="PageScrollChanged" HorizontalScrollBarVisibility="Disabled">
+                    <Grid x:Name="PageRun" Margin="14,10,14,22">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- 过滤条：把「现在在筛什么」写在最上面 -->
+                        <Border Grid.Row="0" Style="{StaticResource Card}" Padding="16,11,16,11">
+                            <Grid>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Path Data="M3,4 L17,4 L11.5,10.5 L11.5,16.5 L8.5,15 L8.5,10.5 Z"
+                                          Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.5"
+                                          StrokeLineJoin="Round" Width="13" Height="13" Stretch="Uniform"
+                                          VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="TbLogFilter" Text="正在看：全部日志" FontSize="12.5"
+                                               Margin="8,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <TextBlock x:Name="TbLogCount" Text="" FontSize="10.5" VerticalAlignment="Center"
+                                               Margin="0,0,10,0" Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    <Button Content="关闭" Style="{StaticResource MiniAction}" Height="26" Padding="10,0"
+                                            Click="BtnLogClose_Click" ToolTip="回到刚才那一页"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- 原来日志页那两张卡：一个字没改，只是搬到这里当正文的头一段 -->
+                        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,16,18,16">
+                            <StackPanel>
+                                <TextBlock Text="刚才跑了什么" FontSize="13.5" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                <TextBlock x:Name="TbRunState" Text="" FontSize="19" FontWeight="SemiBold"
+                                           Margin="0,10,0,0" TextWrapping="Wrap" HorizontalAlignment="Left"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                <TextBlock x:Name="TbRunDetail" Text="" FontSize="12.5" Margin="0,8,0,0"
+                                           TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                <StackPanel x:Name="RunDecisionHost" Margin="0,14,0,0"/>
+                                <WrapPanel Margin="0,16,0,0">
+                                    <Button Style="{StaticResource LaunchGhost}" Height="32" Content="今日详情"
+                                            Click="BtnRunToday_Click"
+                                            ToolTip="每组跑了多久、哪一项没成、它替你做了哪些决定"/>
+                                    <Button Style="{StaticResource LaunchGhost}" Height="32" Content="打开日志"
+                                            Margin="8,0,0,0" Click="BtnRunLog_Click"
+                                            ToolTip="打开日志文件夹，看原始文件"/>
+                                    <!-- M3-6：常用的两个留在外面，其余收进「更多」。
+                                         收的理由很简单：这三个按钮里只有「今日详情」是每天都点的，
+                                         另外两个一周也用不上一次，却一直占着一行最显眼的位置。 -->
+                                    <Button x:Name="BtnRunMore" Style="{StaticResource LaunchGhost}" Height="32"
+                                            Margin="8,0,0,0" Click="BtnRunMore_Click"
+                                            ToolTip="还有几个不常点的">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="更多" VerticalAlignment="Center"/>
+                                            <TextBlock Text="▾" FontSize="9" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Button.ContextMenu>
+                                            <ContextMenu x:Name="RunMoreMenu">
+                                                <MenuItem Header="出门前看一眼" Click="BtnRunHandover_Click"
+                                                          ToolTip="接下来几天它会做什么、哪些兜不住"/>
+                                                <!-- M1-3：全量日志的兜底入口。不带任何条件，
+                                                     从哪一页点都到得了完整的一天。 -->
+                                                <MenuItem Header="全部日志" Click="BtnRunAllLogs_Click"
+                                                          ToolTip="今天记下的每一条，不做任何筛选"/>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                            <StackPanel>
+                                <TextBlock Text="时间账" FontSize="13.5" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                <TextBlock x:Name="TbRunBank" Text="" FontSize="12.5" Margin="0,8,0,0"
+                                           TextWrapping="Wrap" HorizontalAlignment="Left"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                <TextBlock x:Name="TbRunBaseline" Text="" FontSize="12.5" Margin="0,6,0,0"
+                                           TextWrapping="Wrap" HorizontalAlignment="Left" Visibility="Collapsed"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 日志正文：一行一条，时间列用等宽数字对齐 -->
+                        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBlock Text="日志" FontSize="13.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock x:Name="TbLogHint" Text="" FontSize="10.5"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                </Grid>
+                                <StackPanel x:Name="LogListHost" Margin="0,10,0,0"/>
+                                <TextBlock x:Name="TbLogEmpty" Text="" FontSize="12.5" Margin="0,10,0,0"
+                                           TextWrapping="Wrap" Visibility="Collapsed"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </ScrollViewer>
+            </Grid>
 
             <!-- v1.32/v1.33/v1.34：悬浮标签栏。
                  v1.33 修了两处：
@@ -2781,35 +3076,12 @@
                         </Border>
 
                         <StackPanel x:Name="NavItemsHost" Orientation="Horizontal">
-                        <!-- 日志：一页带折角的纸 + 三行字。
-                             v1.34 之前叫「运行」——那说的是「状态」，可这一页放的全是已经发生过的事：
-                             刚才跑了什么、时间账、决定清单。「日志」才对得上里面的内容。
-                             v1.35：原来画的是「左右两半页」，在 18px 下两条竖边糊成一个方框，
-                             用户看不出那是书。现在用折角 + 三行字：纸的形状一眼认得出，三行字是「有内容」。
-                             行数用 3 而不是 4：18px 里 4 行线会连成一块灰。 -->
-                        <RadioButton x:Name="SegPageRun" Tag="0"
-                                     Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
-                                     ToolTip="刚才跑了什么、今天的时间账">
-                            <StackPanel>
-                                <!-- 外框带折角，里面三行 -->
-                                <Path Data="M4,2.5 L11.5,2.5 L16,7 L16,17.5 L4,17.5 Z M11.5,2.5 L11.5,7 L16,7 M6.5,10 L13.5,10 M6.5,13 L13.5,13 M6.5,16 L10.5,16"
-                                      Width="18" Height="18" Stretch="Uniform"
-                                      HorizontalAlignment="Center"
-                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
-                                      StrokeThickness="1.4" StrokeLineJoin="Round"
-                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-                                <TextBlock Text="日志" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
-                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
-                            </StackPanel>
-                        </RadioButton>
 
-                        <!-- 汇报：四根柱子高低不一（「这几天各花了多久」）。
-                             v1.40 新增，插在日志与主页之间——它和日志回答的是同一类问题：
-                             日志答「成没成、为什么没成」，汇报答「花了多久、时间去哪了」。
-                             放在主页左边，是因为它属于「回头看」，而不是「现在要做什么」。
+                        <!-- 日报：四根柱子高低不一（「这几天各花了多久」）。
+                             v1.40 新增，v1.41 起站到最左边——「日志」那一页退出底栏之后，它就是唯一的「回头看」。
                              为什么不用时钟：时钟说的是「现在几点」，这一页说的是「已经用掉多少」，
                              柱状图一眼能看出多寡，时钟要读秒针。 -->
-                        <RadioButton x:Name="SegPageReport" Tag="1"
+                        <RadioButton x:Name="SegPageReport" Tag="0"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="今天每个工具、每个配置组各跑了多久">
                             <StackPanel>
@@ -2819,16 +3091,16 @@
                                           StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                           Stretch="Uniform"/>
                                 </Grid>
-                                <TextBlock Text="汇报" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                <TextBlock Text="日报" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
                                            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                             </StackPanel>
                         </RadioButton>
 
                         <!-- 主页：房子（「接下来几点跑」，每天回来的那一页）。
                              v1.34 之前叫「启动」——但进门的那一页不只是「启动」，它是整个软件的正门。 -->
-                        <RadioButton x:Name="SegPageHome" Tag="2" IsChecked="True"
+                        <RadioButton x:Name="SegPageHome" Tag="1" IsChecked="True"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
-                                     ToolTip="定时、托管配置、一键开跑">
+                                     ToolTip="定时、任务清单、一键开跑">
                             <StackPanel>
                                 <Path Data="M3,9.5 L10,3 L17,9.5 L17,16.5 L3,16.5 Z" Width="18" Height="18"
                                       Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
@@ -2840,7 +3112,7 @@
                         </RadioButton>
 
                         <!-- 设置：两根滑杆（「把东西配好」） -->
-                        <RadioButton x:Name="SegPageSettings" Tag="3"
+                        <RadioButton x:Name="SegPageSettings" Tag="2"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="工具、通知、系统和插件">
                             <StackPanel>
@@ -2864,7 +3136,7 @@
                         <!-- 插件：一块拼图 + 插口。
                              v1.34 新增。它以前是设置页里一张默认收起的折叠卡——要往里放东西的入口，
                              折叠着等于让人自己猜它存在。 -->
-                        <RadioButton x:Name="SegPagePlugins" Tag="4"
+                        <RadioButton x:Name="SegPagePlugins" Tag="3"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="装了哪些、装在哪、为什么没加载">
                             <StackPanel>

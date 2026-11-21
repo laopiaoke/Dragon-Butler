@@ -132,6 +132,7 @@ public partial class MainWindow : Window
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(AnyInteractivePress), true);
 
         LoadSettingsToUi();
+        BuildSettingsHome();   // v1.41 / M4-1：一级五张入口卡，构造时铺一次就够
         RebuildCustomToolCards();
         RefreshPlugins();
         // 汇报页只在切过去时刷一次（见 ShowPage），构造时不读盘：
@@ -150,9 +151,13 @@ public partial class MainWindow : Window
         {
             AppState.RefreshStatus();
             if (SuppressAutoCenter) return;
-            Dispatcher.BeginInvoke(new Action(CenterOnActiveMonitor), DispatcherPriority.Render);
+            // v1.41 / M6-1：先摆回上次的位置，再谈居中——「上次在哪」比「默认在哪」优先。
+            RestoreWindowBounds();
             // 向导放到窗口真正显示之后再弹，避免主界面停留在"未显示"状态
             Dispatcher.BeginInvoke(new Action(TryShowFirstRunWizard), DispatcherPriority.Background);
+            // v1.41 / M4-2：等这一刻才收说明——在此之前控件还没量出行高，判断不了「超没超过一行」。
+            // 之后再改窗口大小也不用管：收过的已经收好了，没超的本来就不该挂 ⓘ。
+            HintFold.Apply(PageSettings);
             // v1.16：启动后安静地看一眼有没有新版。放这么晚是因为它要联网——
             // 界面先出来，网络慢不该让窗口空着等。
             StartBackgroundUpdateCheck();
@@ -165,11 +170,94 @@ public partial class MainWindow : Window
         _uiRefreshTimer.Start();
 
         try { MaxHeight = Math.Max(560, SystemParameters.WorkArea.Height - 24); } catch { }
+        // v1.41 / M6-1：最宽 = 可用宽 − 200。给两侧各留 100，是为了让「这不是全屏」一眼看得出来；
+        // 贴着屏幕边缘的方窗口看起来像卡住了，而它其实只是被拖到最大。
+        try { MaxWidth = Math.Max(MinWidth, SystemParameters.WorkArea.Width - 200); } catch { }
     }
 
     private static void CenterOnActiveMonitor()
     {
         // WindowStartupLocation 已在 XAML 里设 CenterScreen；这里不额外移动，避免多屏时跳到主屏
+    }
+
+    // ===== v1.41 / M6-1：主窗位置与大小 =====
+
+    /// <summary>
+    /// 把窗口摆回上次关掉时的位置和大小。
+    ///
+    /// <para>
+    /// 三种情况不动它：没记过（-1）、记的数不像话（宽高 <= 0）、
+    /// 记的位置现在跑到屏幕外面去了（拔过外接屏、改过缩放）。最后一种最常见，
+    /// 表现为「打开就是一片空白，任务栏有图标但窗口找不到」——所以必须检测，
+    /// 不能只是把 Left/Top 赋回去。
+    /// </para>
+    /// </summary>
+    private void RestoreWindowBounds()
+    {
+        try
+        {
+            var s = AppState.Settings;
+            if (!LooksLikeValidBounds(s)) return;
+
+            // 最大宽 = 屏幕可用宽 − 200：留出两侧，否则贴着边框的窗口看起来像全屏卡死。
+            var work = SystemParameters.WorkArea;
+            double maxW = Math.Max(MinWidth, work.Width - 200);
+            double w = Math.Min(Math.Max(s.WindowWidth, MinWidth), maxW);
+            double h = Math.Min(Math.Max(s.WindowHeight, MinHeight), Math.Max(MinHeight, work.Height));
+
+            Width = w;
+            Height = h;
+
+            // 判定「这一块还有多少露在屏幕里」：只要标题栏能抓到就不算丢。
+            // 拿整个矩形去比会把「右上角探出去一点」也算成丢，那样用户把它挪到边上
+            // 下次打开就被拽回中间，比不记忆更烦人。
+            var candidate = new Rect(s.WindowLeft, s.WindowTop, w, h);
+            bool visible = candidate.Right > work.Left + 80
+                           && candidate.Left < work.Right - 80
+                           && candidate.Bottom > work.Top + 40
+                           && candidate.Top < work.Bottom - 40;
+
+            if (!visible)
+            {
+                // 位置失效但大小还有效：只把大小用上，位置交给 XAML 的 CenterScreen。
+                return;
+            }
+
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = candidate.Left;
+            Top = candidate.Top;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("恢复窗口位置失败：" + ex.Message);
+        }
+    }
+
+    private static bool LooksLikeValidBounds(AppSettings s)
+        => s.WindowLeft > -1 && s.WindowTop > -1 && s.WindowWidth > 0 && s.WindowHeight > 0;
+
+    /// <summary>
+    /// 关窗口（或收进托盘）时把当前位置记下来。
+    /// 用 RestoreBounds 而不是 Left/Top：最小化/最大化之后 Left/Top 会变成
+    /// (−32000, −32000)，记下那个下次启动窗口就在屏幕外面。
+    /// </summary>
+    private void SaveWindowBounds()
+    {
+        try
+        {
+            var s = AppState.Settings;
+            Rect r = RestoreBounds;
+            if (r.Width < MinWidth / 2 || r.Height < MinHeight / 2) return;
+            s.WindowLeft = r.Left;
+            s.WindowTop = r.Top;
+            s.WindowWidth = r.Width;
+            s.WindowHeight = r.Height;
+            AppState.SaveSettings();
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("记录窗口位置失败：" + ex.Message);
+        }
     }
 
     private void OnAppThemeChanged()
@@ -1116,6 +1204,19 @@ public partial class MainWindow : Window
 
     private void BtnWeeklyPlan_Click(object sender, RoutedEventArgs e) => OpenWeeklyPlan();
 
+    /// <summary>
+    /// v1.41 / M3-3：「当前视图名 + 下拉」取代原来五个并排的 chip。
+    /// 菜单贴着按钮左下角弹，人点的是这里、菜单也从这里长出来；
+    /// 不拦 MenuItem 自己的 Click——它们和以前一样各自开门。
+    /// </summary>
+    private void BtnQueueView_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.ContextMenu == null) return;
+        btn.ContextMenu.PlacementTarget = btn;
+        btn.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        btn.ContextMenu.IsOpen = true;
+    }
+
     // ===== v1.9 依赖编排 =====
 
     private void BtnDepends_Click(object sender, RoutedEventArgs e) => OpenDepends();
@@ -2059,7 +2160,10 @@ public partial class MainWindow : Window
                 UIElement cell;
                 if (slot < ids.Count)
                 {
-                    cell = BuildToolTile(ProfileRegistry.Get(ids[slot]));
+                    // v1.41 / M3-5：序号按格子的全局先后算，跨页连续——第 2 页第 1 格是 7，
+                    // 不是 1。用户数的是「今晚第几个跑」，不是「这一页第几个」。
+                    int order = p * ToolPages.PerPage + slot + 1;
+                    cell = BuildToolTile(ProfileRegistry.Get(ids[slot]), order);
                 }
                 else if (p == _toolPage && slot == ids.Count)
                 {
@@ -2399,7 +2503,17 @@ public partial class MainWindow : Window
         GoToolPage(_toolPage + (dx < 0 ? 1 : -1));
     }
 
-    private Border BuildToolTile(ToolProfile profile)
+    /// <summary>
+    /// v1.41 / M3-5：格子再加一行「① · 间隔 2 分钟 · 跑完通知」。
+    ///
+    /// <para>
+    /// 为什么放这儿：格子上原来只有名字和状态两行，回答的是「它配没配好、今晚跑不跑」。
+    /// 但真正让人半夜爬起来看屏幕的问题是「它排第几个、中间歇多久、跑完之后机器会怎样」——
+    /// 这三件事以前散在「任务清单」卡的下半部分和设置页里，要滚要翻。挪到格子上，
+    /// 一眼就齐了。序号按队列顺序（也就是格子的先后），不在队列里的工具没有序号，显示「—」。
+    /// </para>
+    /// </summary>
+    private Border BuildToolTile(ToolProfile profile, int order = 0)
     {
         bool ready = false;
         try { ready = ToolRunner.HasExecutable(profile); } catch { }
@@ -2464,8 +2578,10 @@ public partial class MainWindow : Window
         stack.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        // v1.41 / M3-5：第三行留给「① · 间隔 2 分钟 · 跑完通知」。
+        stack.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        Grid.SetRowSpan(icon, 2);
+        Grid.SetRowSpan(icon, 3);
         Grid.SetColumn(icon, 0);
         stack.Children.Add(icon);
 
@@ -2501,6 +2617,24 @@ public partial class MainWindow : Window
         Grid.SetRow(stateText_, 1);
         Grid.SetColumn(stateText_, 1);
         stack.Children.Add(stateText_);
+
+        // v1.41 / M3-5：第三行——「① · 间隔 2 分钟 · 跑完通知」。
+        // 用辅助色，压得比状态那行更淡：它是给「扫一眼」用的，不该抢状态的位置。
+        var summaryText = new TextBlock
+        {
+            Text = BuildToolTileSummary(profile.ToolId, order),
+            FontSize = 10.5,
+            Margin = new Thickness(9, 2, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            TextAlignment = TextAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        };
+        Grid.SetRow(summaryText, 2);
+        Grid.SetColumn(summaryText, 1);
+        stack.Children.Add(summaryText);
 
         var tile = new Border
         {
@@ -2554,11 +2688,63 @@ public partial class MainWindow : Window
             {
                 nameText.MaxWidth = room;
                 stateText_.MaxWidth = room;
+                summaryText.MaxWidth = room;
             }
         };
 
         return tile;
     }
+
+    /// <summary>
+    /// v1.41 / M3-5：格子上那行状态摘要——「① · 间隔 2 分钟 · 跑完通知」。
+    ///
+    /// <para>
+    /// 三段都只在代码里真实存在的地方取值：序号来自队列顺序（不在队列里就没序号），
+    /// 间隔与跑完动作读的是全局设置（当前代码里没有「按工具单独设间隔 / 单独设跑完动作」这回事，
+    /// 所以这里不编一个出来）。任何一段取不到就整段省掉，不写占位词。
+    /// </para>
+    /// </summary>
+    private static string BuildToolTileSummary(string toolId, int order)
+    {
+        var parts = new List<string>();
+        // 不在队列里的工具不参与排序，序号位写「—」——写个数字会骗人，
+        // 让人以为它会按这个次序跑。
+        bool scheduled = QueueEntryOf(toolId) != null;
+        parts.Add(scheduled && order > 0 ? OrderLabel(order) : "—");
+
+        int minutes = AppState.Settings.QueueIntervalMinutes;
+        parts.Add(minutes > 0 ? $"间隔 {minutes} 分钟" : "不间隔");
+
+        string afterRun = DescribeAfterRun(AppState.Settings.AfterRunAction);
+        if (!string.IsNullOrWhiteSpace(afterRun)) parts.Add("跑完" + afterRun);
+
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>1..20 用带圈数字，超过就退回普通数字——再多也数不清了。</summary>
+    private static string OrderLabel(int order) => order switch
+    {
+        1 => "①", 2 => "②", 3 => "③", 4 => "④", 5 => "⑤",
+        6 => "⑥", 7 => "⑦", 8 => "⑧", 9 => "⑨", 10 => "⑩",
+        11 => "⑪", 12 => "⑫", 13 => "⑬", 14 => "⑭", 15 => "⑮",
+        16 => "⑯", 17 => "⑰", 18 => "⑱", 19 => "⑲", 20 => "⑳",
+        _ => order.ToString(),
+    };
+
+    /// <summary>
+    /// 把 AfterRunAction 的机器值翻成人话。取值集合以 <c>MainWindow.xaml</c> 里
+    /// CbAfterRun 的五项为准（Notify / RunAgain / OpenApp / Sleep / Shutdown），
+    /// 认不出来的返回空串，让调用方整段省掉。
+    /// </summary>
+    private static string DescribeAfterRun(string? action) => action switch
+    {
+        "Notify" => "通知",
+        "RunAgain" => "再跑一轮",
+        "OpenApp" => "打开程序",
+        "Sleep" => "自动睡眠",
+        "Shutdown" => "自动关机",
+        _ => "",
+    };
 
     private string BuildToolTileTip(ToolProfile profile, bool ready, bool runningThis)
     {
@@ -2938,6 +3124,18 @@ public partial class MainWindow : Window
             BorderThickness = new Thickness(1),
             Padding = new Thickness(4),
         };
+
+        // v1.41 / M3-7：先放「现在就要它做点什么」的四件。右键一张工具卡，
+        // 十次里有八次问的是「能不能单独跑一下 / 今晚能不能不跑 / 它到底怎么跑的」，
+        // 而改顺序、改启动设置是要动配置的，放后面——临时动作和改配置不该混在一起。
+        menu.Items.Add(MenuItem("立即跑这一个", () => RunToolNow(toolId)));
+        menu.Items.Add(MenuItem(
+            QueueService.IsSkippedOnce(toolId) ? "这次还是跑" : "跳过这次",
+            () => ToggleSkipOnce(toolId)));
+        menu.Items.Add(MenuItem("改间隔…", () => RevealIntervalSetting()));
+        menu.Items.Add(MenuItem("查看日志", () => OpenLogView(LogFilter.ForTool(toolId))));
+        menu.Items.Add(new Separator());
+
         menu.Items.Add(MenuItem("改启动设置", () => OpenToolLaunch(toolId)));
         // v1.26：格子现在表示「今晚按什么顺序跑」，所以菜单说的是队列里的位置，
         // 不是屏幕上往左往右——2 列 4 行的时候「往右一格」和「下一个跑」是两件事，
@@ -2963,6 +3161,54 @@ public partial class MainWindow : Window
         }
         tile.ContextMenu = menu;
         menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// v1.41 / M3-7：马上单独跑这一个。走的是与命令面板 <c>run.tool:</c> 同一条路——
+    /// 一份执行逻辑，出问题只需要修一个地方。
+    /// </summary>
+    private void RunToolNow(string toolId)
+    {
+        var profile = ProfileRegistry.Get(toolId);
+        if (profile == null)
+        {
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", "找不到这个工具：" + toolId);
+            return;
+        }
+        if (QueueService.IsRunning)
+        {
+            NotifyService.Show(NotifyLevel.Info, "龙管家", "队列正在跑，等它结束或先停止。");
+            return;
+        }
+        AppState.PublishLog($"✓ 单独跑一次：{profile.DisplayName}");
+        LogService.LogEvent("桌面菜单：立即跑 " + toolId);
+        _ = QueueService.StartSingleAsync(profile, QueueTrigger.Manual);
+    }
+
+    /// <summary>
+    /// v1.41 / M3-7：跳过这一次。与「今晚不跑它」不同——后者是把这项从队列里关掉，
+    /// 得手动开回来；这里只是这一次不跑，下一趟定时照旧。
+    /// </summary>
+    private void ToggleSkipOnce(string toolId)
+    {
+        bool nowSkipped = QueueService.ToggleSkipOnce(toolId);
+        var profile = ProfileRegistry.Get(toolId);
+        AppState.PublishLog(nowSkipped
+            ? $"这次不跑 {profile.DisplayName}，下一趟照旧"
+            : $"这次照跑 {profile.DisplayName}");
+        RenderToolGrid();
+    }
+
+    /// <summary>
+    /// v1.41 / M3-7：改间隔。间隔目前只有全局一份（<see cref="AppSettings.QueueIntervalMinutes"/>），
+    /// 所以这里不假装能单独改某个工具——把人送到那个真正的开关旁边，并说清它是全局的。
+    /// </summary>
+    private void RevealIntervalSetting()
+    {
+        ShowPage(Pager.Settings);
+        RevealCard(CbInterval);
+        NotifyService.Show(NotifyLevel.Info, "龙管家",
+            "工具之间歇多久是全局一份，改一次所有工具都跟着变。");
     }
 
     private MenuItem MenuItem(string text, Action action)
@@ -3800,7 +4046,8 @@ public partial class MainWindow : Window
     // ===== 三页切换（v1.22）=====
 
     /// <summary>
-    /// 当前停在哪一页：0 = 日志，1 = 汇报（v1.40），2 = 主页（打开就在这），3 = 设置，4 = 插件。
+    /// 当前停在哪一页：0 = 日报（v1.41 起站最左），1 = 主页（打开就在这），2 = 设置，3 = 插件。
+    /// 日志不再是其中一页——它变成了一层带过滤条件打开的覆盖视图（见 <see cref="OpenLogView"/>）。
     /// 存成字段而不是读控件状态，是因为切页动画期间 RadioButton 已经变了、页面还没到位，
     /// 中间会有一瞬间两者不一致，靠控件判断会把自己绊一下。
     /// </summary>
@@ -3825,8 +4072,8 @@ public partial class MainWindow : Window
         var offsets = Pager.Offsets(index);
         var transforms = new (TranslateTransform? T, int Offset)[]
         {
-            (ShiftRun, offsets[0]), (ShiftReport, offsets[1]), (ShiftHome, offsets[2]),
-            (ShiftSettings, offsets[3]), (ShiftPlugins, offsets[4]),
+            (ShiftReport, offsets[0]), (ShiftHome, offsets[1]),
+            (ShiftSettings, offsets[2]), (ShiftPlugins, offsets[3]),
         };
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         var dur = TimeSpan.FromMilliseconds(260);
@@ -3850,7 +4097,7 @@ public partial class MainWindow : Window
     private void SegPage_Checked(object sender, RoutedEventArgs e)
     {
         // 构造期间 XAML 里的 IsChecked="True" 就会触发一次，那时几个平移量还没建好
-        if (ShiftRun == null || ShiftReport == null || ShiftHome == null
+        if (ShiftReport == null || ShiftHome == null
             || ShiftSettings == null || ShiftPlugins == null) return;
         if (sender is RadioButton rb && int.TryParse(rb.Tag as string, out int want)) ShowPage(want);
     }
@@ -3952,8 +4199,8 @@ public partial class MainWindow : Window
         var offsets = Pager.Offsets(_page);
         var transforms = new (TranslateTransform? T, int Offset)[]
         {
-            (ShiftRun, offsets[0]), (ShiftReport, offsets[1]), (ShiftHome, offsets[2]),
-            (ShiftSettings, offsets[3]), (ShiftPlugins, offsets[4]),
+            (ShiftReport, offsets[0]), (ShiftHome, offsets[1]),
+            (ShiftSettings, offsets[2]), (ShiftPlugins, offsets[3]),
         };
         foreach (var (t, offset) in transforms)
         {
@@ -3975,17 +4222,21 @@ public partial class MainWindow : Window
             index = Pager.Clamp(index);
             _page = index;
 
+            // 从日志视图里点底栏切换：先把覆盖层收掉，否则切了也看不见。
+            CloseLogView(keepHistory: true);
+
             SyncPageSegments(index);
 
             double width = PageClip.ActualWidth;
             if (width <= 0) width = ActualWidth;   // 还没量出来：先按窗口宽猜，SizeChanged 到位后会纠正
             PlacePages(index, width, animate);
 
-            // 切到运行页时顺手刷一遍：那一页的东西是「刚才怎么样了」，
-            // 用户往往是刚回来才看它，进页不刷就会看到上一次的旧话。
-            if (index == 0) RefreshRunPage();
-            // 汇报页同理：这一页摆的是「今天到现在为止」，隔一夜再看会全是昨天的数。
+            // 日报页切过去才刷：这一页摆的是「今天到现在为止」，隔一夜再看会全是昨天的数。
             if (index == Pager.Report) RefreshReportPage();
+
+            // v1.41 / M4-1：从底栏进设置，先站一级（五张入口卡）。
+            // 从别处定位某个开关进来的（RevealCard）会在后面紧接着翻开对应那一类。
+            if (index == Pager.Settings) BackToSettingsHome();
         }
         catch (Exception ex)
         {
@@ -3993,12 +4244,197 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>三个 RadioButton 与 _page 对齐。切页可能来自按钮、也可能来自命令面板或代码，两个方向都要能同步。</summary>
+    // ===== v1.41 / M4-1：设置页二级化的路由 =====
+    //
+    // 一级只有五张入口卡，点一张才进二级铺开那一类的全部开关。
+    // 为什么这么切：以前五张卡并排，一眼看到二十多个开关，想改「失败之后还跑不跑」
+    // 得先在一堆字里认出哪一行属于它。按「你什么时候会想改它」分成五类之后，
+    // 一级那屏只回答一个问题：我要改的是哪一类。
+    private enum SettingsPane { None, Guard, Timing, Notify, Api, Ui }
+
+    private SettingsPane _settingsPane = SettingsPane.None;
+
+    /// <summary>一级入口卡的标题、副标题、图标路径，以及点进去对应哪个分区。</summary>
+    private static readonly (SettingsPane Pane, string Title, string Subtitle, string Icon)[] SettingsEntries =
+    {
+        (SettingsPane.Guard,  "守护",       "跑的时候出事怎么办", "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,7 L12,12 L15.5,14"),
+        (SettingsPane.Timing, "定时",       "几点跑、中间歇多久", "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,7.5 L12,12 L15,13.5"),
+        (SettingsPane.Notify, "通知",       "跑完怎么告诉你",     "M6,9 A6,6 0 0 1 18,9 L18,14 L20,16 L4,16 L6,14 Z M10,19 A2,2 0 0 0 14,19"),
+        (SettingsPane.Api,    "接口",       "给外面的东西开个口", "M7,8 L4,12 L7,16 M17,8 L20,12 L17,16 M14,6 L10,18"),
+        (SettingsPane.Ui,     "界面与启动", "平时怎么用它",       "M4,6 L20,6 L20,17 L4,17 Z M9,21 L15,21 M12,17 L12,21"),
+    };
+
+    /// <summary>把一级入口卡铺出来。卡片只有五张，不值得缓存。</summary>
+    private void BuildSettingsHome()
+    {
+        if (SettingsEntryHost == null) return;
+        SettingsEntryHost.Children.Clear();
+        foreach (var entry in SettingsEntries)
+        {
+            SettingsEntryHost.Children.Add(
+                SettingsEntryCard(entry.Pane, entry.Title, entry.Subtitle, entry.Icon));
+        }
+
+        // 没走完那五步的人，一级里给一句话指个路——但不再重复「三步就能开始」。
+        if (TbSettingsWizardHint != null)
+        {
+            TbSettingsWizardHint.Visibility = AppState.Settings.OnboardingCompleted
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+
+        // 每次进一级都把二级收回去，免得下次进来还停在上一回翻到的那页。
+        BackToSettingsHome();
+    }
+
+    /// <summary>一张入口卡：图标 + 标题 + 一句「这一类管什么」。整块可点。</summary>
+    private UIElement SettingsEntryCard(SettingsPane pane, string title, string subtitle, string icon)
+    {
+        var border = new Border
+        {
+            Width = 208,
+            Margin = new Thickness(0, 0, 12, 12),
+            Padding = new Thickness(14, 12, 14, 12),
+            CornerRadius = new CornerRadius(12),   // M6-2：卡片圆角 12
+            Background = BrushOf("CardBg2Brush") ?? BrushOf("ControlBgBrush") ?? DotGray,
+            BorderBrush = BrushOf("BorderBrush") ?? DotGray,
+            BorderThickness = new Thickness(1),
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var iconBox = new Border
+        {
+            Width = 30,
+            Height = 30,
+            CornerRadius = new CornerRadius(9),
+            Background = BrushOf("BrandSoftBrush") ?? DotGray,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        iconBox.Child = new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse(icon),
+            Stroke = BrushOf("BrandTextBrush") ?? DotGreen,
+            StrokeThickness = 1.5,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Width = 15,
+            Height = 15,
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(iconBox, 0);
+        grid.Children.Add(iconBox);
+
+        var text = new StackPanel
+        {
+            Margin = new Thickness(10, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        text.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
+        });
+        text.Children.Add(new TextBlock
+        {
+            Text = subtitle,
+            FontSize = 11,
+            Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        });
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+
+        border.Child = grid;
+        border.MouseLeftButtonUp += (_, _) => ShowSettingsPane(pane);
+        return border;
+    }
+
+    /// <summary>进二级：收起一级，铺开这一个分区。</summary>
+    private void ShowSettingsPane(SettingsPane pane)
+    {
+        if (pane == SettingsPane.None) return;
+        _settingsPane = pane;
+
+        var hosts = new (SettingsPane Pane, StackPanel? Host)[]
+        {
+            (SettingsPane.Guard,  SecGuard),
+            (SettingsPane.Timing, SecTiming),
+            (SettingsPane.Notify, SecNotify),
+            (SettingsPane.Api,    SecApi),
+            (SettingsPane.Ui,     SecUi),
+        };
+        foreach (var pair in hosts)
+        {
+            if (pair.Host == null) continue;
+            pair.Host.Visibility = pair.Pane == pane ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // v1.41 / M4-2：说明只有露出来才量得到行高，收折得等这一屏真的显示之后再跑。
+        // 放在布局之后（Loaded 优先级）而不是当场，是因为此刻 ActualHeight 还是 0。
+        StackPanel? shown = null;
+        foreach (var pair in hosts) if (pair.Pane == pane) shown = pair.Host;
+        if (shown != null)
+        {
+            Dispatcher.BeginInvoke(new Action(() => HintFold.Apply(shown)), DispatcherPriority.Loaded);
+        }
+
+        if (SettingsHome != null) SettingsHome.Visibility = Visibility.Collapsed;
+        if (SettingsSection != null) SettingsSection.Visibility = Visibility.Visible;
+
+        // v1.41 / M4-1：通知卡默认是收起的（平时不看渠道，收着才不占地方）。
+        // 但人既然点了「通知」这一个入口，就是想改通知——替他把卡打开，
+        // 不然点进来只看见一个标题，还得再点一次。
+        if (pane == SettingsPane.Notify && NotifyBody != null)
+        {
+            NotifyBody.Visibility = Visibility.Visible;
+        }
+
+        if (TbSettingsSectionName != null)
+        {
+            foreach (var entry in SettingsEntries)
+                if (entry.Pane == pane) TbSettingsSectionName.Text = entry.Title;
+        }
+
+        // 换分区等于换一整屏，从顶上开始看才不像「中间缺了一块」。
+        ScrollSettings?.ScrollToVerticalOffset(0);
+    }
+
+    /// <summary>回到一级。返回按钮、以及 ESC 都走这里。</summary>
+    private void BackToSettingsHome()
+    {
+        _settingsPane = SettingsPane.None;
+        if (SettingsHome != null) SettingsHome.Visibility = Visibility.Visible;
+        if (SettingsSection != null) SettingsSection.Visibility = Visibility.Collapsed;
+    }
+
+    private void BtnSettingsBack_Click(object sender, RoutedEventArgs e) => BackToSettingsHome();
+
+    /// <summary>某个控件属于哪一类——RevealCard 靠它先把二级门打开，不然滚了也看不见。</summary>
+    private SettingsPane PaneOfSettingsTarget(FrameworkElement target)
+    {
+        if (SecGuard != null && (SecGuard == target || SecGuard.IsAncestorOf(target))) return SettingsPane.Guard;
+        if (SecTiming != null && (SecTiming == target || SecTiming.IsAncestorOf(target))) return SettingsPane.Timing;
+        if (SecNotify != null && (SecNotify == target || SecNotify.IsAncestorOf(target))) return SettingsPane.Notify;
+        if (SecApi != null && (SecApi == target || SecApi.IsAncestorOf(target))) return SettingsPane.Api;
+        if (SecUi != null && (SecUi == target || SecUi.IsAncestorOf(target))) return SettingsPane.Ui;
+        return SettingsPane.None;
+    }
+    /// <summary>四个 RadioButton 与 _page 对齐。切页可能来自按钮、也可能来自命令面板或代码，两个方向都要能同步。</summary>
     private void SyncPageSegments(int index)
     {
         var pairs = new (RadioButton? Btn, int Index)[]
         {
-            (SegPageRun, Pager.Log), (SegPageReport, Pager.Report), (SegPageHome, Pager.Home),
+            (SegPageReport, Pager.Report), (SegPageHome, Pager.Home),
             (SegPageSettings, Pager.Settings), (SegPagePlugins, Pager.Plugins),
         };
         foreach (var (btn, i) in pairs)
@@ -4178,6 +4614,36 @@ public partial class MainWindow : Window
             new DoubleAnimation(opacity, dur) { EasingFunction = ease, FillBehavior = FillBehavior.HoldEnd });
     }
 
+    // ===== 设置页卡内滚动（v1.41）=====
+
+    /// <summary>
+    /// 卡片自己滚到头之后，把滚轮交回给整页。
+    ///
+    /// 为什么要这道手工转发：滚轮事件是在冒泡阶段被 ScrollViewer 吃掉的，
+    /// 内层吃掉之后外层根本收不到 —— 于是「卡片滚到底，再往下滚整页不动」，
+    /// 而外层不动，导航的「下滑收起」也跟着没反应。
+    /// 这里只在「内层已经到头」时才接管，其余情况一个字都不做，让卡片先滚自己的。
+    /// </summary>
+    private void SetCardBody_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not ScrollViewer inner || ScrollSettings == null) return;
+
+        bool atTop = inner.VerticalOffset <= 0.5;
+        bool atBottom = inner.VerticalOffset >= inner.ScrollableHeight - 0.5;
+        bool roomLeft = e.Delta > 0 ? !atTop : !atBottom;
+
+        // 卡片自己还滚得动：交给它，别插手。
+        if (roomLeft && inner.ScrollableHeight > 1) return;
+
+        e.Handled = true;
+        var forward = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = UIElement.MouseWheelEvent,
+            Source = ScrollSettings,
+        };
+        ScrollSettings.RaiseEvent(forward);
+    }
+
     private void BtnRunLog_Click(object sender, RoutedEventArgs e)
     {
         try { AppState.PublishLog("日志在 " + LogService.Dir); } catch { }
@@ -4185,6 +4651,172 @@ public partial class MainWindow : Window
     }
 
     private void BtnRunHandover_Click(object sender, RoutedEventArgs e) => OpenHandover();
+
+    /// <summary>
+    /// 「更多 ▾」把菜单挂在按钮下沿弹出来。
+    /// 不直接点开 MenuItem：WPF 的 ContextMenu 默认跟着鼠标走，
+    /// 挂在按钮上按「按钮左下角」定位，人点的是这里、菜单也从这里长出来。
+    /// </summary>
+    private void BtnRunMore_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.ContextMenu == null) return;
+        btn.ContextMenu.PlacementTarget = btn;
+        btn.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        btn.ContextMenu.IsOpen = true;
+    }
+
+    /// <summary>M1-3：不带条件的全量日志——四个下钻入口都用不上时的兜底。</summary>
+    private void BtnRunAllLogs_Click(object sender, RoutedEventArgs e) => OpenLogView(LogFilter.None);
+
+    // ===== 日志视图（v1.41 / M1-2）=====
+    //
+    // 日志不再占底栏一格，改成一层「带着问题进来」的覆盖视图。
+    // 四个固定入口，进来时已经把条件筛好：
+    //   主页告警卡「看现场」      → { runId: 最近一次不顺的运行 }
+    //   工具卡右键「查看日志」    → { toolId }
+    //   日报「配置组执行」某一行  → { 组名, date: 当日 }
+    //   主页「更多 → 全部日志」   → 不带条件，全量兜底
+    // 关掉它就回到进来之前那一页，底栏四项一动不动。
+
+    private LogFilter _logFilter = LogFilter.None;
+    private int _logReturnPage = Pager.Home;
+
+    /// <summary>带着条件打开日志视图。条件为空 = 全量。</summary>
+    private void OpenLogView(LogFilter filter)
+    {
+        if (LogLayer == null) return;
+        // 记下从哪一页来的：这不是「多一个返回栈」，只是让人关掉之后回到原地。
+        if (LogLayer.Visibility != Visibility.Visible) _logReturnPage = _page;
+        _logFilter = filter;
+        LogLayer.Visibility = Visibility.Visible;
+        RefreshLogFilterBar();
+        RefreshRunPage();
+        RenderLogList();
+        LogScroll?.ScrollToVerticalOffset(0);
+    }
+
+    /// <summary>
+    /// 收起日志视图。<paramref name="keepHistory"/> 只是给调用处表意用——
+    /// 视图本身不留任何状态，收起来就是收起来。
+    /// </summary>
+    private void CloseLogView(bool keepHistory)
+    {
+        if (LogLayer == null || LogLayer.Visibility != Visibility.Visible) return;
+        LogLayer.Visibility = Visibility.Collapsed;
+        _logFilter = LogFilter.None;
+    }
+
+    private void BtnLogClose_Click(object sender, RoutedEventArgs e) => CloseLogView(keepHistory: true);
+
+    private void RefreshLogFilterBar()
+    {
+        if (TbLogFilter == null) return;
+        string what = _logFilter.Describe(id => ProfileRegistry.Get(id)?.DisplayName);
+        TbLogFilter.Text = "正在看：" + what;
+    }
+
+    /// <summary>
+    /// v1.41 / M1-2：主页告警卡的「看现场」。
+    /// 先找出最近一次出事的那一趟（日志里带 [run:xxxxxxxx] 且写了卡住原因的行），
+    /// 带着这个 runId 打开日志视图——进来看见的就是出事那一段，不用自己翻。
+    /// 找不到就问一句要不要截图：编一个「最近一次」出来比不给更糟。
+    /// </summary>
+    private void OpenSceneOfLatestTrouble()
+    {
+        string? runId = null;
+        try { runId = LogQuery.LastFailedRunId(DateTime.Now); }
+        catch (Exception ex) { LogService.LogEvent("找最近一次异常失败：" + ex.Message); }
+
+        if (!string.IsNullOrWhiteSpace(runId))
+        {
+            OpenLogView(LogFilter.ForRun(runId!));
+            return;
+        }
+
+        _ = Task.Run(() =>
+        {
+            string msg = SnapshotService.CaptureMessage("命令面板");
+            NotifyService.Show(NotifyLevel.Info, "龙管家", msg);
+        });
+    }
+
+    /// <summary>
+    /// 把筛出来的日志铺到界面上。每行「时间 + 正文」两列：
+    /// 时间用等宽数字对齐，正文允许换行——日志正文里有引号、括号、英文,
+    /// 强行走省略号会让人看不到最关键的半句。
+    /// </summary>
+    private void RenderLogList()
+    {
+        if (LogListHost == null || TbLogEmpty == null) return;
+        LogListHost.Children.Clear();
+        TbLogEmpty.Visibility = Visibility.Collapsed;
+
+        List<LogQuery.Entry> entries;
+        try
+        {
+            entries = LogQuery.Read(_logFilter, DateTime.Now,
+                id => ProfileRegistry.Get(id)?.DisplayName);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("读日志失败：" + ex.Message);
+            entries = new List<LogQuery.Entry>();
+        }
+
+        if (TbLogCount != null)
+            TbLogCount.Text = entries.Count > 0 ? $"最近 {entries.Count} 条" : "";
+
+        if (entries.Count == 0)
+        {
+            // 空状态先安抚再给出口（VOICE.md 第三句的路数）：不指挥人「去跑一次」，
+            // 只说现在为什么是空的、以及去哪儿让它不空。
+            TbLogEmpty.Text = _logFilter.IsEmpty
+                ? "今天这里还是空的。跑过一次之后，每一步都会写在这儿。"
+                : "这组条件下没有记到东西。可能那一天没跑，也可能这次跑得很干净。";
+            TbLogEmpty.Visibility = Visibility.Visible;
+            if (TbLogHint != null) TbLogHint.Text = "";
+            return;
+        }
+
+        if (TbLogHint != null)
+            TbLogHint.Text = _logFilter.IsEmpty ? "全量" : "已按上面的条件筛过";
+
+        foreach (var entry in entries)
+        {
+            LogListHost.Children.Add(LogRow(entry));
+        }
+    }
+
+    private UIElement LogRow(LogQuery.Entry entry)
+    {
+        var row = new Grid { Margin = new Thickness(0, 2, 0, 0) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var time = new TextBlock
+        {
+            Text = entry.Time,
+            FontSize = 11.5,
+            VerticalAlignment = VerticalAlignment.Top,
+            Foreground = BrushOf("TextTertiaryBrush"),
+        };
+        // 时间列用等宽数字：否则 08:00 和 11:11 的冒号对不齐，整列看着是歪的。
+        time.FontFamily = new FontFamily("Consolas, Cascadia Mono, Courier New");
+        Grid.SetColumn(time, 0);
+        row.Children.Add(time);
+
+        var text = new TextBlock
+        {
+            Text = entry.Text,
+            FontSize = 12,
+            LineHeight = 18,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = BrushOf("TextSecondaryBrush"),
+        };
+        Grid.SetColumn(text, 1);
+        row.Children.Add(text);
+        return row;
+    }
 
     /// <summary>
     /// 运行页的三句话：刚才怎么样（复用复盘）、这个月省了多少（时间银行）、
@@ -4267,44 +4899,364 @@ public partial class MainWindow : Window
         return $"{m} 分钟";
     }
 
+    /// <summary>
+    /// 日报页（v1.41 / M5-8）。
+    ///
+    /// <para>
+    /// 所有数字都来自 <see cref="DailyReport.Build"/> 那一份——IM 晨报读的也是它。
+    /// 这里只负责把它摆成卡片：谁排前面、哪句话放哪儿。
+    /// 以前这一页自己从 DurationLedger 汇总，跟推送那一路各算各的，
+    /// 同一天两边对不上时没人说得清哪个对；现在只有一个源头，就不会再打起来。
+    /// </para>
+    /// </summary>
     private void RefreshReportPage()
     {
         try
         {
             var now = DateTime.Now;
-            var today = DurationLedger.GetDay(now);
+            var data = DailyReport.Build(now);
 
-            if (today.Count == 0)
-            {
-                TbReportTotal.Text = "还没跑过";
-                TbReportSummary.Text = "";
-                TbReportHint.Text = QueueService.IsRunning
-                    ? "这一轮还在跑，跑完一项就会记一笔。"
-                    : "今晚跑一次，明天这里就有数了。";
-            }
-            else
-            {
-                int totalSeconds = today.Sum(e => e.Seconds);
-                int runCount = today.Sum(e => e.Runs);
-                TbReportTotal.Text = Minutes(totalSeconds);
-                TbReportSummary.Text = $"{today.Count} 个工具 · 一共 {runCount} 次";
-                // 只挑一句最值得说的，不堆排比句。
-                var top = today[0];
-                TbReportHint.Text = today.Count == 1
-                    ? $"{top.Name} 一项就把它跑完了。"
-                    : $"最费时间的是 {top.Name}，占了 {Minutes(top.Seconds)}。";
-            }
-
+            RenderReportHeader(data, now);
+            RenderReportAnomalies(data);
+            RenderReportGroups(data);
+            RenderReportTools(data);
+            RenderReportEmptyMerge(data);
             RenderReportBars(now);
-            RenderReportTools(today);
-            RenderReportGroups(today);
         }
         catch (Exception ex)
         {
-            LogService.LogEvent("汇报页刷新失败：" + ex.Message);
+            LogService.LogEvent("日报页刷新失败：" + ex.Message);
         }
     }
 
+    /// <summary>合计、一句话、以及「较昨日」。空的时候不许说「一切正常」以外的好听话。</summary>
+    private void RenderReportHeader(DailyReportData data, DateTime now)
+    {
+        if (data.IsEmpty)
+        {
+            TbReportTotal.Text = "还没跑过";
+            TbReportSummary.Text = "";
+            TbReportTrend.Text = "";
+            TbReportHint.Text = QueueService.IsRunning
+                ? "这一轮还在跑，跑完一项就会记一笔。"
+                : "今晚跑一次，明天这里就有数了。";
+            TbReportComparedNote.Text = "";
+            return;
+        }
+
+        TbReportTotal.Text = Minutes(data.TotalSeconds);
+        TbReportSummary.Text = $"{data.ToolCount} 个工具 · 一共 {data.RunCount} 次";
+
+        // v1.41 / M5-5：没有昨天的数就不说这句。硬凑一句「和昨天一样」是在替人打包票。
+        string? trend = DailyReport.SayTrend(data.TotalSeconds, data.PreviousTotalSeconds);
+        TbReportTrend.Text = trend ?? "";
+        TbReportTrend.Visibility = string.IsNullOrEmpty(trend) ? Visibility.Collapsed : Visibility.Visible;
+
+        // 只挑一句最值得说的，不堆排比句。
+        var top = data.Tools.Count > 0 ? data.Tools[0] : null;
+        TbReportHint.Text = top == null
+            ? ""
+            : data.Tools.Count == 1
+                ? $"{top.Name} 一项就把它跑完了。"
+                : $"最费时间的是 {top.Name}，占了 {Minutes(top.Seconds)}。";
+
+        // v1.41 / M5-2：只在真有「较上次」这种东西出现时才解释这一句，
+        // 否则页面上会多一行说明在讲一件没发生的事。
+        bool anyDelta = data.Groups.Any(g => g.DeltaSeconds != null);
+        // v1.41 / M5-2：这句只说清「较上次」是哪一次，别的一句话不多加。
+        TbReportComparedNote.Text = anyDelta ? "较上次 = 与该任务上一次运行相比" : "";
+        TbReportComparedNote.Visibility = anyDelta ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 「异常与处理」（v1.41 / M5-4）。
+    ///
+    /// <para>
+    /// 没有异常时明确写「没有需要你操心的事」——这句话本身就是信息，
+    /// 比留一块空白让人猜「是没出事还是没记到」要好。
+    /// 有异常时每行只写「哪个组、卡在哪、管家做了什么」，动作全部来自日志原文。
+    /// 行尾那个「看现场」只在能定位到具体某次运行（有 runId）时才挂。
+    /// </para>
+    /// </summary>
+    private void RenderReportAnomalies(DailyReportData data)
+    {
+        ReportAnomalyHost.Children.Clear();
+
+        if (data.Anomalies.Count == 0)
+        {
+            TbReportAnomalyHint.Text = "";
+            ReportAnomalyHost.Children.Add(new TextBlock
+            {
+                // 这句是任务书 M5-4 指定的原文，不要改写。
+                Text = data.ToolCount > 0
+                    ? $"✅ 异常与处理：{data.ToolCount} 个配置组全部顺利，没有需要你操心的事。"
+                    : "今天还没有跑过，暂时没什么可说的。",
+                FontSize = 11.5,
+                LineHeight = 18,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = BrushOf("TextSecondaryBrush"),
+            });
+            return;
+        }
+
+        TbReportAnomalyHint.Text = $"{data.Anomalies.Count} 条";
+
+        foreach (var a in data.Anomalies)
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var dot = new TextBlock
+            {
+                Text = "·",
+                FontSize = 12,
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Top,
+                Foreground = BrushOf("WarningBrush") ?? BrushOf("TextSecondaryBrush"),
+            };
+            Grid.SetColumn(dot, 0);
+            row.Children.Add(dot);
+
+            var text = new TextBlock
+            {
+                Text = $"{a.Group} 在 {a.Stage} 卡住 → 管家已{a.Action}",
+                FontSize = 11.5,
+                LineHeight = 18,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = BrushOf("TextSecondaryBrush"),
+            };
+            Grid.SetColumn(text, 1);
+            row.Children.Add(text);
+
+            if (!string.IsNullOrEmpty(a.RunId))
+            {
+                string runId = a.RunId!;
+                var link = new Button
+                {
+                    Content = "看现场",
+                    Style = TryFindResource("LinkButton") as Style,
+                    FontSize = 11.5,
+                    Margin = new Thickness(8, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Top,
+                    ToolTip = "打开这次运行的日志",
+                };
+                link.Click += (_, _) => OpenLogView(LogFilter.ForRun(runId));
+                Grid.SetColumn(link, 2);
+                row.Children.Add(link);
+            }
+
+            ReportAnomalyHost.Children.Add(row);
+        }
+    }
+
+    /// <summary>
+    /// 配置组执行（v1.41 / M5-1）。
+    ///
+    /// <para>
+    /// 绝对耗时是普通文字，不带底色；只有差异值是一个彩色 pill。
+    /// 两个都上色的话，人会以为「跑得久」也是一种错——它只是慢。
+    /// 差额小于 1 秒显示「持平」并留灰，免得秒表的抖动被当成今天变快了。
+    /// </para>
+    /// </summary>
+    private void RenderReportGroups(DailyReportData data)
+    {
+        ReportGroupHost.Children.Clear();
+
+        if (data.Groups.Count == 0)
+        {
+            TbReportGroupHint.Text = "";
+            ReportGroupHost.Children.Add(new TextBlock
+            {
+                Text = data.ToolCount == 0
+                    ? "还没有数据。"
+                    : "今天还没记到配置组。跑的时候 BetterGI 那边没报组名，或者那一组还没结束——只有整组跑完的才算数。",
+                FontSize = 11.5,
+                LineHeight = 18,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = BrushOf("TextSecondaryBrush"),
+            });
+            return;
+        }
+
+        TbReportGroupHint.Text = $"{data.Groups.Count} 个组";
+
+        foreach (var g in data.Groups)
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 7) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var name = new TextBlock
+            {
+                Text = g.Name,
+                FontSize = 12,
+                Foreground = BrushOf("TextSecondaryBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand,
+                // v1.41 / M1-2：点组名进日志视图，按「这一组 + 今天」筛好。
+                ToolTip = "看这一组的日志",
+            };
+            name.MouseLeftButtonUp += (_, _) => OpenLogView(LogFilter.ForGroup(g.Name, DateTime.Now));
+            Grid.SetColumn(name, 0);
+            row.Children.Add(name);
+
+            // 绝对耗时：普通文本，无底色。数字用等宽字体，纵向才对得齐。
+            var secs = new TextBlock
+            {
+                Text = DailyReport.SayDuration(g.Seconds),
+                FontSize = 12,
+                Margin = new Thickness(10, 0, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("TextPrimaryBrush"),
+                FontFamily = new FontFamily("Consolas, Cascadia Mono, Courier New"),
+            };
+            Grid.SetColumn(secs, 1);
+            row.Children.Add(secs);
+
+            if (g.DeltaSeconds != null)
+            {
+                string text = DailyReport.SayDelta(g.DeltaSeconds.Value, out bool? faster);
+                Brush? pillBg = faster == null
+                    ? BrushOf("ControlBgBrush")
+                    : faster.Value ? BrushOf("SuccessBrush") : BrushOf("WarningBrush");
+                Brush? pillFg = faster == null
+                    ? BrushOf("TextTertiaryBrush")
+                    : BrushOf("CardBgBrush");
+
+                var pill = new Border
+                {
+                    CornerRadius = new CornerRadius(9),
+                    Padding = new Thickness(7, 2, 7, 2),
+                    Margin = new Thickness(8, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Background = pillBg,
+                    ToolTip = g.ComparedWith == null ? null : $"与 {g.ComparedWith} 那次相比",
+                    Child = new TextBlock
+                    {
+                        Text = text,
+                        FontSize = 10.5,
+                        Foreground = pillFg ?? BrushOf("TextPrimaryBrush"),
+                    },
+                };
+                Grid.SetColumn(pill, 2);
+                row.Children.Add(pill);
+            }
+
+            ReportGroupHost.Children.Add(row);
+        }
+    }
+
+    /// <summary>每个工具一行：名字、占比条、总时长、跑了几次。</summary>
+    private void RenderReportTools(DailyReportData data)
+    {
+        ReportToolHost.Children.Clear();
+        if (data.Tools.Count == 0)
+        {
+            TbReportToolHint.Text = "";
+            return;
+        }
+
+        TbReportToolHint.Text = data.TotalSeconds > 0 ? $"合计 {Minutes(data.TotalSeconds)}" : "";
+
+        foreach (var e in data.Tools)
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var left = new StackPanel();
+            left.Children.Add(new TextBlock
+            {
+                Text = e.Name.Length > 0 ? e.Name : e.ToolId,
+                FontSize = 12.5,
+                Foreground = BrushOf("TextPrimaryBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+
+            // 占比条：固定 160 宽，只用来横向比较，不随窗口拉伸——
+            // 一拉伸它就跟右边那个数字对不齐了。
+            double frac = data.TotalSeconds > 0 ? (double)e.Seconds / data.TotalSeconds : 0;
+            var trackHost = new Grid
+            {
+                Width = 160,
+                Margin = new Thickness(0, 6, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            trackHost.Children.Add(new Border
+            {
+                Height = 4,
+                CornerRadius = new CornerRadius(2),
+                Background = BrushOf("ControlBgBrush"),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = 160,
+            });
+            trackHost.Children.Add(new Border
+            {
+                Height = 4,
+                CornerRadius = new CornerRadius(2),
+                Background = BrushOf("BrandBrush"),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = Math.Max(2, 160 * frac),
+            });
+            left.Children.Add(trackHost);
+
+            Grid.SetColumn(left, 0);
+            row.Children.Add(left);
+
+            var right = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 0, 0, 0) };
+            right.Children.Add(new TextBlock
+            {
+                Text = Minutes(e.Seconds),
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Foreground = BrushOf("TextPrimaryBrush"),
+            });
+            right.Children.Add(new TextBlock
+            {
+                Text = e.Runs > 1 ? $"{e.Runs} 次" : "",
+                FontSize = 10,
+                Margin = new Thickness(0, 3, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Foreground = BrushOf("TextTertiaryBrush"),
+            });
+
+            Grid.SetColumn(right, 1);
+            row.Children.Add(right);
+
+            ReportToolHost.Children.Add(row);
+        }
+    }
+
+    /// <summary>
+    /// 空分区合并（v1.41 / M5-3）。
+    ///
+    /// <para>
+    /// 两个以上分区都只剩「暂无」时，合成一句放末尾，别在页面上挂三行一样的空话。
+    /// 分区名从数据里取，不写死——以后多一个分区不用回来改这里。
+    /// </para>
+    /// </summary>
+    private void RenderReportEmptyMerge(DailyReportData data)
+    {
+        if (data.EmptySections.Count < 2)
+        {
+            TbReportEmptyMerge.Text = "";
+            TbReportEmptyMerge.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        TbReportEmptyMerge.Text = $"📦 {string.Join(" / ", data.EmptySections)}：今天都没有记录。";
+        TbReportEmptyMerge.Visibility = Visibility.Visible;
+
+        // 合成之后，那几块本身就不用再各说一遍「还没有数据」了。
+        ReportGroupCard.Visibility = data.Groups.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ReportToolCard.Visibility = data.Tools.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
     /// <summary>
     /// 最近 7 天：一天一根柱子，高的那天跑得久。
     /// 用 Border 撑高度而不是画 Chart——这一块只想让人看出「有没有变多」，
@@ -4366,157 +5318,6 @@ public partial class MainWindow : Window
         TbReportBarsHint.Text = best.Total.TotalSeconds > 0
             ? $"最近 7 天，{best.Day:MM-dd} 跑得最久（{Minutes((int)Math.Round(best.Total.TotalSeconds))}）。"
             : "最近 7 天都还没跑过。";
-    }
-
-    /// <summary>每个工具一行：名字、占比条、总时长、跑了几次。</summary>
-    private void RenderReportTools(List<DurationEntry> today)
-    {
-        ReportToolHost.Children.Clear();
-        if (today.Count == 0)
-        {
-            TbReportToolHint.Text = "";
-            return;
-        }
-
-        int total = today.Sum(e => e.Seconds);
-        TbReportToolHint.Text = total > 0 ? $"合计 {Minutes(total)}" : "";
-
-        foreach (var e in today)
-        {
-            var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            var left = new StackPanel();
-            left.Children.Add(new TextBlock
-            {
-                Text = e.Name.Length > 0 ? e.Name : e.ToolId,
-                FontSize = 12.5,
-                Foreground = BrushOf("TextPrimaryBrush"),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            });
-
-            // 占比条：固定 160 宽，只用来横向比较，不随窗口拉伸——
-            // 一拉伸它就跟右边那个数字对不齐了。
-            double frac = total > 0 ? (double)e.Seconds / total : 0;
-            var trackHost = new Grid
-            {
-                Width = 160,
-                Margin = new Thickness(0, 6, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            trackHost.Children.Add(new Border
-            {
-                Height = 4,
-                CornerRadius = new CornerRadius(2),
-                Background = BrushOf("ControlBgBrush"),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Width = 160,
-            });
-            trackHost.Children.Add(new Border
-            {
-                Height = 4,
-                CornerRadius = new CornerRadius(2),
-                Background = BrushOf("BrandBrush"),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Width = Math.Max(2, 160 * frac),
-            });
-            left.Children.Add(trackHost);
-
-            Grid.SetColumn(left, 0);
-            row.Children.Add(left);
-
-            var right = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 0, 0, 0) };
-            right.Children.Add(new TextBlock
-            {
-                Text = Minutes(e.Seconds),
-                FontSize = 12.5,
-                FontWeight = FontWeights.SemiBold,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Foreground = BrushOf("TextPrimaryBrush"),
-            });
-            right.Children.Add(new TextBlock
-            {
-                Text = e.Runs > 1 ? $"{e.Runs} 次" : (e.LastAt ?? ""),
-                FontSize = 10,
-                Margin = new Thickness(0, 3, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Foreground = BrushOf("TextTertiaryBrush"),
-            });
-
-            Grid.SetColumn(right, 1);
-            row.Children.Add(right);
-
-            ReportToolHost.Children.Add(row);
-        }
-    }
-
-    /// <summary>
-    /// 按配置组：把所有工具在同一组上的时间加起来。
-    /// 一个组可能被好几个工具各自跑过（BetterGI 和三月七助手都可能进「每日委托」），
-    /// 所以这里求的是「这个组一共被占用多久」，不是某一个工具在它上面花了多久。
-    /// </summary>
-    private void RenderReportGroups(List<DurationEntry> today)
-    {
-        ReportGroupHost.Children.Clear();
-
-        var merged = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var e in today)
-        {
-            foreach (var kv in e.Groups)
-            {
-                merged.TryGetValue(kv.Key, out int had);
-                merged[kv.Key] = had + kv.Value;
-            }
-        }
-
-        if (merged.Count == 0)
-        {
-            TbReportGroupHint.Text = "";
-            ReportGroupHost.Children.Add(new TextBlock
-            {
-                Text = today.Count == 0
-                    ? "还没有数据。"
-                    : "今天还没记到配置组。跑的时候 BetterGI 那边没报组名，或者那一组还没结束——只有整组跑完的才算数。",
-                FontSize = 11.5,
-                LineHeight = 18,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = BrushOf("TextSecondaryBrush"),
-            });
-            return;
-        }
-
-        TbReportGroupHint.Text = $"{merged.Count} 个组";
-
-        foreach (var kv in merged.OrderByDescending(k => k.Value))
-        {
-            var row = new Grid { Margin = new Thickness(0, 0, 0, 6) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            var name = new TextBlock
-            {
-                Text = kv.Key,
-                FontSize = 12,
-                Foreground = BrushOf("TextSecondaryBrush"),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            Grid.SetColumn(name, 0);
-            row.Children.Add(name);
-
-            var secs = new TextBlock
-            {
-                Text = Minutes(kv.Value),
-                FontSize = 12,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Foreground = BrushOf("TextPrimaryBrush"),
-            };
-            Grid.SetColumn(secs, 1);
-            row.Children.Add(secs);
-
-            ReportGroupHost.Children.Add(row);
-        }
     }
 
     private void BtnReportRefresh_Click(object sender, RoutedEventArgs e) => RefreshReportPage();
@@ -5932,11 +6733,14 @@ public partial class MainWindow : Window
         {
             bool enabled = AppState.Settings.SentinelEnabled;
             bool alerted = AppState.Settings.ShieldAlertAt is DateTime t && (DateTime.Now - t).TotalMinutes < 30;
+            // v1.41 / M2-12：还没走完向导的人，状态栏不该挂一个「近期有告警」——
+            // 那玩意儿是他装之前的事，写了也帮不上，只让人以为自己错过了什么。
+            bool showAlert = alerted && AppState.Settings.OnboardingCompleted;
             bool escort = QueueService.IsRunning && KeepAwakeService.IsActive;
 
-            ShieldDot.Fill = escort ? DotYellow : !enabled ? DotGray : alerted ? DotYellow : DotGreen;
+            ShieldDot.Fill = escort ? DotYellow : !enabled ? DotGray : showAlert ? DotYellow : DotGreen;
             ShieldText.Text = escort ? "护航中" : !enabled ? "守护已关闭"
-                : alerted ? "守护中 · 近期有告警" : "守护中";
+                : showAlert ? "守护中 · 近期有告警" : "守护中";
 
             var h = SentinelService.HealthSnapshot();
             var escortItems = KeepAwakeService.ActiveSummary();
@@ -6119,7 +6923,10 @@ public partial class MainWindow : Window
 
             // 「刚才出过事」只认 30 分钟内的告警：昨天半夜卡过一次，
             // 今天中午打开软件不该还在说「刚才有点不对劲」。
-            bool trouble = s.ShieldAlertAt.HasValue
+            // v1.41 / M2-12：同理，没走完五步的人也不该看到它——他今天才装，
+            // 「刚才」发生过的只可能是向导里那次自动寻找没找到，那不是事故。
+            bool trouble = AppState.Settings.OnboardingCompleted
+                           && s.ShieldAlertAt.HasValue
                            && DateTime.Now - s.ShieldAlertAt.Value <= TimeSpan.FromMinutes(30);
 
             var view = HomeState.Build(
@@ -6169,6 +6976,7 @@ public partial class MainWindow : Window
             ToolSetupBlock.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;
 
             RenderHomeSteps(view.ShowSteps);
+            RefreshHomeFirstVisit();
             RefreshHomeRecap();
 
             // 出错时整张卡换描边色：这一条比任何文字都快。
@@ -6194,7 +7002,9 @@ public partial class MainWindow : Window
             HomeRecap.Children.Clear();
 
             var input = BuildRecapInput();
-            bool show = input != null && !QueueService.IsRunning;
+            // v1.41 / M2-12：没走完五步的人不该看到「昨晚没跑」——
+            // 他今天才装，昨天当然没跑。那句话在首屏读起来像指责。
+            bool show = input != null && !QueueService.IsRunning && AppState.Settings.OnboardingCompleted;
             HomeRecap.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
             if (!show || input == null) return;
 
@@ -6303,6 +7113,131 @@ public partial class MainWindow : Window
         HomeHeroSteps.Children.Add(HomeStep("1", "选 BetterGI 的 exe", "点右边按钮，或者把 exe 直接拖进窗口", true));
         HomeHeroSteps.Children.Add(HomeStep("2", "确认每天几点跑", "默认早上 8 点，之后随时能改", false));
         HomeHeroSteps.Children.Add(HomeStep("3", "点开跑，然后去睡觉", "跑完会给你一句话", false));
+    }
+
+    /// <summary>
+    /// v1.41 / M3-1：首访清单。
+    ///
+    /// <para>
+    /// 只在没走完五步时出现，替代原来的「昨晚没跑」复盘和告警描边——
+    /// 那两样对一个今天才装的人来说都是错的：他昨天没跑是因为昨天还没装。
+    /// </para>
+    /// <para>
+    /// 三行都带完成状态：装完路径回来，第一行自己会打勾。不给勾的话，
+    /// 用户只能靠「我记得我设过了」来判断，而这种判断十次有三次是错的。
+    /// </para>
+    /// </summary>
+    private void RefreshHomeFirstVisit()
+    {
+        try
+        {
+            HomeFirstVisit.Children.Clear();
+
+            bool onboarded = AppState.Settings.OnboardingCompleted;
+            HomeFirstVisit.Visibility = onboarded ? Visibility.Collapsed : Visibility.Visible;
+            if (onboarded) return;
+
+            var s = AppState.Settings;
+
+            bool pathDone = false;
+            try { pathDone = ToolRunner.HasExecutable(ProfileRegistry.Get("bettergi")); } catch { }
+            bool timeDone = s.ScheduleEnabled;
+            bool ranDone = !string.IsNullOrEmpty(s.LastRunAt);
+
+            HomeFirstVisit.Children.Add(new TextBlock
+            {
+                Text = "还没跑过——三步就能开始",
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            });
+
+            HomeFirstVisit.Children.Add(FirstVisitRow("①", "选 BetterGI 在哪里", pathDone,
+                () => PickBetterGi()));
+            HomeFirstVisit.Children.Add(FirstVisitRow("②", "设个每天几点跑", timeDone,
+                () => OpenWizardAtStep(3)));
+            HomeFirstVisit.Children.Add(FirstVisitRow("③", "点一下「一键开跑」，先看它动起来", ranDone,
+                () => RevealCard(BtnQueueStart)));
+        }
+        catch (Exception ex)
+        {
+            HomeFirstVisit.Visibility = Visibility.Collapsed;
+            LogService.LogEvent("首访清单刷新失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>首访清单的一行：序号 + 文案 + 勾。整行可点，点了就跳到能完成它的地方。</summary>
+    private UIElement FirstVisitRow(string no, string text, bool done, Action jump)
+    {
+        var row = new Grid
+        {
+            Margin = new Thickness(0, 6, 0, 0),
+            Background = Brushes.Transparent,   // 透明底也要有，否则空白处点不中
+            Cursor = Cursors.Hand,
+        };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = no,
+            FontSize = 11.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = done
+                ? (BrushOf("TextTertiaryBrush") ?? DotGray)
+                : (BrushOf("BrandTextBrush") ?? DotGreen),
+        });
+
+        var label = new TextBlock
+        {
+            Text = text,
+            FontSize = 12.5,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = done
+                ? (BrushOf("TextTertiaryBrush") ?? DotGray)
+                : (BrushOf("TextPrimaryBrush") ?? DotGray),
+            TextDecorations = done ? TextDecorations.Strikethrough : null,
+        };
+        Grid.SetColumn(label, 1);
+        row.Children.Add(label);
+
+        if (done)
+        {
+            var tick = new TextBlock
+            {
+                Text = "✓",
+                FontSize = 12.5,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("SuccessBrush") ?? DotGreen,
+            };
+            Grid.SetColumn(tick, 2);
+            row.Children.Add(tick);
+        }
+        else
+        {
+            var go = new TextBlock
+            {
+                Text = "去设置",
+                FontSize = 11.5,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("BrandTextBrush") ?? DotGreen,
+            };
+            Grid.SetColumn(go, 2);
+            row.Children.Add(go);
+        }
+
+        row.MouseLeftButtonUp += (_, _) =>
+        {
+            try { jump(); }
+            catch (Exception ex) { LogService.LogEvent("首访清单跳转失败：" + ex.Message); }
+        };
+        return row;
     }
 
     private UIElement HomeStep(string no, string title, string hint, bool active)
@@ -6980,18 +7915,7 @@ public partial class MainWindow : Window
         try
         {
             if (AppState.Settings.FirstRunDone) return;
-            var wiz = new FirstRunWindow { Owner = this };
-            wiz.ShowDialog();
-            AppState.Settings.FirstRunDone = true;
-            AppState.SaveSettings();
-            // v1.39：向导改的是设置，而设置页的开关是构造时就按**旧值**摆好的
-            // （LoadSettingsToUi 在构造函数里跑，向导要等 Loaded 之后才弹）。
-            // 不在这儿重读一遍，用户就会看到「向导里勾了开机自启，设置里还是关着」——
-            // 值其实已经写进注册表和 settings.json，只是界面停在几分钟前。
-            LoadSettingsToUi();
-            RenderQueue();
-            RefreshToolCards();
-            RefreshDetectedGroups(force: true);
+            ShowWizard(0);
         }
         catch (Exception ex)
         {
@@ -6999,6 +7923,69 @@ public partial class MainWindow : Window
             AppState.Settings.FirstRunDone = true;
             AppState.SaveSettings();
         }
+    }
+
+    /// <summary>
+    /// v1.41 / M3-1：从首访清单的第二行直接跳进向导的第 3 步。
+    /// 走同一个窗口、同一套保存逻辑——主页那张清单只是入口，不是第二套向导。
+    /// </summary>
+    private void OpenWizardAtStep(int step)
+    {
+        try
+        {
+            ShowWizard(step);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("打开向导失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>打开向导。<paramref name="startStep"/> 为 0 表示从第一步开始。</summary>
+    private void ShowWizard(int startStep)
+    {
+        var wiz = new FirstRunWindow { Owner = this };
+        if (startStep > 0) wiz.JumpToStep(startStep);
+        wiz.ShowDialog();
+        AppState.Settings.FirstRunDone = true;
+        AppState.SaveSettings();
+
+        // v1.41 / M2-4：向导最后一步的「完成并试跑一次」不是一句客套——
+        // 它真的会把选中的第一个工具跑起来，跑完在这一页就能看到结果。
+        // 只用 StartSingleAsync 走和「一键开跑」同一条路径：另写一条执行链，
+        // 迟早会和队列里的行为对不上（一个会做前置检查，一个不会）。
+        if (wiz.TrialRequested)
+        {
+            var first = AppState.Settings.Queue?
+                .FirstOrDefault(q => q.Enabled && !string.IsNullOrWhiteSpace(ProfileRegistry.Get(q.ToolId).ExecutablePath));
+            if (first != null)
+            {
+                try
+                {
+                    var profile = ProfileRegistry.Get(first.ToolId);
+                    AppState.PublishLog($"✓ 试跑一次：{profile.DisplayName}");
+                    _ = QueueService.StartSingleAsync(profile, QueueTrigger.Manual);
+                }
+                catch (Exception ex)
+                {
+                    AppState.PublishLog("⚠ 试跑没起来：" + ex.Message);
+                }
+            }
+            else
+            {
+                AppState.PublishLog("还没有配置好路径的工具，试跑先跳过——在工具卡里设好后随时能跑。");
+            }
+        }
+        // v1.39：向导改的是设置，而设置页的开关是构造时就按**旧值**摆好的
+        // （LoadSettingsToUi 在构造函数里跑，向导要等 Loaded 之后才弹）。
+        // 不在这儿重读一遍，用户就会看到「向导里勾了开机自启，设置里还是关着」——
+        // 值其实已经写进注册表和 settings.json，只是界面停在几分钟前。
+        LoadSettingsToUi();
+        RenderQueue();
+        RefreshToolCards();
+        RefreshDetectedGroups(force: true);
+        // v1.41 / M3-1：清单的勾选状态要跟着变——用户刚设完时间，第二行该打勾了。
+        RefreshHomeHero();
     }
 
     // ===== 日志 / 横幅 =====
@@ -7050,6 +8037,10 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object sender, CancelEventArgs e)
     {
+        // v1.41 / M6-1：先记位置再谈别的——下面那条 return 会让「不驻留托盘」的人
+        // 直接关掉窗口，位置得在那之前存下来。
+        SaveWindowBounds();
+
         if (App.ForceExit || !AppState.Settings.StayInTray) return;
         e.Cancel = true;
         Hide();
@@ -7175,7 +8166,8 @@ public partial class MainWindow : Window
                 // v1.35：高级设置与系统不再是折叠卡，内容直接摊在「守护与恢复 / 节奏与报告」两张卡里。
                 // 这条命令还留着，落到那张卡的第一行上，位置一样是「设置页往下一点的地方」。
                 case "view.advanced": RevealCard(TgSentinel); break;
-                case "view.log": RevealCard(TbLog); break;
+                // v1.41：日志不再是一页。这条命令现在直接开日志视图（全量）。
+                case "view.log": OpenLogView(LogFilter.None); break;
                 case "view.calendar": OpenCalendar(); break;
                 case "view.today": OpenToday(); break;
                 case "view.logrules": OpenLogRules(); break;
@@ -7196,11 +8188,10 @@ public partial class MainWindow : Window
                     TgLanPanel_Click(this, new RoutedEventArgs());
                     break;
                 case "tool.snapshot":
-                    _ = Task.Run(() =>
-                    {
-                        string msg = SnapshotService.CaptureMessage("命令面板");
-                        NotifyService.Show(NotifyLevel.Info, "龙管家", msg);
-                    });
+                    // v1.41 / M1-2：「看现场」先带人去看那一次的日志。
+                    // 以前它只会截一张图——图能证明「当时屏幕上长什么样」，
+                    // 但「到底哪一步卡住」只有日志说得清。翻不到运行标记时才退回截图。
+                    OpenSceneOfLatestTrouble();
                     break;
 
                 case "ui.miniBar":
@@ -7231,9 +8222,10 @@ public partial class MainWindow : Window
         {
             // v1.22：内容分了三页，先判断目标在哪个页里，不然滚了也看不见。
             // 判断顺序从里到外：先进页，再展开折叠卡，最后才滚。
+            // v1.41：日志那两页搬进了覆盖层，落点改成「带着条件打开日志视图」。
             if (PageRun != null && (PageRun == target || PageRun.IsAncestorOf(target)))
             {
-                ShowPage(Pager.Log);
+                OpenLogView(LogFilter.None);
                 target.BringIntoView();
                 return;
             }
@@ -7246,6 +8238,10 @@ public partial class MainWindow : Window
             if (PageSettings != null && (PageSettings == target || PageSettings.IsAncestorOf(target)))
             {
                 ShowPage(Pager.Settings);
+                // v1.41 / M4-1：设置分了五类，得先把目标所在的那一类翻开——
+                // 否则定位到的是一个还收着的小门后面，滚到底也看不见。
+                SettingsPane pane = PaneOfSettingsTarget(target);
+                if (pane != SettingsPane.None) ShowSettingsPane(pane);
             }
 
             // 折叠卡里的元素是 Collapsed 的，先展开父级（只往上找一层已知的折叠体）

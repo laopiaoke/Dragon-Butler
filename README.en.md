@@ -30,8 +30,96 @@ A small Windows desktop app that **does no game dailies itself**. It's a dispatc
 It does exactly four things: start processes, read the public logs those tools write, listen on a localhost webhook, and manage process lifetimes. **It never touches the game, the tools' files, or your account.**
 
 <p align="center">
-  <img src="docs/proto/main_folded.png" width="720" alt="Main window">
+  <img src="docs/proto/main_v141.png" width="820" alt="Home">
 </p>
+
+<p align="center">
+  <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds tonight's items.</sub>
+</p>
+
+## v1.41: the interface was rebuilt
+
+No new features in this release. The whole UI was gone through once: four tabs, a five-step wizard, settings split into five groups, and logs that arrive pre-filtered from wherever you clicked.
+
+### Four tabs, each answering one question
+
+The leftmost tab used to be called "Logs" and the second "Report" — neither name told you why you'd want to open it. Now:
+
+| Tab | Answers |
+| --- | --- |
+| **日报** (Daily report) | How long today took, which group got faster or slower, whether anything went wrong |
+| **主页** (Home) | When it runs today, what's queued tonight, run now |
+| **设置** (Settings) | Five entry points; switches live one level down |
+| **插件** (Plugins) | It runs a full set with zero plugins installed |
+
+"Logs" is no longer a tab. It **opens with a filter already applied**, at the place you needed it:
+
+- Something went wrong → **【看现场】** on the home card takes you straight to that run's log lines (filtered by `runId`).
+- Tool card right-click → **"查看日志"** shows only what that tool wrote.
+- Click a config group's name in the daily report → only that group, that day.
+- Want everything → the third action chip **"更多 ▾"** → **【全部日志】**.
+
+<p align="center">
+  <img src="docs/proto/logview_v141.png" width="820" alt="Log view">
+</p>
+
+<p align="center">
+  <sub>The bar on top reads "正在看：全部日志" (viewing: all logs). A filtered view says what it filtered on; 【关闭】 returns to the page you came from.</sub>
+</p>
+
+### First run: five steps
+
+<p align="center">
+  <img src="docs/proto/wizard3_v141.png" width="640" alt="Wizard step 3">
+  <img src="docs/proto/wizard5_v141.png" width="640" alt="Wizard step 5">
+</p>
+
+Tools → find the executables → **pick a time** → notify or not → read the summary.
+
+Step 2 **auto-detects on entry**, so most people do nothing there. The time you set in step 3 *is* the time on the home schedule card — one value, never two.
+
+The last page has exactly two buttons: **【完成并试跑一次】** actually runs the first tool once so you can watch it move; **【先不跑，完成】** skips that.
+
+The summary is honest about what's missing — e.g. "BetterGI：还没设置路径（可稍后在工具卡里设置）", with an inline "现在去设置" to go back and fix it. **It never says "all done" when something isn't.**
+
+### Settings fold into five groups
+
+One level shows five entry cards; switches live inside, with a back arrow top-left.
+
+<p align="center">
+  <img src="docs/proto/settings_v141.png" width="760" alt="Settings">
+</p>
+
+| Entry | Contains |
+| --- | --- |
+| **守护** (Watchdog) | Watchdog / restart on crash / frozen-screen check / auto-kill stalls / clean leftovers before a run + log rules |
+| **定时** (Timing) | Do-not-disturb, failure policy, tool interval, keep-awake, night screen-off |
+| **通知** (Notify) | Twelve push channels + Reports (morning, weekly, harvest ledger, event webhook) |
+| **接口** (Interface) | Local control API, LAN panel, global hotkeys, backup, preflight, handover |
+| **界面与启动** (UI & Startup) | Appearance, autostart, tray, sounds, mini bar, speech |
+
+<p align="center">
+  <img src="docs/proto/settings_timing_v141.png" width="760" alt="Timing pane">
+</p>
+
+<p align="center">
+  <sub>Explanations longer than one line fold to a single line with a ⓘ — hover or click to expand.</sub>
+</p>
+
+### Daily report: how much faster than last time
+
+<p align="center">
+  <img src="docs/proto/report_v141.png" width="820" alt="Daily report">
+</p>
+
+Four blocks, and **"Anomalies" comes first**:
+
+- When everything went fine it says so outright: "N 个配置组全部顺利，没有需要你操心的事" — that sentence is itself the information.
+- When something broke, each line reads "which group, which stage, what the butler did" — **only actions that actually exist in code** (e.g. "停下等你", stopped and waited). Anything it can't prove, it leaves out. "看现场" at the end of the line jumps to that run.
+- "Config groups" rows carry a coloured pill: **快了 33 秒** / **慢了 5 分 59 秒**, and "持平" when the difference is under a second.
+- The total line adds "较昨日 慢了 46 分 50 秒"; with no yesterday data that half is simply omitted.
+
+**The in-app report and the pushed one are rendered from one dataset** — group counts, durations and deltas can't disagree.
 
 ## What it fixes
 
@@ -45,7 +133,7 @@ It does exactly four things: start processes, read the public logs those tools w
 - **No sense of "how does today compare"** — it compares against your own 14-day median, not a hard-coded threshold, and stays quiet when samples are thin.
 - **No idea how much time it saved you** — one number: hours it ran for you this month.
 - **A crash prompt ate the whole night** — no more dialogs. Crashes, tools that failed to launch and interrupted queues go into the message centre in the title bar, each translated into plain language (what happened / why / what you can do). The dot stays lit until you look, and never blocks startup.
-- **Three nested fold-outs before you could edit a tool** — one ⚙ button in the startup page header opens a 3×2 tool desktop: click to edit, double-click to run now, right-click for "run tonight or not" / remove, hold and drag to reorder. Hovering spells out what each button does.
+- **Three nested fold-outs before you could edit a tool** — a tool card's right-click menu is the whole menu now: run this one now / skip this time / change interval / view log / edit launch settings / move it.
 
 ## One self-imposed rule
 
@@ -55,25 +143,40 @@ The one exception is **when something goes wrong**: a crash, a tool that wouldn'
 
 ## Quick start
 
-1. Grab the **portable** build from [Releases](https://github.com/laopiaoke/Dragon-Butler/releases/latest) (bundles .NET, unzip and run; 0.3 MB runtime-dependent build if you already have .NET 8).
+1. Grab the **portable** build from [Releases](https://github.com/laopiaoke/Dragon-Butler/releases/latest) (bundles .NET, unzip and run; 3.5 MB runtime-dependent build if you already have .NET 8).
 2. Unzip, run `Dragon Butler.exe`, accept the UAC prompt.
-3. First-run wizard: tick your tools → **Auto-detect** (browse if it misses).
-4. Back on the main window, hit **Run queue**.
+3. Follow the five-step wizard: tick tools → (it auto-detects) → pick a time → notify or not → done.
+4. To see it move right away, hit 【完成并试跑一次】 on the last page.
 
-Want it unattended? Tick on the schedule card (defaults to 08:00 daily). Want messages? Pick a channel under **Notifications** and press **Test**. **Neither is required.**
+**Nothing has to be configured.** No notification channel, no schedule — it still runs a full set on one click.
+
+## Interface tour
+
+<p align="center">
+  <img src="docs/proto/settings_guard_v141.png" width="380" alt="Watchdog">
+  <img src="docs/proto/settings_notify_v141.png" width="380" alt="Notify">
+</p>
+
+<p align="center">
+  <img src="docs/proto/settings_api_v141.png" width="380" alt="Interface">
+  <img src="docs/proto/settings_ui_v141.png" width="380" alt="UI and startup">
+</p>
+
+The window defaults to 1080×720, shrinks to 880×600; position and size are remembered.
 
 ## Where data lives
 
-Everything sits next to the exe; deleting the folder uninstalls it (turn off autostart first).
+Everything sits next to the exe; deleting the folder uninstalls it (turn off autostart first, under Settings → UI & Startup).
 
 ```
 所有配置\settings.json      all settings, hand-editable
 所有配置\group_archive.json which config groups ran each day
+所有配置\durations.json     per-tool / per-group durations (the daily report reads this)
 所有配置\notices.json       message centre (capped at 100)
 所有配置\tools\*.json       tool profiles
-插件\                       plugins (the 「打开插件目录」 button on the Plugins tab opens this)
 所有配置\备份\              settings backups
 所有配置\sounds\            custom sounds
+插件\                       plugins (the Plugins tab opens this folder)
 全部日志\                    runtime log — check here first
 全部日志\snapshots\          scheduled snapshots
 全部日志\incidents\          failure bundles
@@ -84,6 +187,26 @@ Older builds scattered `config` / `tools` / `plugins` / `cache` / `sounds` / `�
 Nothing is written to `%APPDATA%`; the whole folder is portable.
 
 ## FAQ
+
+<details>
+<summary><b>Where did the log page go</b></summary>
+There is no "Logs" tab any more. Logs open pre-filtered from wherever you clicked: 【看现场】 on the home card (that failing run), "查看日志" on a tool card (that tool only), a config group's name in the daily report (that group, that day). For everything, use "更多 ▾" → 【全部日志】. The top bar always says "正在看：…" so you know whether it's filtered.
+</details>
+
+<details>
+<summary><b>I can't find a setting any more</b></summary>
+v1.41 split settings into five groups: Watchdog / Timing / Notify / Interface / UI & Startup. The first level is just five cards; switches are one click in, back arrow top-left. See the table above — every existing setting is still there.
+</details>
+
+<details>
+<summary><b>Does "完成并试跑一次" really run something</b></summary>
+Yes. It runs the first tool with a configured path once, through the same single-tool path as **Run queue**, so you see it launch, run and finish. Prefer not to? 【先不跑，完成】. Either button marks the wizard complete.
+</details>
+
+<details>
+<summary><b>Why is there no "didn't run last night" text on a fresh install</b></summary>
+Because nothing has run yet. On a fresh install those history and alert lines are suppressed and replaced with a "还没跑过——三步就能开始" checklist, which goes away once you've actually done it.
+</details>
 
 <details>
 <summary><b>"BetterGI not found"</b></summary>
@@ -107,12 +230,12 @@ No. Process lookup and termination are filtered to the current Windows session; 
 
 <details>
 <summary><b>Daily plan is set, but manual runs still do everything</b></summary>
-The daily plan only constrains schedule-triggered runs. Manual **Run queue** always follows the current ticks, so you can catch up. See "today (Fri) runs 2 items" under the queue.
+The daily plan only constrains schedule-triggered runs. Manual **Run queue** always follows the current ticks, so you can catch up. See it under "配置组 ▾" → "计划" on the task list card.
 </details>
 
 <details>
 <summary><b>"Possibly stalled" — what now?</b></summary>
-Check whether the screen is actually stuck. The queue waits for you by default; continue with **Run queue**. To auto-kill instead, enable it in Advanced.
+Check whether the screen is actually stuck. The queue waits for you by default; continue with **Run queue**. To auto-kill instead, enable it under Settings → Watchdog.
 </details>
 
 <details>
@@ -122,35 +245,41 @@ Bottom of the tools card → "Custom tool" → "＋ Add": pick the exe, name the
 
 ## Privacy
 
-**No telemetry, no analytics, no crash reporting.** Nothing about your usage leaves the machine.
+**No telemetry, no analytics, no crash reporting.** The program sends usage data to nobody.
 
-The only outbound connection is the notification channel you configure. The local listener accepts `127.0.0.1` only, and can be turned off.
+The only outbound connection is the notification endpoint you fill in yourself; the local listener accepts `127.0.0.1` requests only and can be switched off.
 
-## Building
+## Build
 
-Requires .NET 8 SDK. Zero NuGet dependencies:
+Needs .NET 8 SDK. Zero NuGet dependencies:
 
 ```
 dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
 ```
 
-Tests run through a hand-written probe: 84 modes, over a thousand assertions.
+Tests run through a hand-written probe — 84 modes, well over a thousand assertions:
 
 ```
 dotnet build tests\CoordinatorProbe\CoordinatorProbe.csproj -c Release
-dotnet "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.dll" live
+dotnet "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.dll" all
+```
+
+Package both variants:
+
+```
+.\scripts\package.ps1 -Variant all
 ```
 
 ## Notes
 
-- **AI-assisted development**: code and docs were produced with AI help; the author is not a programmer and cannot professionally vouch for quality or stability. Evaluate the risk yourself and back up your data.
-- **Not affiliated with** the game vendor or any tool listed below; no authorization implied. Names and icons belong to their owners.
-- **Automation carries risk**: third-party tools may violate the game's terms of service and lead to account restrictions. You accept that risk.
-- **No account access**: it never logs into the game or reads game data — only the log files the tools write.
+- **AI-assisted development**: code and docs were produced with AI assistance. The author does not write code and cannot make professional guarantees about quality or stability. Assess the risk yourself and back up your data.
+- **Not affiliated with any game publisher or the tools below.** No authorisation was granted. Game names, tool names and icons belong to their respective owners.
+- **Automation carries risk**: third-party tools may violate a game's terms of service and put your account at risk. That risk is yours.
+- **No account access**: it doesn't log into the game, doesn't read game data; it only reads logs those tools already write to disk.
 
 ## Related projects
 
-This project implements no game dailies; all of that comes from:
+This project implements no game dailies itself; it all goes to them. Thanks to their authors:
 
 - [BetterGI](https://github.com/babalae/better-genshin-impact)
 - [March7thAssistant](https://github.com/moesnow/March7thAssistant)
@@ -158,12 +287,14 @@ This project implements no game dailies; all of that comes from:
 
 ## License
 
-Released under [GNU AGPL-3.0](LICENSE). You may use, modify and redistribute it freely, **but any distribution — including modified versions and network-service use — must also be AGPL-licensed with full source provided**.
+Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — **but any distribution (including modified redistributions and network-service use) must be AGPL too, with full source provided**.
 
-- **Why AGPL**: this README has always said "no reselling, no paid boosting, no paid repackaging", and MIT permits exactly those. AGPL turns that sentence into an enforceable term — you may profit from it, but the code stays open.
-- **Third-party assets**: game and tool names, plus screenshots and UI assets under `docs/`, are not covered by this license and belong to their respective owners.
-- **When redistributing**: keep the Notes section above so downstream users don't mistake this for an official product.
+- **Why AGPL**: this README has always said "don't sell it, don't charge for boosting or repackaging", which MIT explicitly permits. AGPL turns that sentence into a binding term — you may make money with it, but the code has to stay open.
+- **Third-party assets**: game names, tool names, and the screenshots and UI assets under `docs/` are outside this licence and belong to their respective owners.
+- **When redistributing**: keep the "Notes" section above so downstream users don't mistake this for an official product.
 
 ## Version
 
-Latest release **v1.40** (in-app `1.40.0`). Per-version changes: [RELEASE_NOTES.md](RELEASE_NOTES.md). Design and trade-offs: [docs/路线图.md](docs/路线图.md).
+Latest release **v1.41** (`1.41.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+
+The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

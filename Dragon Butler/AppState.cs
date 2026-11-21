@@ -235,9 +235,10 @@ public class AppSettings
 
     /// <summary>
     /// 当前配置结构版本号。14 = v1.6 补跑窗口与队列续跑字段；
-    /// 15 = v1.25 通知默认改成「不推送」（见 <see cref="LoadSettings"/> 里的迁移）。
+    /// 15 = v1.25 通知默认改成「不推送」；
+    /// 16 = v1.41 加 <see cref="OnboardingCompleted"/> 与主窗位置大小（见 <see cref="LoadSettings"/> 里的迁移）。
     /// </summary>
-    public const int CurrentVersion = 15;
+    public const int CurrentVersion = 16;
 
     /// <summary>各工具档案（键为 ToolId）。旧配置无此节时为空字典。</summary>
     public Dictionary<string, ToolProfile> Tools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -297,6 +298,16 @@ public class AppSettings
 
     /// <summary>首启向导是否已完成（或跳过）。</summary>
     public bool FirstRunDone { get; set; } = false;
+
+    /// <summary>
+    /// 引导是否真的走完了（v1.41）。与 <see cref="FirstRunDone"/> 不是一件事：
+    /// FirstRunDone 记的是「这个窗子弹过没有」，跳过也算；这里记的是「他有没有走完五步」。
+    ///
+    /// 为什么要单独一个标记：全新安装的人首屏上不该出现「昨晚没跑」「近期有告警」这类
+    /// 历史与告警文案——他昨晚当然没跑，这是他第一次打开。这些文案对老用户是信息，
+    /// 对新人是指责。所以只有真的走完向导，才允许它们出现。
+    /// </summary>
+    public bool OnboardingCompleted { get; set; } = false;
 
     // ===== v1.4：挂机护航 =====
     /// <summary>挂机护航总开关（默认开）：队列运行期间抑制睡眠、重启与屏保。</summary>
@@ -380,6 +391,17 @@ public class AppSettings
     /// 所以默认关；只有确实在意常驻内存的人才该打开它。
     /// </summary>
     public bool TrimToTrayEnabled { get; set; } = false;
+
+    // ===== v1.41 / M6-1：主窗位置与大小 =====
+    //
+    // 存这四个值而不是「记住最大化」：主窗从来不许最大化（WindowStyle=None 自绘），
+    // 能记住的就只有「上次摆在屏幕的哪儿、多大」。
+    // -1 表示「还没记过」——全新安装和老配置都是这个值，跟 0 区分开：
+    // 0 是合法坐标（贴在左上角），不能拿它当「没设置」。
+    public double WindowLeft { get; set; } = -1;
+    public double WindowTop { get; set; } = -1;
+    public double WindowWidth { get; set; } = -1;
+    public double WindowHeight { get; set; } = -1;
 
     // v1.35：TrayNoticeShown 跟着「关窗口还在后台」那条提示一起删了。
     // 那提示本身就绕过了用户意愿——它在人正看着屏幕的时候弹一条系统通知，
@@ -528,6 +550,18 @@ public static class AppState
                 for (int i = 0; i < flat.Count; i += ToolPages.PerPage)
                     migrated.Add(flat.Skip(i).Take(ToolPages.PerPage).ToList());
                 Settings.ToolPages = migrated;
+            }
+
+            // v1.41：引导完成标记。
+            // 老用户升级上来时 FirstRunDone 早就是 true（那个窗子弹过），
+            // 所以直接把它的值搬过来——否则一个用了两个月的人会因为「新字段默认 false」
+            // 被当成新人，首屏换成「还没跑过——三步就能开始」，而他昨天刚跑完。
+            // 新人装机时 FirstRunDone 与 OnboardingCompleted 都是 false，
+            // 于是他们看到引导卡，走完向导才变成 true。
+            if (Settings.Version < 16)
+            {
+                if (Settings.FirstRunDone) Settings.OnboardingCompleted = true;
+                Settings.Version = 16;
             }
         }
         catch (Exception ex)

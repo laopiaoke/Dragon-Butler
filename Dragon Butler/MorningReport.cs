@@ -1,13 +1,24 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace DragonButler;
 
 /// <summary>
-/// 晨报（v1.5，默认关）：每天首次启动时，用一句话汇报昨天队列的情况。
-/// 数据源只有 <see cref="GroupArchive"/>（零新增采集）：一处配置组记录 = 一次运行，
-/// 全部有结束时间 = 全部成功，耗时按开始/结束时间累加。无运行日不播报。
+/// 晨报（v1.5，默认关；v1.41 起改叫「日报」）：每天首次启动时，用一段话汇报昨天的情况。
+///
+/// <para>
+/// 数据只有一份：<see cref="DailyReport.Build"/> 算出的 <see cref="DailyReportData"/>。
+/// 界面那页日报读的也是它——同一份事实，两种排版。
+/// 以前这里自己从 <see cref="GroupArchive"/> 数「几次运行、总耗时多少」，
+/// 界面上按 <see cref="DurationLedger"/> 算，两边口径不同（组 vs 工具、是否含未结束的组），
+/// 同一天的数字对不上时没人说得清哪个对。现在只剩下一个源头。
+/// </para>
+/// <para>
+/// 这里的文字模板是给 IM 看的：分区头带 emoji（IM 里没有图标，纯文本要靠它分段），
+/// 界面那版用图标替换。文案风格按 docs/VOICE.md：口语、克制、不堆感叹号。
+/// </para>
 /// </summary>
 public static class MorningReportService
 {
@@ -28,39 +39,99 @@ public static class MorningReportService
             s.MorningReportDate = today;
             AppState.SaveSettings();
 
-            var records = GroupArchive.GetDay(DateTime.Today.AddDays(-1));
+            var yesterday = DateTime.Today.AddDays(-1);
+            var data = DailyReport.Build(yesterday);
             string catchUp = CatchUpNote();
-            if (records.Count == 0 && catchUp.Length == 0)
+            if (data.IsEmpty && catchUp.Length == 0)
             {
-                LogService.LogEvent("晨报：昨日无运行记录，跳过播报");
+                LogService.LogEvent("日报：昨日无运行记录，跳过播报");
                 return;
             }
 
-            string text = records.Count == 0 ? catchUp : BuildSummary(records) + catchUp;
-            LogService.LogEvent("[晨报] " + text);
-            NotifyService.Show(NotifyLevel.Info, "龙管家 · 晨报", text);
+            string text = data.IsEmpty ? catchUp.Trim() : RenderText(data) + catchUp;
+            LogService.LogEvent("[日报] " + text.Replace("\n", " / "));
+            NotifyService.Show(NotifyLevel.Info, "龙管家 · 日报", text);
         }
         catch (Exception ex)
         {
-            LogService.LogEvent("晨报生成失败：" + ex.Message);
+            LogService.LogEvent("日报生成失败：" + ex.Message);
         }
     }
 
-    /// <summary>把昨天的组归档拼成一句话（"昨日队列：2 次运行，全部成功，总耗时 3小时12分"）。</summary>
-    public static string BuildSummary(IReadOnlyList<GroupRecord> records)
+    /// <summary>
+    /// 把一份日报数据排成 IM 文本。分区顺序与界面一致：
+    /// 异常与处理 → 配置组执行 → 每个工具 → 空分区合并 → 合计。
+    ///
+    /// <para>
+    /// 只渲染结构化数据里有的东西，不做二次汇总——否则又会出现「界面说 3 小时、推送说 3 小时 12 分」。
+    /// </para>
+    /// </summary>
+    public static string RenderText(DailyReportData data)
     {
-        int runs = records.Count;
-        int finished = records.Count(r => !string.IsNullOrWhiteSpace(r.End));
-        string state = finished >= runs ? "全部成功" : $"{runs - finished} 项未完成";
+        var sb = new StringBuilder();
+        sb.Append("昨天（").Append(data.Date).Append("）跑了这些：\n");
 
-        double minutes = 0;
-        foreach (var r in records)
+        // ===== 异常与处理（放最前）=====
+        if (data.Anomalies.Count == 0)
         {
-            var span = DurationOf(r);
-            if (span.HasValue) minutes += span.Value.TotalMinutes;
+            // 这句是任务书 M5-4 指定的原文，不要改写。
+            sb.Append("\n✅ 异常与处理：")
+              .Append(data.ToolCount)
+              .Append(" 个配置组全部顺利，没有需要你操心的事。\n");
+        }
+        else
+        {
+            sb.Append("\n⚠️ 异常与处理：\n");
+            foreach (var a in data.Anomalies)
+            {
+                sb.Append("· ").Append(a.Group).Append(" 在 ").Append(a.Stage)
+                  .Append(" 卡住 → 管家已").Append(a.Action).Append('\n');
+            }
         }
 
-        return $"昨日队列：{runs} 次运行，{state}，总耗时 {FormatDuration(minutes)}";
+        // ===== 配置组执行（M5-1：耗时是普通文本，差异是人话）=====
+        if (data.Groups.Count > 0)
+        {
+            sb.Append("\n📋 配置组执行：\n");
+            foreach (var g in data.Groups)
+            {
+                sb.Append("· ").Append(g.Name).Append("　").Append(DailyReport.SayDuration(g.Seconds));
+                if (g.DeltaSeconds != null)
+                {
+                    string delta = DailyReport.SayDelta(g.DeltaSeconds.Value, out _);
+                    sb.Append("（较上次").Append(delta).Append('）');
+                }
+                sb.Append('\n');
+            }
+        }
+
+        // ===== 每个工具 =====
+        if (data.Tools.Count > 0)
+        {
+            sb.Append("\n🧰 每个工具：\n");
+            foreach (var t in data.Tools)
+            {
+                sb.Append("· ").Append(string.IsNullOrWhiteSpace(t.Name) ? t.ToolId : t.Name)
+                  .Append("　").Append(DailyReport.SayDuration(t.Seconds));
+                if (t.Runs > 1) sb.Append("（").Append(t.Runs).Append(" 次）");
+                sb.Append('\n');
+            }
+        }
+
+        // ===== 空分区合并（M5-3）：两个以上才值得说一句 =====
+        if (data.EmptySections.Count >= 2)
+        {
+            sb.Append("\n📦 ").Append(string.Join(" / ", data.EmptySections))
+              .Append("：今天都没有记录。\n");
+        }
+
+        // ===== 合计 + 趋势（M5-5）=====
+        sb.Append("\n合计耗时：").Append(DailyReport.SayDuration(data.TotalSeconds));
+        string? trend = DailyReport.SayTrend(data.TotalSeconds, data.PreviousTotalSeconds);
+        if (!string.IsNullOrEmpty(trend)) sb.Append(" · ").Append(trend);
+        sb.Append('。');
+
+        return sb.ToString();
     }
 
     /// <summary>
@@ -107,25 +178,16 @@ public static class MorningReportService
             string why = window == 0
                 ? "（补跑是关着的，错过那一分钟就不再补）"
                 : $"（补跑窗口 {window} 分钟内没跑起来）";
-            return $" 昨天 {when} 的定时没跑成{why}。";
+            return $"\n昨天 {when} 的定时没跑成{why}。";
         }
         catch (Exception ex)
         {
-            LogService.LogEvent("晨报补跑提示生成失败：" + ex.Message);
+            LogService.LogEvent("日报补跑提示生成失败：" + ex.Message);
             return "";
         }
     }
 
-    private static TimeSpan? DurationOf(GroupRecord r)
-    {
-        if (string.IsNullOrWhiteSpace(r.Start) || string.IsNullOrWhiteSpace(r.End)) return null;
-        if (!TimeSpan.TryParse(r.Start, out var start) || !TimeSpan.TryParse(r.End, out var end)) return null;
-        var span = end - start;
-        if (span < TimeSpan.Zero) span += TimeSpan.FromDays(1); // 跨零点
-        return span;
-    }
-
-    /// <summary>耗时文案：3小时12分 / 12分 / 不到 1 分钟。</summary>
+    /// <summary>耗时文案：3小时12分 / 12分 / 不到 1 分钟。周报还在用，保持原样。</summary>
     public static string FormatDuration(double totalMinutes)
     {
         int minutes = (int)Math.Round(totalMinutes);

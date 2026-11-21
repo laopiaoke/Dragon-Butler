@@ -95,7 +95,12 @@ internal static class RenderProbe
         {
             var m = typeof(MainWindow).GetMethod("ShowPage",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            m?.Invoke(w, new object[] { 2, false });
+            // v1.40：设置页从第 2 位挪到第 3 位（汇报插在日志与主页之间），这里必须跟着走，
+            // 否则截出来的是主页——2026-11-21 就踩过一次，看图才发现导航亮的是「主页」。
+            m?.Invoke(w, new object[] { Pager.Settings, false });
+            var pillSet = typeof(MainWindow).GetMethod("MoveNavPill",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            pillSet?.Invoke(w, new object[] { Pager.Settings, false });
             w.UpdateLayout();
         }
         catch (Exception ex) { Console.WriteLine("SWITCH-PAGE-FAIL " + ex.Message); }
@@ -689,9 +694,11 @@ internal static class RenderProbe
                         AppState.Settings.LastRunSeconds = 49 * 60;
                         var w = new MainWindow();
                         w.UpdateLayout();
-                        var show = typeof(MainWindow).GetMethod("ShowPage",
+                        // v1.41 / M1-1：日志不再是一页，改成了覆盖层。
+                        // 以前这里调 ShowPage(0) —— 0 现在是最左边的日报，所以改成直接开日志视图。
+                        var open = typeof(MainWindow).GetMethod("OpenLogView",
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        show?.Invoke(w, new object[] { 0, false });
+                        open?.Invoke(w, new object[] { LogFilter.None });
                         w.UpdateLayout();
                         bool ok = Save(w, Path.Combine(spot, "runpage.png"), 980, 460);
                         Console.WriteLine($"RENDER runpage={ok}");
@@ -814,7 +821,9 @@ internal static class RenderProbe
                                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                             update?.Invoke(w, null);
                             w.UpdateLayout();
-                            bool ok = Save(w, Path.Combine(spot, $"wizard_{step}.png"), 620, 0);
+                            // v1.41 / M2-9：卡片宽度写死 760，截图窗口得比它更宽，
+                            // 否则截出来两边各被切一截，看着像布局坏了。
+                            bool ok = Save(w, Path.Combine(spot, $"wizard_{step}.png"), 800, 0);
                             Console.WriteLine($"RENDER wizard_{step}={ok}");
                             w.Close();
                         }
@@ -865,7 +874,7 @@ internal static class RenderProbe
                         // BringIntoView 在没 Show 过的窗口上不生效（没有滚动宿主测量），只能直接给偏移。
                         var showPage = typeof(MainWindow).GetMethod("ShowPage",
                             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        showPage?.Invoke(w, new object[] { 1, false });
+                        showPage?.Invoke(w, new object[] { Pager.Home, false });
                         w.UpdateLayout();
                         if (w.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer svGrid)
                         {
@@ -1027,7 +1036,7 @@ internal static class RenderProbe
                         w.Show();
                         SwitchToReportPage(w);
                         w.UpdateLayout();
-                        bool ok = Save(w, Path.Combine(spot, "report.png"), 980, 0);
+                        bool ok = Save(w, Path.Combine(spot, "report.png"), 1120, 0);
                         Console.WriteLine($"RENDER report={ok}");
                         w.Close();
                         DurationLedger.ClearForTest();
@@ -1301,8 +1310,45 @@ internal static class RenderProbe
                                     : mode == "notify" ? "notify.png"
                                     : mode == "backup" ? "backup.png"
                                     : "main.png";
-                        bool ok = Save(w, Path.Combine(spot, file), 980, 0);
+                        // v1.41 / M6-1：主窗默认 1080×720，截图按 1120 宽才装得下默认布局。
+                        bool ok = Save(w, Path.Combine(spot, file), 1120, 0);
                         Console.WriteLine($"RENDER {Path.GetFileNameWithoutExtension(file)}={ok}");
+                        w.Close();
+                    }
+
+                    // v1.41 / M4-1：设置页从「一屏全是开关」改成「一级五张入口卡 + 二级才铺开关」。
+                    // 老的 advanced/top 只能拍到一级那五张卡，二级到底长什么样需要单独拍。
+                    if (mode == "panes" || mode == "all")
+                    {
+                        var w = new MainWindow();
+                        SwitchToSettingsPage(w);
+                        w.UpdateLayout();
+                        var show = typeof(MainWindow).GetMethod("ShowSettingsPane",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        foreach (var (paneName, file) in new[]
+                        {
+                            ("Guard", "pane_guard.png"),
+                            ("Timing", "pane_timing.png"),
+                            ("Notify", "pane_notify.png"),
+                            ("Api", "pane_api.png"),
+                            ("Ui", "pane_ui.png"),
+                        })
+                        {
+                            try
+                            {
+                                var paneType = typeof(MainWindow).GetNestedType("SettingsPane",
+                                    System.Reflection.BindingFlags.NonPublic);
+                                object value = Enum.Parse(paneType!, paneName);
+                                show?.Invoke(w, new[] { value });
+                                w.UpdateLayout();
+                                // 说明折叠（M4-2）要等排版完再跑一遍才收得起来
+                                w.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+                                w.UpdateLayout();
+                                bool ok = Save(w, Path.Combine(spot, file), 1120, 0);
+                                Console.WriteLine($"RENDER {Path.GetFileNameWithoutExtension(file)}={ok}");
+                            }
+                            catch (Exception ex) { Console.WriteLine("RENDER pane fail " + paneName + ": " + ex.Message); }
+                        }
                         w.Close();
                     }
 

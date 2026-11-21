@@ -1,11 +1,12 @@
 <Window x:Class="DragonButler.FirstRunWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="第一次使用" Width="620" SizeToContent="Height"
-        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True" Background="Transparent"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Title="第一次使用"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="#99000000" WindowStartupLocation="Manual" ShowInTaskbar="False"
         FontFamily="HarmonyOS Sans SC, Microsoft YaHei UI, Segoe UI"
-        UseLayoutRounding="True">
+        UseLayoutRounding="True"
+        PreviewKeyDown="Window_PreviewKeyDown">
 
     <Window.Resources>
         <Style x:Key="WizPrimary" TargetType="Button">
@@ -143,6 +144,32 @@
             </Setter>
         </Style>
 
+        <!-- v1.41：完成页每一行未办完的事都要能就地回去办（M2-5）。
+             主窗的 LinkButton 是窗口级资源，这里同样拿不到，自己画一条下划线文字按钮。 -->
+        <Style x:Key="WizLink" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource BrandTextBrush}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent">
+                            <TextBlock x:Name="Tx" Text="{TemplateBinding Content}" FontSize="{TemplateBinding FontSize}"
+                                       Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center"
+                                       TextDecorations="Underline"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Tx" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="WizScrollBar" TargetType="ScrollBar">
             <Setter Property="Width" Value="8"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -266,6 +293,12 @@
             <Setter Property="Margin" Value="0,4,0,0"/>
             <Setter Property="LineHeight" Value="16"/>
         </Style>
+        <!-- v1.41：通知页按「本机 / IM / 手机」分组，组名就是这一行小字。 -->
+        <Style x:Key="WizGroupLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/>
+            <Setter Property="Margin" Value="0,10,0,6"/>
+        </Style>
 
         <Style x:Key="SwitchStyle" TargetType="ToggleButton">
             <Setter Property="Cursor" Value="Hand"/>
@@ -316,142 +349,215 @@
         </Style>
     </Window.Resources>
 
-    <Border Margin="16" CornerRadius="14" Background="{DynamicResource CardBgBrush}"
-            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="26" ShadowDepth="6" Direction="270" Opacity="0.38" Color="#000000"/>
-        </Border.Effect>
+    <!-- v1.41：窗口铺满主窗（代码里按 Owner 定位），底下一层 60% 的黑——
+         这就是任务书 M2-10 要的遮罩：主界面被压到约 40% 亮度，文字读不出来，
+         注意力全落在中间这张卡上。 -->
+    <Grid>
+        <Border x:Name="WizardCard" Width="760" MinHeight="480"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                CornerRadius="14" Background="{DynamicResource CardBgBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="26" ShadowDepth="6" Direction="270" Opacity="0.38" Color="#000000"/>
+            </Border.Effect>
 
-        <Grid Margin="22,18,22,18">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
+            <Grid Margin="22,18,22,18">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="300"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0">
+                <StackPanel Grid.Row="0">
                     <TextBlock Text="第一次使用，五步就好" FontSize="16" FontWeight="SemiBold"
-                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                               Foreground="{DynamicResource TextPrimaryBrush}"/>
                     <TextBlock x:Name="TbStep" Text="第 1 步 / 共 5 步" FontSize="11" Margin="0,5,0,0"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
-            </StackPanel>
+                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    <!-- v1.41 / M2-6：五段进度条。当前高亮、已过填充、未到灰。 -->
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border x:Name="Prog1" Grid.Column="0" Height="3" CornerRadius="2" Margin="0,0,6,0"/>
+                        <Border x:Name="Prog2" Grid.Column="1" Height="3" CornerRadius="2" Margin="0,0,6,0"/>
+                        <Border x:Name="Prog3" Grid.Column="2" Height="3" CornerRadius="2" Margin="0,0,6,0"/>
+                        <Border x:Name="Prog4" Grid.Column="3" Height="3" CornerRadius="2" Margin="0,0,6,0"/>
+                        <Border x:Name="Prog5" Grid.Column="4" Height="3" CornerRadius="2"/>
+                    </Grid>
+                </StackPanel>
 
-            <!-- 步骤 1：选择工具 -->
-            <StackPanel x:Name="Step1" Grid.Row="1" Margin="0,16,0,0">
-                <TextBlock Text="打开你在用的那几个（可多选，之后也能改）" FontSize="12.5"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
-                <!-- 列表是滚动区：以后再加工具不会把窗口越撑越高 -->
-                <ScrollViewer MaxHeight="392" VerticalScrollBarVisibility="Auto" Margin="0,10,0,0"
-                              Padding="0,4,8,0">
+                <!-- 步骤 1：选择工具 -->
+                <ScrollViewer x:Name="Step1" Grid.Row="1" Margin="0,16,0,0" MaxHeight="300"
+                              VerticalAlignment="Center" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
                     <ScrollViewer.Resources>
                         <Style TargetType="ScrollBar" BasedOn="{StaticResource WizScrollBar}"/>
                     </ScrollViewer.Resources>
-                    <!-- 图标一格一格摆（每行五个），不是一行一个——十六个一行一个要滚半天，
-                         而且一眼看不出「一共能选哪些」。 -->
-                    <WrapPanel x:Name="ToolPickHost"/>
+                    <StackPanel>
+                        <TextBlock Text="打开你在用的那几个（可多选，之后也能改）" FontSize="12.5"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <!-- 图标一格一格摆（每行五个），不是一行一个——十六个一行一个要滚半天，
+                             而且一眼看不出「一共能选哪些」。 -->
+                        <WrapPanel x:Name="ToolPickHost" Margin="0,10,0,0"/>
+                        <TextBlock x:Name="TbPickSummary" FontSize="11" Margin="0,8,0,0"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    </StackPanel>
                 </ScrollViewer>
-                <TextBlock x:Name="TbPickSummary" FontSize="11" Margin="0,8,0,0"
+
+                <!-- 步骤 2：找路径 -->
+                <ScrollViewer x:Name="Step2" Grid.Row="1" Margin="0,16,0,0" MaxHeight="300"
+                              VerticalAlignment="Center" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0"
+                              Visibility="Collapsed">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource WizScrollBar}"/>
+                    </ScrollViewer.Resources>
+                    <StackPanel>
+                        <TextBlock Text="进这一步会自动找一遍；找不到再手动浏览。" FontSize="12.5" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <StackPanel x:Name="FindHost" Margin="0,10,0,0"/>
+                        <TextBlock x:Name="TbFindSummary" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- 步骤 3：每天几点跑（v1.41 / M2-1） -->
+                <ScrollViewer x:Name="Step3" Grid.Row="1" Margin="0,16,0,0" MaxHeight="300"
+                              VerticalAlignment="Center" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0"
+                              Visibility="Collapsed">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource WizScrollBar}"/>
+                    </ScrollViewer.Resources>
+                    <StackPanel>
+                        <TextBlock Text="每天几点跑？" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        <TextBlock Text="到点自动拉起工具跑一遍，之后随时能改。" FontSize="12.5" TextWrapping="Wrap"
+                                   Margin="0,6,0,0" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <WrapPanel x:Name="TimeChipHost" Margin="0,14,0,0"/>
+                        <StackPanel x:Name="CustomTimeHost" Orientation="Horizontal" Margin="0,6,0,0"
+                                    Visibility="Collapsed">
+                            <TextBox x:Name="TbTimeHour" Style="{StaticResource InputBox}" Width="62" MaxLength="2"
+                                     TextAlignment="Center" LostFocus="TbTimeField_LostFocus"/>
+                            <TextBlock Text=":" FontSize="14" VerticalAlignment="Center" Margin="6,0,6,0"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBox x:Name="TbTimeMinute" Style="{StaticResource InputBox}" Width="62" MaxLength="2"
+                                     TextAlignment="Center" LostFocus="TbTimeField_LostFocus"/>
+                            <TextBlock x:Name="TbTimeNote" FontSize="11" VerticalAlignment="Center" Margin="12,0,0,0"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                        </StackPanel>
+                        <TextBlock x:Name="TbTimeSummary" FontSize="11" Margin="0,12,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- 步骤 4：跑完怎么告诉你 -->
+                <ScrollViewer x:Name="Step4" Grid.Row="1" Margin="0,16,0,0" MaxHeight="300"
+                              VerticalAlignment="Center" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0"
+                              Visibility="Collapsed">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource WizScrollBar}"/>
+                    </ScrollViewer.Resources>
+                    <StackPanel>
+                        <TextBlock FontSize="12.5" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="跑完之后要不要提醒你，怎么提醒。默认什么都不弹——挂机时每跑完一个工具就弹一次，比不提醒更烦。"/>
+
+                        <!-- 「不推送」独立置顶（M2-8）：它不是一个渠道，是「不选渠道」。 -->
+                        <WrapPanel x:Name="NotifyTopHost" Margin="0,12,0,0"/>
+                        <StackPanel x:Name="NotifyGroupsHost"/>
+
+                        <TextBlock x:Name="TbNotifyPickHint" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+
+                        <!-- 只有一个地址要填的渠道，就在这里填掉；多字段的（邮件/Telegram）留到通知卡 -->
+                        <StackPanel x:Name="NotifyFieldHost" Margin="0,10,0,0" Visibility="Collapsed">
+                            <TextBlock x:Name="TbNotifyFieldLabel" FontSize="11.5"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBox x:Name="TbNotifyField" Style="{StaticResource InputBox}" Margin="0,5,0,0"
+                                     LostFocus="TbNotifyField_LostFocus"/>
+                            <TextBlock x:Name="TbNotifyFieldNote" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button x:Name="BtnNotifyTest" Content="发一条试试" Style="{StaticResource WizGhost}"
+                                    Height="28" Padding="12,0" Click="BtnNotifyTest_Click"/>
+                            <TextBlock x:Name="TbNotifyTest" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center"
+                                       TextWrapping="Wrap" MaxWidth="380" HorizontalAlignment="Left"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- 步骤 5：完成（v1.41：自启两项搬到这里，M2-2） -->
+                <ScrollViewer x:Name="Step5" Grid.Row="1" Margin="0,16,0,0" MaxHeight="300"
+                              VerticalAlignment="Center" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0"
+                              Visibility="Collapsed">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource WizScrollBar}"/>
+                    </ScrollViewer.Resources>
+                    <StackPanel>
+                        <TextBlock Text="现在就绪了。" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        <TextBlock Margin="0,8,0,0" FontSize="12.5" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   Text="点「完成并试跑一次」会立刻跑一遍第一个工具，你能看到它真的动起来。"/>
+                        <StackPanel x:Name="DoneSummaryHost" Margin="0,10,0,0"/>
+
+                        <Border Height="1" Margin="0,14,0,0" Background="{DynamicResource BorderBrush}"/>
+                        <TextBlock Text="顺手两项，以后能改" FontSize="11" Margin="0,10,0,0"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+
+                        <Border Style="{StaticResource SetRow}">
+                            <Grid>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SetLabel}" Text="开机自启动"/>
+                                    <TextBlock Style="{StaticResource SetHint}"
+                                               Text="系统启动时程序自动运行。不装服务、不写系统目录，只往当前用户的启动项里加一条。"/>
+                                </StackPanel>
+                                <ToggleButton x:Name="WizAutoStart" Style="{StaticResource SwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Click="WizAutoStart_Click"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource SetRowLast}">
+                            <Grid>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SetLabel}" Text="启动时最小化到托盘"/>
+                                    <TextBlock Style="{StaticResource SetHint}"
+                                               Text="开机后它自己在托盘里待着，不弹窗口——自启的意思是「它就在」，不是「在你脸上开一扇窗」。"/>
+                                </StackPanel>
+                                <ToggleButton x:Name="WizStartMin" Style="{StaticResource SwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Click="WizStartMin_Click"/>
+                            </Grid>
+                        </Border>
+
+                        <TextBlock x:Name="TbStartupNote" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- 下一步预告（PATTERNS 第 1 条）：流程类界面底部必须说清下一步是什么 -->
+                <TextBlock x:Name="TbNextPreview" Grid.Row="2" FontSize="11" Margin="0,12,0,0" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextTertiaryBrush}"/>
-            </StackPanel>
 
-            <!-- 步骤 2：找路径 -->
-            <StackPanel x:Name="Step2" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
-                <TextBlock Text="点「自动寻找」定位程序；找不到再手动浏览。" FontSize="12.5" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextSecondaryBrush}"/>
-                <StackPanel x:Name="FindHost" Margin="0,10,0,0"/>
-                <TextBlock x:Name="TbFindSummary" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
-            </StackPanel>
-
-            <!-- 步骤 3：开机自启 -->
-            <StackPanel x:Name="Step3" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
-                <TextBlock FontSize="12.5" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextSecondaryBrush}"
-                           Text="要不要让它跟着电脑一起起来。这两项都在设置里能改。"/>
-
-                <StackPanel Margin="0,14,0,0">
-                    <Border Style="{StaticResource SetRow}">
-                        <Grid>
-                            <StackPanel>
-                                <TextBlock Style="{StaticResource SetLabel}" Text="开机自启动"/>
-                                <TextBlock Style="{StaticResource SetHint}"
-                                           Text="系统启动时程序自动运行。不装服务、不写系统目录，只往当前用户的启动项里加一条。"/>
-                            </StackPanel>
-                            <ToggleButton x:Name="WizAutoStart" Style="{StaticResource SwitchStyle}"
-                                          HorizontalAlignment="Right" VerticalAlignment="Center"
-                                          Click="WizAutoStart_Click"/>
-                        </Grid>
-                    </Border>
-
-                    <Border Style="{StaticResource SetRowLast}">
-                        <Grid>
-                            <StackPanel>
-                                <TextBlock Style="{StaticResource SetLabel}" Text="启动时最小化到托盘"/>
-                                <TextBlock Style="{StaticResource SetHint}"
-                                           Text="开机后它自己在托盘里待着，不弹窗口——自启的意思是「它就在」，不是「在你脸上开一扇窗」。"/>
-                            </StackPanel>
-                            <ToggleButton x:Name="WizStartMin" Style="{StaticResource SwitchStyle}"
-                                          HorizontalAlignment="Right" VerticalAlignment="Center"
-                                          Click="WizStartMin_Click"/>
-                        </Grid>
-                    </Border>
-                </StackPanel>
-
-                <TextBlock x:Name="TbStartupNote" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
-            </StackPanel>
-
-            <!-- 步骤 4：跑完怎么告诉你 -->
-            <StackPanel x:Name="Step4" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
-                <TextBlock FontSize="12.5" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextSecondaryBrush}"
-                           Text="跑完之后要不要提醒你，怎么提醒。默认什么都不弹——挂机时每跑完一个工具就弹一次，比不提醒更烦。"/>
-
-                <WrapPanel x:Name="NotifyChipHost" Margin="0,12,0,0"/>
-
-                <TextBlock x:Name="TbNotifyPickHint" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
-
-                <!-- 只有一个地址要填的渠道，就在这里填掉；多字段的（邮件/Telegram）留到通知卡 -->
-                <StackPanel x:Name="NotifyFieldHost" Margin="0,10,0,0" Visibility="Collapsed">
-                    <TextBlock x:Name="TbNotifyFieldLabel" FontSize="11.5"
-                               Foreground="{DynamicResource TextSecondaryBrush}"/>
-                    <TextBox x:Name="TbNotifyField" Style="{StaticResource InputBox}" Margin="0,5,0,0"
-                             LostFocus="TbNotifyField_LostFocus"/>
-                    <TextBlock x:Name="TbNotifyFieldNote" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"
-                               Foreground="{DynamicResource TextTertiaryBrush}"/>
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                    <Button x:Name="BtnNotifyTest" Content="发一条试试" Style="{StaticResource WizGhost}"
-                            Height="28" Padding="12,0" Click="BtnNotifyTest_Click"/>
-                    <TextBlock x:Name="TbNotifyTest" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center"
-                               TextWrapping="Wrap" MaxWidth="380" HorizontalAlignment="Left"
-                               Foreground="{DynamicResource TextTertiaryBrush}"/>
-                </StackPanel>
-            </StackPanel>
-
-            <!-- 步骤 5：完成 -->
-            <StackPanel x:Name="Step5" Grid.Row="1" Margin="0,16,0,0" Visibility="Collapsed">
-                <TextBlock Text="现在就绪了。" FontSize="14" FontWeight="SemiBold"
-                           Foreground="{DynamicResource TextPrimaryBrush}"/>
-                <TextBlock Margin="0,8,0,0" FontSize="12.5" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextSecondaryBrush}"
-                           Text="关掉这个窗口后，点队列卡上的「一键开跑」就能试一次；先跑一个工具也可以。"/>
-                <TextBlock x:Name="TbDoneSummary" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextTertiaryBrush}"/>
-            </StackPanel>
-
-            <Grid Grid.Row="3" Margin="0,20,0,0">
-                <Button x:Name="BtnSkip" Content="跳过" HorizontalAlignment="Left"
-                        Style="{StaticResource WizGhost}" Click="BtnSkip_Click"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="BtnBack" Content="上一步" Style="{StaticResource WizGhost}" Margin="0,0,8,0"
-                            Visibility="Collapsed" Click="BtnBack_Click"/>
-                    <Button x:Name="BtnNext" Content="下一步" Style="{StaticResource WizPrimary}" Click="BtnNext_Click"/>
-                </StackPanel>
+                <Grid Grid.Row="3" Margin="0,16,0,0">
+                    <Button x:Name="BtnSkip" Content="跳过" HorizontalAlignment="Left"
+                            Style="{StaticResource WizGhost}" Click="BtnSkip_Click"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="BtnBack" Content="上一步" Style="{StaticResource WizGhost}" Margin="0,0,8,0"
+                                Visibility="Collapsed" Click="BtnBack_Click"/>
+                        <Button x:Name="BtnDoneLater" Content="先不跑，完成" Style="{StaticResource WizGhost}"
+                                Margin="0,0,8,0" Visibility="Collapsed" Click="BtnDoneLater_Click"/>
+                        <Button x:Name="BtnNext" Content="下一步" Style="{StaticResource WizPrimary}" Click="BtnNext_Click"/>
+                    </StackPanel>
+                </Grid>
             </Grid>
-        </Grid>
-    </Border>
+        </Border>
+    </Grid>
 </Window>

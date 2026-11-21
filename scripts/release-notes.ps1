@@ -43,22 +43,23 @@ if (-not (Test-Path -LiteralPath $Path)) { throw "找不到发布说明：$Path"
 $lines = Get-Content -LiteralPath $Path -Encoding UTF8
 
 # 找到这一节的标题行：以 # 开头且含版本号，且版本号后面不是数字（v1.5 不能匹配到 v1.5.1）
+# 标题层级不固定：# 和 ## 都见过（v1.40 起统一用 ##），这里一并认，免得改个层级就抽不出来
 $start = -1
 for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -notmatch '^#\s+') { continue }
+    if ($lines[$i] -notmatch '^#{1,3}\s+') { continue }
     if ($lines[$i] -match ('(?<![\d.])' + [regex]::Escape($Version) + '(?![\d.])')) { $start = $i; break }
 }
 if ($start -lt 0) { throw "RELEASE_NOTES.md 里找不到 $Version 的标题" }
 
 if ($TitleOnly) {
-    Write-Output ($lines[$start] -replace '^#\s*', '').Trim()
+    Write-Output ($lines[$start] -replace '^#+\s*', '').Trim()
     return
 }
 
 # 到下一个版本标题为止
 $end = $lines.Count - 1
 for ($i = $start + 1; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match '^#\s+v\d') { $end = $i - 1; break }
+    if ($lines[$i] -match '^#{1,3}\s+v\d') { $end = $i - 1; break }
 }
 
 $body = [System.Collections.Generic.List[string]]::new()
