@@ -204,13 +204,16 @@
 | 项目 | 状态 |
 | --- | --- |
 | `Dragon Butler/Dragon Butler.csproj` 版本 | 1.40.0 → **1.41.0**（Version / FileVersion / AssemblyVersion） |
-| `发布\Dragon-Butler-v1.41-win-x64-portable.zip` | 65.20 MB · sha256 `8DC48874C3418ADB88E10484309C82666D9676A6EC96741A8F22A4E713EA6AE5` |
-| `发布\Dragon-Butler-v1.41-win-x64-runtime-dependent.zip` | 2.73 MB · sha256 `CA29F45ED9A7A29010670574827FCC6E898992302A8710252923166B4D5ECFC8` |
+| `发布\Dragon-Butler-v1.41-win-x64-portable.zip` | 67.23 MB · sha256 `A0F4F134749B54F4AC9E82525A995A1A97487E557B20B1EAA7CBBCC79868E9B0`（CI 打出并上传的那一份，`发布` 目录已与线上对齐） |
+| `发布\Dragon-Butler-v1.41-win-x64-runtime-dependent.zip` | 2.73 MB · sha256 `E6B17C9D590479FBF970F8AA0C563138F4E4DB186203191A2096658BAE8D30A8`（同上） |
+| GitHub Release | <https://github.com/laopiaoke/Dragon-Butler/releases/tag/v1.41> · Latest · 两个包已上传 |
+| `发布\SHA256SUMS.txt` | 按线上产物重写，两份自校验一致 |
 | `docs/使用说明.txt` | 264 → 305 行，全面对齐 v1.41（五步向导、四页签、五类设置、日报、日志入口、新数据目录），并已打进两个 zip |
 | `README.md` / `README.en.md` | 按 v1.41 重写：四页签表、五步向导、设置五类表、日报四块、界面速览、四条新 FAQ、构建命令改 `all` |
 | `RELEASE_NOTES.md` | 新增 v1.41 小节（workflow 发版靠它抽 Release 正文） |
 | `docs/proto/*_v141.png` | 11 张新截图，README 主图换成 `main_v141.png` |
 | `scripts/release-notes.ps1` | 修一处**既有缺陷**：原来只认 `^#\s+` 一级标题，而 v1.40 起正文用 `##`，导致 `gh release create` 取不到发布说明、直接 throw。改成 `^#{1,3}\s+`，标题剥离改 `^#+\s*`（PS 5.1 下已复验 v1.40 / v1.41 均可抽取） |
+| `.gitattributes` | 修一处**既有缺陷**：注释写着「程序图标不进 LFS」但没写例外规则，`*.png filter=lfs` 把 `Dragon Butler/Assets/icons/` 下 12 个图标抓进了 LFS → CI 干净检出只拿到 130 字节指针、`CS7065`。从 v1.38 起每次 push 的 CI 都卡在「构建输入必须是真实字节」这一步，v1.38/1.39/1.40 的 tag 都在但也没能走完。补一行例外 + renormalize，图标在索引里已是真实字节 |
 
 发布包产物目录里只有 `Dragon Butler.exe` 与 `使用说明.txt`，无运行期数据（`所有配置\`/`全部日志\`/`插件\`）混入。
 
