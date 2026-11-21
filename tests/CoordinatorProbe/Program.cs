@@ -3143,6 +3143,14 @@ internal static class Program
         Check("自启/记下用户想要什么", appStateCs.Contains("public bool AutoStartOnBoot"));
         Check("自启/启动时按意图对账", appCsV138.Contains("AutoStartHelper.Heal(AppState.Settings.AutoStartOnBoot)"));
         Check("自启/写失败不记意图", SliceBetween(mainCs, "private void TgAutoStart_Click", "\n    }").Contains("return;"));
+        // 向导在 Loaded 之后才弹，而设置页的开关是构造时按旧值摆好的。
+        // 向导关掉之后必须重读一遍，否则「向导里勾了、设置里还关着」——
+        // 值已经写进注册表和 settings.json，只有界面停在几分钟前。
+        Check("自启/向导关掉后设置页要重读",
+            SliceBetween(mainCs, "private void TryShowFirstRunWizard", "private void FlashStatusError")
+                .Contains("LoadSettingsToUi();"));
+        Check("自启/设置页的开关读的是注册表不是设置字段",
+            mainCs.Contains("TgAutoStart.IsChecked = AutoStartHelper.IsSet();"));
 
         // 开关这边：拨不动的时候要把勾子拨回去，别让界面替失败圆场。
         Check("自启/写失败把勾子拨回来", SliceBetween(mainCs, "private void TgAutoStart_Click", "\n    }").Contains("_suppressToggle"));

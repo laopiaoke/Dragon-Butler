@@ -6640,6 +6640,11 @@ public partial class MainWindow : Window
             wiz.ShowDialog();
             AppState.Settings.FirstRunDone = true;
             AppState.SaveSettings();
+            // v1.39：向导改的是设置，而设置页的开关是构造时就按**旧值**摆好的
+            // （LoadSettingsToUi 在构造函数里跑，向导要等 Loaded 之后才弹）。
+            // 不在这儿重读一遍，用户就会看到「向导里勾了开机自启，设置里还是关着」——
+            // 值其实已经写进注册表和 settings.json，只是界面停在几分钟前。
+            LoadSettingsToUi();
             RenderQueue();
             RefreshToolCards();
             RefreshDetectedGroups(force: true);
