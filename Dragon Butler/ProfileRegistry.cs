@@ -244,7 +244,10 @@ public static class ProfileRegistry
             if (!string.IsNullOrWhiteSpace(settings.BgiPath))
                 bgi.ExecutablePath = settings.BgiPath;
             bgi.CustomData["dragonConfigName"] = settings.DragonConfigName ?? "";
-            bgi.CustomData["selectedGroups"] = string.Join("|", settings.SelectedGroups ?? Array.Empty<string>());
+            // v1.42 / M9-2（D16）：不再往旧存储写勾选镜像。
+            // 事实源是 QueueEntry.Groups，这条镜像从来就没有读取点（ToolRunner 不读 CustomData），
+            // 继续写只会让旧的 bettergi.json 里那份看起来「还在生效」。
+            // 历史数据不删——老用户回退旧版本时还得靠它。
             if (!bgi.CustomData.ContainsKey("webhookPort"))
                 bgi.CustomData["webhookPort"] = settings.BgiWebhookPort.ToString();
 

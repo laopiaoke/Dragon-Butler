@@ -964,12 +964,12 @@ public static class QueueService
             // v1.9 / P2：本项自己写了组就跑那几个，没写才用全局勾选（空＝交给配置名/默认流程）
             // v1.15：中间的兜底从「全局勾选」改成「配置组合勾选，没有组合再用全局勾选」。
             // 优先级 = 本项切片 > 配置组合 > 全局勾选；越具体越优先，和用户改动的顺序一致。
+            // v1.42 / M9-2（D16 单点化）：勾选只有一份事实源——本项自己的 QueueEntry.Groups。
+            // 配置组合是「记下来的一套」，仍然优先；再往下就是「不指定，交给配置名」。
+            // 不再回落到旧的全局 SelectedGroups：那份已 deprecated，没有其他存活读取点。
             var own = FindEntry(profile.ToolId)?.Groups;
             var presetGroups = ActivePresetGroups();
-            IReadOnlyList<string> fallback = presetGroups.Count > 0
-                ? presetGroups
-                : AppState.Settings.SelectedGroups;
-            var groups = GroupSlicing.Effective(own, fallback, SafeKnownGroups());
+            var groups = GroupSlicing.Effective(own, presetGroups, SafeKnownGroups());
             if (groups.Count > 0)
                 return GroupSlicing.StartGroupsArgument(groups);
             return ToolRunner.BuildArguments(profile, ActiveDragonConfigName());
@@ -977,6 +977,25 @@ public static class QueueService
         return ToolRunner.BuildArguments(profile, null);
     }
 
+    /// <summary>
+    /// v1.42 / M9-2：这个工具今晚实际会跑哪几组配置组。
+    ///
+    /// <para>
+    /// 存在的理由只有一个：「今晚要跑」那一行必须和真正传出去的命令行同源。
+    /// 各算一遍迟早会分叉——摘要说 3 组、实际只传了 2 组，这种错没人能一眼看出来。
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<string> EffectiveGroupsFor(string toolId)
+    {
+        try
+        {
+            if (!string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase))
+                return Array.Empty<string>();
+            var own = FindEntry(toolId)?.Groups;
+            return GroupSlicing.Effective(own, ActivePresetGroups(), SafeKnownGroups());
+        }
+        catch { return Array.Empty<string>(); }
+    }
     /// <summary>
     /// v1.15：这次开跑用哪个一条龙配置名。
     /// 装了配置组合就跟着组合走，没装或组合已被删就退回全局设置——

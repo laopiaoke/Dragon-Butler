@@ -30,12 +30,33 @@ A small Windows desktop app that **does no game dailies itself**. It's a dispatc
 It does exactly four things: start processes, read the public logs those tools write, listen on a localhost webhook, and manage process lifetimes. **It never touches the game, the tools' files, or your account.**
 
 <p align="center">
-  <img src="docs/proto/main_v141.png" width="820" alt="Home">
+  <img src="docs/proto/tasklist_collapsed_v1421.png" width="820" alt="Home">
 </p>
 
 <p align="center">
-  <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds tonight's items.</sub>
+  <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
 </p>
+
+## v1.42: manage it all inside the task-list card
+
+This release only touches the right-hand card on the home page: **one tool per row**, tonight's plan as the card's headline, group checkboxes unfold in place, and the separate "managed config" window is gone.
+
+<p align="center">
+  <img src="docs/proto/tasklist_expanded_v1421.png" width="820" alt="Task list card with groups expanded">
+</p>
+
+<p align="center">
+  <sub>Click the row (or the ⌄ on the right) to unfold: which groups are checked, in what order, and how many items are left. The leading number is the execution order.</sub>
+</p>
+
+- **Rows instead of a grid**: drag the `≡` handle to reorder, double-click to run just that one, right-click for a nine-item menu. Editing, launching, ordering, adding tools and checking state all happen right there.
+- **Headline summary**: `今晚要跑：日常 + 活动 · 2 项 · 约 47 分钟`. It used to sit at the bottom of the card, below the fold at 720px — as a headline it finally answers "what is this card for tonight".
+- **Zero scrolling when collapsed at 720px**: summary, start button and the add row are all above the fold. The "how each tool runs" section stays below it, one small scroll away.
+- **Adding a tool happens in the card**: the dashed `＋ 添加工具` opens an icon grid with already-added ones ticked; anything else goes through "其它 exe…".
+- **Nine-item right-click menu**: "skip this once" lasts one run, "don't run it tonight" persists — written separately because the cost of regretting them differs.
+- **Removal in plain words**: `把 BetterGI 从今晚清单移除？配置会保留，随时可以再加回来。`
+- **Group selection now has a single store**: the old global checkbox list and each tool's own list disagreed; now the tool's own list wins, and legacy data is migrated once on upgrade (never overwriting what you already picked).
+- **The five-view dropdown and its four windows are gone** (daily plan / idle calendar / dependency matrix / group slices). Dependency data and execution logic are untouched — historical configs keep working, there is just no editor any more.
 
 ## v1.41: the interface was rebuilt
 
@@ -295,6 +316,6 @@ Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — *
 
 ## Version
 
-Latest release **v1.41** (`1.41.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+Latest release **v1.42** (`1.42.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
 
 The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

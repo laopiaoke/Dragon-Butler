@@ -131,6 +131,51 @@ internal static class RenderProbe
     /// 与插件页同一套做法：先 ShowPage，再把标签块一步到位，否则截图会拍到「底还在上一格」。
     /// </summary>
     /// <summary>
+    /// v1.42.1 / M9-3（D17）：把主页夹具按固定形状重建，不受前面几段 mode 的影响。
+    /// 存在的理由：零滚动量的是「装好的人、两行工具」这一种主页。
+    /// ui all 会先跑 grid / presets，那两段往设置里塞了 4 行工具和一套配置组合，
+    /// 量出来 722 而不是 623——数字随顺序漂，契约就成了摆设。
+    /// </summary>
+    private static void ResetHomeFixture()
+    {
+        try
+        {
+            AppState.Settings.Queue = new List<QueueEntry>
+            {
+                new() { ToolId = "bettergi", Enabled = true, WeekdayMask = 0x7F, Groups = new List<string> { "日常", "活动" } },
+                new() { ToolId = "march7th", Enabled = true, WeekdayMask = 0x7F },
+            };
+            AppState.Settings.ToolPages = new List<List<string>> { new() { "bettergi", "march7th", "ok-ww" } };
+            AppState.Settings.ToolOrder = ToolPages.Flatten(AppState.Settings.ToolPages).ToArray();
+            AppState.Settings.Presets = new List<ConfigPreset>();
+            AppState.Settings.ActivePresetId = "";
+            AppState.Settings.LastRunAt = "";
+            AppState.Settings.LastRunOk = false;
+            AppState.Settings.ShieldAlertAt = null;
+            SeedSampleBgiDir();
+            // 契约量的是「装好的人」：档案里得真有一个存在的 exe，否则 HomeState 判 FirstRun，
+            // 量到的是一张压暗的引导页——那页当然不超预算，等于没测。
+            // 同时把 ToolSetupBlock 亮出来：装好的人才会看到「每个工具怎么跑」那一段，
+            // 首次运行它是收起的，撑出来的高度比真用户还矮。
+            try
+            {
+                string exe = Path.Combine(Path.GetTempPath(), "dragon-ui", "fake-bgi", "BetterGI.exe");
+                Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+                if (!File.Exists(exe)) File.WriteAllBytes(exe, Array.Empty<byte>());
+                AppState.Settings.BgiPath = exe;
+                var bgi = ProfileRegistry.Get("bettergi");
+                bgi.ExecutablePath = exe;
+                ProfileRegistry.Save(bgi);
+            }
+            catch (Exception ex) { Console.WriteLine("RESET-EXE-FAIL " + ex.Message); }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("RESET-FAIL " + ex.Message);
+        }
+    }
+
+    /// <summary>
     /// v1.40：把导航胶囊直接摆到终点（要么藏在下面，要么在原位）。
     /// 渲染截图要的是稳定画面，动画本身靠 220ms 的消息泵推进，截不到。
     /// </summary>
@@ -171,7 +216,7 @@ internal static class RenderProbe
                 new() { ToolId = "march7th", Enabled = true, WeekdayMask = 0x7F, DependsOn = new List<string> { "bettergi" }, OnDependencyFail = QueueGraph.PolicyAbort },
                 new() { ToolId = "ok-ww", Enabled = false, WeekdayMask = 0x7F, DependsOn = new List<string> { "bettergi" }, Groups = new List<string> { "收尾" } },
             };
-            AppState.Settings.SelectedGroups = new[] { "日常", "活动", "收尾" };
+            // v1.42 / M9-2（D16）：勾选只有 QueueEntry.Groups 一份，不再铺全局那份。
             SeedSampleBgiDir();
         }
         catch (Exception ex)
@@ -484,7 +529,8 @@ internal static class RenderProbe
 
             DateTime today = DateTime.Today;
             var rand = new Random(20261108);
-            for (int back = 0; back < CalendarModel.Weeks * 7; back++)
+            // v1.42.1 / M9-4：CalendarModel 随日历窗口一起删了，这里直接用周数。
+            for (int back = 0; back < 53 * 7; back++)
             {
                 DateTime day = today.AddDays(-back);
                 int roll = rand.Next(100);
@@ -583,6 +629,8 @@ internal static class RenderProbe
     public static int RunUi(string mode)
     {
         int exit = 1;
+        // v1.42.1 / M9-3（D17）：收起态零滚动是契约，不是参考值——超了就让退出码非零。
+        bool zeroScrollFail = false;
         var worker = new Thread(() =>
         {
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -598,7 +646,7 @@ internal static class RenderProbe
                     // 不铺一份样例数据，渲染出来永远是「队列里还没有工具」的空壳。
                     SeedSampleQueue();
                     // 日历读的是 GroupArchive，不造历史的话 53 周全灰，看不出四色设计。
-                    if (mode == "calendar" || mode == "all") SeedSampleArchive();
+                    // v1.42.1 / M9-4：日历窗口删了，样例历史只在 today/running 这些还要它的模式里造。
                     // v1.13「今日运行」同样读 GroupArchive（今天那一段）+ RunJournal。
                     if (mode == "today")
                     {
@@ -628,14 +676,6 @@ internal static class RenderProbe
                         w.Close();
                     }
 
-                    if (mode == "calendar" || mode == "all")
-                    {
-                        var w = new CalendarWindow();
-                        bool ok = Save(w, Path.Combine(spot, "calendar.png"), 0, 0);
-                        Console.WriteLine($"RENDER calendar={ok}");
-                        w.Close();
-                    }
-
                     if (mode == "today" || mode == "all")
                     {
                         var w = new TodayWindow();
@@ -650,22 +690,6 @@ internal static class RenderProbe
                         var w = new LogRulesWindow();
                         bool ok = Save(w, Path.Combine(spot, "logrules.png"), 720, 0);
                         Console.WriteLine($"RENDER logrules={ok}");
-                        w.Close();
-                    }
-
-                    if (mode == "depends" || mode == "all")
-                    {
-                        var w = new DependsWindow();
-                        bool ok = Save(w, Path.Combine(spot, "depends.png"), 820, 0);
-                        Console.WriteLine($"RENDER depends={ok}");
-                        w.Close();
-                    }
-
-                    if (mode == "groups" || mode == "all")
-                    {
-                        var w = new GroupsWindow();
-                        bool ok = Save(w, Path.Combine(spot, "groups.png"), 760, 0);
-                        Console.WriteLine($"RENDER groups={ok}");
                         w.Close();
                     }
 
@@ -943,33 +967,171 @@ internal static class RenderProbe
                         try { if (File.Exists(sandbox)) File.Delete(sandbox); } catch { }
                     }
 
-                    // v1.30：托管配置独立窗口。要证明的两件事——
-                    // ① 横三竖二摆得开、不挤（主窗那张卡只有半屏宽，这里翻了一倍）；
-                    // ② 格子是「图标在上、名字在下」的桌面感，不是列表行。
-                    // 种多于一页的工具（7 个），顺带看一眼页码点与溢出提示。
-                    if (mode == "tray" || mode == "all")
+                    // v1.42 / M8-2：任务清单卡里的横向工具行。要证明的三件事——
+                    // ① 一行一个工具，手柄/图标/名字/徽章/摘要/箭头都在一条基线上；
+                    // ② 展开区缩进到图标左边对齐（不是跟手柄对齐），圆角与深一档底色；
+                    // ③ BetterGI 那行展开后能勾配置组，右侧实时「今晚 N 项」。
+                    // 原来这里截的是「托管配置」独立窗口，v1.42 起那个窗口按 D9 删掉了。
+                    if (mode == "rows" || mode == "tray" || mode == "all")
                     {
-                        SeedSampleQueue();
-                        // 种进来的工具必须先有档案：窗口是按 ProfileRegistry.All ∪ 队列画的，
-                        // 只往 ToolPages 里塞 id 而不建档案，Normalize 会把它们当「已删工具」剔掉，
-                        // 截出来就只剩种子队列自带的三个（第一次跑就是这么少了一半）。
+                        // v1.42.1 / M9-3：零滚动契约量的是「装好的人」的主页。
+                        // 不设这两个标志，HomeHero 会顶上首访引导卡（装好的人看不到它），
+                        // 多出来的 100 多像素会把结论带偏。
+                        AppState.Settings.FirstRunDone = true;
+                        AppState.Settings.OnboardingCompleted = true;
+                        // 工具行和配置组合行都不能是前面几段 mode 留下的残留：
+                        // ui all 会先跑 grid / presets，那两段往设置里塞了 4 行工具和一套组合，
+                        // 量出来 722 而不是 623。量的必须是固定夹具，不然这个数字每次跑都不一样。
+                        ResetHomeFixture();
                         foreach (var id in new[] { "zzz-od", "maaend", "ok-nte", "src" })
                         {
                             try { ProfileRegistry.Save(ProfileRegistry.Get(id)); } catch { }
                         }
-                        AppState.Settings.ToolPages = new List<List<string>>
-                        {
-                            new() { "bettergi", "march7th", "ok-ww", "zzz-od", "maaend", "ok-nte" },
-                            new() { "src" },
-                        };
-                        AppState.Settings.ToolOrder = ToolPages.Flatten(AppState.Settings.ToolPages).ToArray();
                         AppState.SaveSettings();
 
-                        var w = new TrayConfigWindow();
-                        w.UpdateLayout();
-                        bool ok = Save(w, Path.Combine(spot, "tray.png"), 720, 560);
-                        Console.WriteLine($"RENDER tray={ok}");
-                        w.Close();
+                        var win = new MainWindow();
+                        win.Show();
+                        win.UpdateLayout();
+                        win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+                        try
+                        {
+                            var showPage = typeof(MainWindow).GetMethod("ShowPage", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                            showPage?.Invoke(win, new object[] { Pager.Home, false });
+                            win.UpdateLayout();
+                            win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+                            bool ok1 = Save(win, Path.Combine(spot, "toolrows.png"), 1120, 720);
+                            Console.WriteLine($"RENDER toolrows={ok1}");
+
+                            // v1.42.1 / M9-3（D17）：收起态零滚动契约。
+                            // 720 高是笔记本上最常见的窗口高度，摘要和一键开跑必须一眼都在。
+                            // 判据用 ScrollableHeight——比「截图看起来没被挡」硬，挡没挡住不靠眼睛。
+                            if (win.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer homeScroll)
+                            {
+                                win.UpdateLayout();
+                                Console.WriteLine($"ZERO-SCROLL viewport={homeScroll.ViewportHeight:F0} " +
+                                    $"extent={homeScroll.ExtentHeight:F0} scrollable={homeScroll.ScrollableHeight:F1}");
+                                Console.WriteLine($"ZERO-SCROLL collapsed_ok={(homeScroll.ScrollableHeight <= 0.5 ? "YES" : "NO")}");
+                                // v1.42.1 / M9-3（D17）：契约说的是「摘要、一键开跑、添加行都看得见」，
+// 不是「整页一点都滚不动」——「每个工具怎么跑」那一段本来就在折叠线下面，
+// 注释里写明了「上面挑、下面配，往下滚一点就到」。拿整页 ExtentHeight 当判据
+// 会把它算成赤字，逼着人去砍一段本来就不该进首屏的内容。
+// 所以量三块东西的底边：都在视口里，才算达成。
+bool AboveFold(System.Windows.FrameworkElement? el)
+{
+    if (el == null || el.ActualHeight <= 0) return false;
+    try
+    {
+        var p = el.TransformToAncestor(homeScroll).Transform(new System.Windows.Point(0, el.ActualHeight));
+        return p.Y <= homeScroll.ViewportHeight + 0.5;
+    }
+    catch { return false; }
+}
+var fnSummary = win.FindName("TbTonightSummary") as System.Windows.FrameworkElement;
+var fnStart = win.FindName("BtnQueueStart") as System.Windows.FrameworkElement;
+bool okSummary = fnSummary != null && AboveFold(fnSummary);
+bool okStart = fnStart != null && AboveFold(fnStart);
+// 添加行没有名字，按位置找：ToolRowHost 里最后一个 Border（BuildAddRow 出来的那条）。
+bool okAdd = false;
+if (win.FindName("ToolRowHost") is System.Windows.Controls.StackPanel hostRows)
+{
+    System.Windows.Controls.Border? lastBorder = null;
+    foreach (System.Windows.UIElement r in hostRows.Children)
+        if (r is System.Windows.Controls.Border rb) lastBorder = rb;
+    okAdd = lastBorder != null && AboveFold(lastBorder);
+}
+Console.WriteLine($"ZERO-SCROLL fold summary={okSummary} start={okStart} add={okAdd}");
+if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
+                                // 主卡内部也打一遍：250 的主卡是最大的一块，得知道钱花在哪。
+                                if (win.FindName("HomeHero") is System.Windows.Controls.Border hero && hero.Child is System.Windows.Controls.Panel hp)
+                                    foreach (System.Windows.UIElement hc in hp.Children)
+                                        if (hc is System.Windows.Controls.Panel hsp)
+                                            foreach (System.Windows.UIElement hcc in hsp.Children)
+                                                if (hcc is System.Windows.FrameworkElement hf && hf.ActualHeight > 0)
+                                                    Console.WriteLine($"ZERO-SCROLL       hero={hf.Name}/{hf.GetType().Name} h={hf.ActualHeight:F0}");
+                                // 超预算时要知道是哪一块撑出来的，不然只能瞎调间距。
+                                                                // 工具行宿主与「每个工具怎么跑」块也逐行量。
+                                if (win.FindName("ToolRowHost") is System.Windows.Controls.StackPanel rh)
+                                    foreach (System.Windows.UIElement r in rh.Children)
+                                        if (r is System.Windows.FrameworkElement rfe && rfe.ActualHeight > 0)
+                                            Console.WriteLine($"ZERO-SCROLL       rowhost={rfe.Name}/{rfe.GetType().Name} h={rfe.ActualHeight:F0} margin={rfe.Margin}");
+                                if (win.FindName("ToolSetupBlock") is System.Windows.Controls.StackPanel tsb)
+                                    foreach (System.Windows.UIElement s in tsb.Children)
+                                        if (s is System.Windows.FrameworkElement sfe && sfe.ActualHeight > 0)
+                                            Console.WriteLine($"ZERO-SCROLL       setup={sfe.Name}/{sfe.GetType().Name} h={sfe.ActualHeight:F0} margin={sfe.Margin}");                                // 底部动作区逐行量：超 20px 时得知道钱花在哪一行。
+                                if (win.FindName("QueueCard") is System.Windows.Controls.Border qcard && qcard.Child is System.Windows.Controls.Panel qpanel)
+                                    foreach (System.Windows.UIElement qchild in qpanel.Children)
+                                        if (qchild is System.Windows.Controls.StackPanel bottom && System.Windows.Controls.Grid.GetRow(bottom) == 5)
+                                            foreach (System.Windows.UIElement bline in bottom.Children)
+                                                if (bline is System.Windows.FrameworkElement bfe && bfe.ActualHeight > 0)
+                                                    Console.WriteLine($"ZERO-SCROLL       bottom={bfe.Name}/{bfe.GetType().Name} h={bfe.ActualHeight:F0}");if (homeScroll.Content is System.Windows.Controls.Panel panel)
+                                {
+                                    foreach (System.Windows.UIElement child in panel.Children)
+                                    {
+                                        if (child is System.Windows.FrameworkElement fe && fe.ActualHeight > 0)
+                                            Console.WriteLine($"ZERO-SCROLL part={fe.Name}/{fe.GetType().Name} h={fe.ActualHeight:F0}");
+                                        // Grid 这一行里就是左定时卡 + 右任务清单卡。
+                                        if (child is System.Windows.Controls.Panel inner)
+                                            foreach (System.Windows.UIElement g in inner.Children)
+                                            {
+                                                if (g is System.Windows.FrameworkElement gf && gf.ActualHeight > 0)
+                                                    Console.WriteLine($"ZERO-SCROLL   sub={gf.Name}/{gf.GetType().Name} h={gf.ActualHeight:F0}");
+                                                if (g is System.Windows.Controls.Border qb && qb.Name == "QueueCard"
+                                                    && qb.Child is System.Windows.Controls.Panel qp)
+                                                    foreach (System.Windows.UIElement qpChild in qp.Children)
+                                                        if (qpChild is System.Windows.FrameworkElement qf && qf.ActualHeight > 0)
+                                                            Console.WriteLine($"ZERO-SCROLL     qq={qf.Name}/{qf.GetType().Name} row={System.Windows.Controls.Grid.GetRow(qf)} h={qf.ActualHeight:F0}");
+                                            }
+                                    }
+                                }
+
+                            }
+                            else
+                            {
+                                Console.WriteLine("ZERO-SCROLL collapsed_ok=MISSING(ScrollHome)");
+                            }
+
+                            // 展开 BetterGI 那一行：组勾选面板。
+                            var expanded = typeof(MainWindow).GetField("_expandedRows", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(win);
+                            if (expanded is System.Collections.Generic.ICollection<string> list) list.Add("bettergi");
+                            var render = typeof(MainWindow).GetMethod("RenderToolRows", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                            render?.Invoke(win, null);
+                            win.UpdateLayout();
+                            win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+                            bool ok2 = Save(win, Path.Combine(spot, "toolrows_open.png"), 1120, 720);
+                            Console.WriteLine($"RENDER toolrows_open={ok2}");
+
+                            // v1.42：添加面板（虚线行点开后的内联图标网格）。
+                            // 先把展开区收掉、再滚到底，否则面板会被卡片下沿和悬浮导航挡住。
+                            if (expanded is System.Collections.Generic.ICollection<string> nowExpanded) nowExpanded.Clear();
+                            typeof(MainWindow).GetField("_addingTool", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(win, true);
+                            render?.Invoke(win, null);
+                            win.UpdateLayout();
+                            if (win.FindName("ScrollHome") is System.Windows.Controls.ScrollViewer sc) sc.ScrollToEnd();
+                            win.UpdateLayout();
+                            win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+                            bool ok3 = Save(win, Path.Combine(spot, "toolrows_add.png"), 1120, 720);
+                            Console.WriteLine($"RENDER toolrows_add={ok3}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("RENDER toolrows failed: " + ex.Message);
+                        }
+                        win.Close();
+
+                        // v1.42：移除确认框（右键「移除…」弹的那个）。
+                        try
+                        {
+                            var dlg = AppDialog.Create(AppDialog.Kind.Question, "移除",
+                                "把 BetterGI 从今晚清单移除？配置会保留，随时可以再加回来。",
+                                primary: "移除", secondary: "算了");
+                            bool ok4 = Save(dlg, Path.Combine(spot, "removedialog.png"), 640, 0);
+                            Console.WriteLine($"RENDER removedialog={ok4}");
+                            dlg.Close();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("RENDER removedialog failed: " + ex.Message);
+                        }
                     }
 
                     // v1.34：插件变成导航第四项，独立一页。
@@ -1353,7 +1515,7 @@ internal static class RenderProbe
                     }
 
                     Console.WriteLine("RENDER-DIR " + spot);
-                    exit = 0;
+                    exit = zeroScrollFail ? 1 : 0;
                 }
                 catch (Exception ex)
                 {

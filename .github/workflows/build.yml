@@ -99,7 +99,6 @@ jobs:
             hotkey   = "F9 全局热键"
             progress = "F10 任务栏进度与托盘"
             command  = "F15 命令面板"
-            calendar = "F13 挂机日历"
             dag      = "P2 依赖编排"
             groups   = "P2 配置组切片"
             bgiupdate = "P2 BGI 版本前置检查"

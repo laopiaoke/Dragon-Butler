@@ -61,7 +61,8 @@ public partial class PresetsWindow : Window
     {
         var s = AppState.Settings;
         string cfg = (s.DragonConfigName ?? "").Trim();
-        var groups = GroupSlicing.Sanitize(s.SelectedGroups);
+        // v1.42 / M9-2：读「此刻真正会跑的组」，不再读 deprecated 的全局勾选。
+        var groups = GroupSlicing.Sanitize(QueueService.EffectiveGroupsFor("bettergi"));
         string cfgText = cfg.Length == 0 ? "没填一条龙配置名" : "「" + cfg + "」";
         string groupText = groups.Count == 0
             ? "没勾配置组（交给 BGI 走默认流程）"
@@ -152,7 +153,7 @@ public partial class PresetsWindow : Window
         {
             var s = AppState.Settings;
             var next = ConfigPresets.Capture(
-                s.Presets, s.DragonConfigName, s.SelectedGroups, TbNewName.Text,
+                s.Presets, s.DragonConfigName, QueueService.EffectiveGroupsFor("bettergi"), TbNewName.Text,
                 () => Guid.NewGuid().ToString("N"));
 
             string? why = ConfigPresets.RefuseReason(next, s.Presets);

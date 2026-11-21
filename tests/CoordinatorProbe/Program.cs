@@ -99,7 +99,6 @@ internal static class Program
             "hotkey" => RunHotkey(),
             "progress" => RunProgress(),
             "command" => RunCommand(),
-            "calendar" => RunCalendar(),
             "live" => RunLive(),
             "logrules" => RunLogRules(),
             "favorites" => RunFavorites(),
@@ -2828,8 +2827,7 @@ internal static class Program
         // ---- 11) 接线 ----
         string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
         string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
-        string trayXaml = ReadRepoSources("Dragon Butler/TrayConfigWindow.xaml");
-        string trayCs = ReadRepoSources("Dragon Butler/TrayConfigWindow.xaml.cs");
+        // v1.42 / M8-1：TrayConfigWindow 已经整体删除，这里不再读它的源码。
         string appStateCs = ReadRepoSources("Dragon Butler/AppState.cs");
         string logCs = ReadRepoSources("Dragon Butler/LogService.cs");
         string profileCs = ReadRepoSources("Dragon Butler/ProfileRegistry.cs");
@@ -2935,33 +2933,43 @@ internal static class Program
         Check("插件/空着也说清不影响功能", mainCs.Contains("这不影响任何功能"));
 
         // ---- 11d) v1.30 托管配置缩成入口 + 独立窗口 + 目录收拾 ----
-        Check("入口/有配置按钮", mainXaml.Contains("x:Name=\"BtnOpenTrayConfig\""));
-        Check("入口/按钮上有齿轮图标", mainXaml.Contains("A2.4,2.4 0 1 0 10,8"));
-        Check("入口/点它会开窗口", mainCs.Contains("new TrayConfigWindow { Owner = this };"));
-        Check("入口/不会叠出第二份", mainCs.Contains("w is TrayConfigWindow old"));
-        Check("入口/卡里的格子墙收起来了", mainXaml.Contains("<Grid Grid.Row=\"2\" Margin=\"0,10,0,0\" Visibility=\"Collapsed\">"));
-        Check("窗口/横三竖二", trayCs.Contains("private const int Columns = 3;") && trayCs.Contains("private const int Rows = 2;"));
-        Check("窗口/一屏六格", trayCs.Contains("private const int PerView = Columns * Rows;"));
-        Check("窗口/左键单击改设置", trayCs.Contains("OpenConfig(toolId);"));
-        // v1.32：双击现在是真的双击（ClickCount >= 2），单击要等一个双击间隔才走「改设置」。
-        Check("窗口/双击直接启动",
-            trayCs.Contains("e.ClickCount >= 2") && trayCs.Contains("LaunchNow(toolId)"));
-        Check("窗口/单击先等一等别抢先开窗",
-            trayCs.Contains("SystemInformation.DoubleClickTime") && trayCs.Contains("_click?.Stop();"));
-        Check("窗口/右键有菜单", trayCs.Contains("new ContextMenu()"));
-        Check("窗口/右键能改今晚跑不跑", trayCs.Contains("今晚不跑它") && trayCs.Contains("ToggleDuty(toolId)"));
-        Check("窗口/悬停会说明三个键各做什么",
-            trayCs.Contains("左键单击改设置") && trayCs.Contains("双击现在就跑") && trayCs.Contains("TbHint.Text"));
-        Check("窗口/拖拽是插入不是交换", trayCs.Contains("ToolPages.Insert("));
-        Check("窗口/拖完别格让位有动画", trayCs.Contains("AnimateFrom(") && trayCs.Contains("TimeSpan.FromMilliseconds(260)"));
-        Check("窗口/翻页有动画", trayCs.Contains("TimeSpan.FromMilliseconds(300)"));
-        Check("窗口/自带样式不靠主窗", trayXaml.Contains("x:Key=\"Ghost\"") && trayXaml.Contains("x:Key=\"CloseBtn\""));
-        Check("窗口/三页共用同一份数据", trayCs.Contains("AppState.Settings.ToolPages"));
+        // ---- 11d) v1.42：托管配置窗口与五个视图入口双双撤掉 ----
+        Check("入口/「配置」大按钮没了", !mainXaml.Contains("BtnOpenTrayConfig"));
+        Check("入口/托管配置窗口没了", !mainCs.Contains("TrayConfigWindow"));
+        Check("入口/卡中间那格换成了工具行宿主", mainXaml.Contains("x:Name=\"ToolRowHost\""));
+        Check("入口/标题行有「已配 N 个」", mainXaml.Contains("x:Name=\"TbQueueCount\""));
+        Check("入口/视图下拉整个撤掉", !mainXaml.Contains("BtnQueueView") && !mainCs.Contains("BtnQueueView_Click"));
+        // v1.42.1 / M9-4（D18）：四个窗口类本身也删了。留着入口是隐患，留着类更是——
+        // 六个月后有人「顺手接回去」，被撤掉的视图系统就还魂了。
+        Check("入口/四个视图窗口类已从仓库删除",
+            !mainCs.Contains("WeeklyPlanWindow") && !mainCs.Contains("CalendarWindow") &&
+            !mainCs.Contains("DependsWindow") && !mainCs.Contains("GroupsWindow"));
+        // v1.42 / M8-2：格子墙改成横向工具行，六项能力一个不少。
+        Check("工具行/有渲染入口", mainCs.Contains("RenderToolRows()") && mainCs.Contains("SyncToolRows()"));
+        // v1.42.1 / M9-3（D17）：56 → 52。零滚动契约是硬预算，一行省 4px 正好把它抹平。
+        Check("工具行/单行 52 高", mainCs.Contains("Height = 52"));
+        Check("工具行/带拖拽手柄", mainCs.Contains("≡") && mainCs.Contains("MoveToolRow("));
+        Check("工具行/双击立即跑", mainCs.Contains("e2.ClickCount >= 2") && mainCs.Contains("RunToolNow("));
+        Check("工具行/点一下展开配置组", mainCs.Contains("_expandedRows") && mainCs.Contains("BuildGroupPanel("));
+        Check("工具行/行内徽章", mainCs.Contains("_rowBadges") && mainCs.Contains("✓ 已就绪") && mainCs.Contains("未配置路径"));
+        Check("工具行/添加行是虚线", mainCs.Contains("BuildAddRow(") && mainCs.Contains("StrokeDashArray"));
+        Check("工具行/添加面板是内联格子", mainCs.Contains("BuildAddPanel(") && !mainCs.Contains("ToolPickerWindow"));
+        // v1.42 / M8-4：展开区读写的就是 QueueEntry.Groups（与配置组视图同一份存储）。
+        Check("展开区/读写 QueueEntry.Groups", mainCs.Contains("QueueEntryOf(\"bettergi\")") && mainCs.Contains("target.Groups = order2.ToList();"));
+        Check("展开区/有全选与全部取消", mainCs.Contains("全选") && mainCs.Contains("全部取消"));
+        Check("展开区/有今晚 N 项计数", mainCs.Contains("footerCount") && mainCs.Contains("今晚 {n} 项"));
+        // v1.42 / M8-7：今晚摘要。
+        Check("今晚摘要/有那一行", mainXaml.Contains("x:Name=\"TbTonightSummary\""));
+        Check("今晚摘要/按组耗时算时长", mainCs.Contains("TonightMinutes(") && mainCs.Contains("MedianMinutes("));
+        Check("今晚摘要/没有样本就不报时长", mainCs.Contains("if (median == null) return null;"));
+        // v1.42 / M8-6：菜单统一走应用级模板，不留 Icon 列。
+        string appXaml = ReadRepoSources("Dragon Butler/App.xaml");
+        Check("菜单/应用级有 MenuItem 模板", appXaml.Contains("<Style TargetType=\"MenuItem\">"));
+        Check("菜单/模板里不画图标列", !appXaml.Contains("ContentSource=\"Icon\""));
         Check("默认/不再自己塞三个工具", !appStateCs.Contains("Settings.Queue.Add(new QueueEntry\n            {\n                ToolId = p.ToolId,"));
         Check("默认/队列只保证非 null", appStateCs.Contains("Settings.Queue ??= new List<QueueEntry>();"));
         Check("引导/桌面照着勾选重建", wizardCs.Contains("AppState.Settings.ToolPages = ToolPages.Repack("));
         Check("引导/一个都不勾就空着", wizardCs.Contains("if (picked.Count > 0)"));
-
         // ---- 11e) v1.30 目录收拾成两个 ----
         Check("目录/配置根叫所有配置", pathCs.Contains("\"所有配置\""));
         Check("目录/日志根叫全部日志", pathCs.Contains("\"全部日志\""));
@@ -3120,19 +3128,23 @@ internal static class Program
         Check("米游社/本体里没有那段签到了", !mainCs.Contains("MiyousheService.SignNowAsync"));
         Check("米游社/设置里不再有那八个字段", !appStateCs.Contains("MiyousheAutoSign"));
 
-        // ---- 11j) v1.35 配置按钮挪到卡中间 + 插件文件夹挪到 exe 旁边 ----
-        // 它原来缩在标题行那一排 26 高的小按钮里，而它是这张卡最主要的动作。
-        // 现在占 Row 2（*，吃掉剩余高度），在标题下面、按日计划上面的中间空白里。
-        Check("托管配置/「配置」在卡中间不在标题行",
-            mainXaml.Contains("<Grid Grid.Row=\"2\" Margin=\"0,10,0,10\">") &&
-            mainXaml.Contains("x:Name=\"BtnOpenTrayConfig\" Style=\"{StaticResource LaunchGhost}\""));
-        // 标题行那一排现在只剩「看一眼 / 定规矩」的五个小按钮。
-        string titleRow = SliceBetween(mainXaml, "<StackPanel Grid.Column=\"1\" Orientation=\"Horizontal\" HorizontalAlignment=\"Right\"", "</StackPanel>");
-        Check("托管配置/标题行不再有它", titleRow.Length > 0 && !titleRow.Contains("BtnOpenTrayConfig"));
-        Check("托管配置/按钮比小按钮大一号",
-            mainXaml.Contains("x:Name=\"BtnOpenTrayConfig\" Style=\"{StaticResource LaunchGhost}\"") &&
-            mainXaml.Contains("Height=\"38\" MinWidth=\"132\""));
-
+        // ---- 11j) v1.42：任务清单卡内部按「工具行 → 开关 → 一键开跑 → 今晚摘要」重排 ----
+        // 原来那张卡里塞了：五个视图小按钮、一个「配置」大按钮、一堵 3×2 格子墙、
+        // 一条「按日计划」和一条「依次执行勾选的工具」。现在只留一行提示 + 工具行列表。
+        Check("任务清单/只剩一行提示",
+            mainXaml.Contains("拖 ≡ 换顺序 · 双击立即跑 · 右键更多") &&
+            !mainXaml.Contains("x:Name=\"TbPlanSummary\"") && !mainXaml.Contains("x:Name=\"TbQueueHint\"") &&
+            !mainXaml.Contains("x:Name=\"QueueEmptyHint\""));
+        Check("任务清单/加载行挂在工具行下面", mainCs.Contains("ToolRowHost.Children.Add(BuildAddRow())") ||
+              mainCs.Contains("BuildAddRow();"));
+        // v1.42.1 / M9-3（D17）：摘要从卡片底部搬到头条，方向掉了个头——
+        // 摘要现在必须排在「一键开跑」前面，否则又回到「要滚动才看得见」。
+        Check("任务清单/今晚摘要在卡片头条",
+            mainXaml.IndexOf("x:Name=\"TbTonightSummary\"") >= 0 &&
+            mainXaml.IndexOf("x:Name=\"TbTonightSummary\"") < mainXaml.IndexOf("x:Name=\"BtnQueueStart\""),
+            "摘要要排在标题行下面、一键开跑上面");
+        Check("任务清单/摘要挨着标题行",
+            mainXaml.IndexOf("x:Name=\"TbTonightSummary\"") < mainXaml.IndexOf("x:Name=\"TbGridHint\""));
         // 插件目录：v1.35 起是 exe 旁边的「插件」，不是「所有配置\plugins」。
         // 理由是这一项在导航里就叫「插件」，点进去却指向两级子文件夹里的 plugins。
         Check("插件目录/在 exe 旁边叫插件", pathCs.Contains("public static string PluginsDir => Path.Combine(AppContext.BaseDirectory, \"插件\");"));
@@ -3226,11 +3238,11 @@ internal static class Program
         Check("小按钮/字号 11.5",
             SliceBetween(mainXaml, "<Style x:Key=\"MiniAction\"", "</Style>")
                 .Contains("Property=\"FontSize\" Value=\"11.5\""));
-        // v1.41 / M3-3：五个 chip 收进一个下拉之后，标题行只剩一个按钮，不再需要「五个之间留 8」。
-        // 要守的变成另一件事：那五个入口一个都没少，只是换了个住的地方。
-        Check("队列卡/五个视图入口一个没少",
+        // v1.42 / M8-3：五个视图入口按 D10 全部撤掉——前四个用户确认用不上，
+        // 「配置组」搬进了 BetterGI 工具行的展开区。这里改成守「一个不剩」。
+        Check("队列卡/五个视图入口一个不剩",
             new[] { "BtnWeeklyPlan_Click", "BtnCalendar_Click", "BtnToday_Click", "BtnDepends_Click", "BtnGroupSlice_Click" }
-                .All(h => mainXaml.Contains(h)));
+                .All(h => !mainXaml.Contains(h)) && !mainXaml.Contains("BtnQueueView"));
 
         // 任务书 P1-4：只配了一部分时也是警示——那正是「一键开跑」会悄悄跳过它们的场景。
         Check("半配/文案用警示色",
@@ -3375,8 +3387,8 @@ internal static class Program
 
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）
-        Check("接线/移除菜单真的删", mainCs.Contains("() => RemoveToolCompletely(toolId)"));
-        Check("接线/移除前会问一句", mainCs.Contains("从桌面移除「{name}」？"));
+        Check("接线/移除菜单存在且内置外置分路", mainCs.Contains("() => RemoveFromList(toolId)") && mainCs.Contains("RemoveToolCompletely(toolId)"));
+        Check("接线/移除前会问一句", mainCs.Contains("从今晚清单移除？配置会保留，随时可以再加回来。"));
         // ② 每秒轮询必须走 SyncToolGrid，不能每次都 Children.Clear() 重画——
         //    否则长按拖起来的那一格一秒内就被换成新对象，拖拽必断
         Check("接线/轮询不重画格子", mainCs.Contains("SyncToolGrid();"));
@@ -5011,9 +5023,17 @@ internal static class Program
     /// <summary>配置迁移：写一份 v1.2 形态的 settings.json，验证迁移结果与备份。</summary>
     private static int Migrate()
     {
-        string dir = Path.Combine(AppContext.BaseDirectory, "config");
-        Directory.CreateDirectory(dir);
-        string path = Path.Combine(dir, "settings.json");
+        // v1.42.1：settings.json 的位置早就搬到「所有配置」下了（Paths.ConfigRoot），
+        // 这里再往 config\ 写，LoadSettings 根本看不见，跑出来的永远是上一轮的残留。
+        // 直接问 AppState.SettingsPath，位置只有一处定义。
+        string path = AppState.SettingsPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // 先删旧的：不删的话夹具读不到时会静默沿用上一轮留下的 v17 状态，断言全是假的。
+        // tools/bettergi.json 也会盖掉夹具：上一次渲染探针往它里面写过假 BGI 路径，
+        // 不一起清掉，读出来的 bgiPath / 旧镜像全是上一轮的。
+        string staleProfile = Path.Combine(Paths.ToolsDir, "bettergi.json");
+        if (File.Exists(staleProfile)) File.Delete(staleProfile);
+        if (File.Exists(path)) File.Delete(path);
         string backup = path + ".bak.v12";
         if (File.Exists(backup)) File.Delete(backup);
 
@@ -5022,6 +5042,7 @@ internal static class Program
           "BgiPath": "D:\\BetterGI\\BetterGI.exe",
           "DragonConfigName": "日常一条龙",
           "SelectedGroups": ["日常", "挖矿"],
+          "Queue": [ { "ToolId": "bettergi", "Enabled": true } ],
           "ScheduleEnabled": true,
           "ScheduleHour": 8,
           "Theme": "Dark"
@@ -5035,12 +5056,33 @@ internal static class Program
         Console.WriteLine("MIGRATE version=" + AppState.Settings.Version);
         Console.WriteLine("MIGRATE bgiPath=" + bgi.ExecutablePath);
         Console.WriteLine("MIGRATE configName=" + bgi.CustomData.GetValueOrDefault("dragonConfigName"));
-        Console.WriteLine("MIGRATE groups=" + bgi.CustomData.GetValueOrDefault("selectedGroups"));
+        // v1.42 / M9-2（D16）：勾选单源化之后，旧镜像键应当不再被写入；
+        // 迁移结果看的是 QueueEntry.Groups 有没有接住旧全局勾选。
+        Console.WriteLine("MIGRATE groups=" + string.Join("|", (AppState.Settings.Queue ?? new List<QueueEntry>())
+            .FirstOrDefault(e => string.Equals(e.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase))?.Groups ?? new List<string>()));
+        Console.WriteLine("MIGRATE legacyMirror=" + (bgi.CustomData.TryGetValue("selectedGroups", out string? mirror) && !string.IsNullOrEmpty(mirror) ? mirror : "empty"));
         Console.WriteLine("MIGRATE schedule=" + AppState.Settings.ScheduleEnabled + "/" + AppState.Settings.ScheduleHour);
         Console.WriteLine("MIGRATE backup=" + File.Exists(backup));
         Console.WriteLine("MIGRATE toolsJson=" + File.Exists(Path.Combine(ProfileRegistry.ToolsDir, "bettergi.json")));
+        // v1.42 / M9-2（D16）：单源化之后，迁移的正确结果是「勾选搬进 QueueEntry.Groups、旧镜像不再写」。
+        // 这条以前只打日志不判定，跑绿了也不知道对不对——现在判死。
+        var bgiEntry = (AppState.Settings.Queue ?? new List<QueueEntry>())
+            .FirstOrDefault(e => string.Equals(e.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase));
+        int fails = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine((ok ? "PASS " : "FAIL ") + name + (string.IsNullOrEmpty(detail) ? "" : "  :: " + detail));
+            if (!ok) fails++;
+        }
+        Check("迁移/旧全局勾选搬进 bettergi 的 Groups",
+            string.Join("|", bgiEntry?.Groups ?? new List<string>()) == "日常|挖矿",
+            "实际：" + string.Join("|", bgiEntry?.Groups ?? new List<string>()));
+        Check("迁移/旧镜像不再写入",
+            !bgi.CustomData.TryGetValue("selectedGroups", out string? m) || string.IsNullOrEmpty(m));
+        Check("迁移/版本号到 17", AppState.Settings.Version == 17);
+        Console.WriteLine("RESULT migrate " + (fails == 0 ? "fails=0" : "fails=" + fails));
         Console.WriteLine("MIGRATE profiles=" + string.Join(",", System.Linq.Enumerable.Select(ProfileRegistry.All, p => p.ToolId)));
-        return 0;
+        return fails == 0 ? 0 : 1;
     }
 
     /// <summary>
@@ -5221,72 +5263,6 @@ internal static class Program
         return fails.Count == 0 ? 0 : 1;
     }
 
-    /// <summary>
-    /// v1.8 / F13：挂机日历的判定逻辑。
-    /// 重点断言「有记录但没结束」算失败——这是最容易被写反的一处。
-    /// </summary>
-    private static int RunCalendar()
-    {
-        var fails = new List<string>();
-        void Check(string name, bool ok, string detail = "")
-        {
-            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
-            if (!ok) fails.Add(name);
-        }
-
-        Check("空记录=没跑", CalendarModel.LevelOf(null) == CalendarModel.DayLevel.Idle);
-        Check("空列表=没跑", CalendarModel.LevelOf(new List<GroupRecord>()) == CalendarModel.DayLevel.Idle);
-
-        var ok2 = new List<GroupRecord>
-        {
-            new() { Name = "A", Start = "01:00:00", End = "02:00:00" },
-            new() { Name = "B", Start = "02:00:00", End = "03:00:00" },
-        };
-        Check("全有结束=全成功", CalendarModel.LevelOf(ok2) == CalendarModel.DayLevel.AllOk);
-
-        var partial = new List<GroupRecord>
-        {
-            new() { Name = "A", Start = "01:00:00", End = "02:00:00" },
-            new() { Name = "B", Start = "02:00:00", End = null },
-        };
-        Check("部分有结束=部分成功", CalendarModel.LevelOf(partial) == CalendarModel.DayLevel.Partial);
-
-        var none = new List<GroupRecord>
-        {
-            new() { Name = "A", Start = "01:00:00", End = null },
-            new() { Name = "B", Start = "02:00:00", End = "" },
-        };
-        Check("全无结束=全没成", CalendarModel.LevelOf(none) == CalendarModel.DayLevel.Failed);
-
-        // 空 End 字符串与 null 等价，不能因为 "" 就当成已完成
-        var emptyEnd = new List<GroupRecord> { new() { Name = "A", Start = "01:00:00", End = "" } };
-        Check("空 End 不算完成", CalendarModel.LevelOf(emptyEnd) == CalendarModel.DayLevel.Failed);
-
-        // FirstDay：必须是周一，且往前整 52 个整周
-        var anchor = new DateTime(2026, 11, 6); // 星期五
-        DateTime first = CalendarModel.FirstDay(anchor);
-        Check("起点是周一", first.DayOfWeek == DayOfWeek.Monday, first.DayOfWeek.ToString());
-        Check("起点不晚于今天", first <= anchor);
-        Check("跨度正好 53 周", (anchor.Date.AddDays(-((int)anchor.DayOfWeek + 6) % 7) - first).Days == (CalendarModel.Weeks - 1) * 7,
-            (anchor.Date - first).Days.ToString());
-        Check("同日反复调用稳定", CalendarModel.FirstDay(anchor) == first);
-
-        // Summary 文案
-        Check("无记录文案", CalendarModel.Summary(0, 0, 0, 0).Contains("还没有"));
-        string s = CalendarModel.Summary(10, 6, 3, 1);
-        Check("有记录含天数", s.Contains("10 天"), s);
-        Check("有记录含三类", s.Contains("全部成功 6") && s.Contains("部分成功 3") && s.Contains("全没成 1"), s);
-
-        // 悬停提示
-        Check("提示/没跑", CalendarModel.TipFor(anchor, CalendarModel.DayLevel.Idle, 0, 0).Contains("没跑"));
-        Check("提示/全成功", CalendarModel.TipFor(anchor, CalendarModel.DayLevel.AllOk, 2, 2).Contains("全部跑成"));
-        Check("提示/部分", CalendarModel.TipFor(anchor, CalendarModel.DayLevel.Partial, 2, 1).Contains("1/2"));
-        Check("提示/全失败", CalendarModel.TipFor(anchor, CalendarModel.DayLevel.Failed, 2, 0).Contains("全部没跑成"));
-        Check("提示带日期", CalendarModel.TipFor(anchor, CalendarModel.DayLevel.Idle, 0, 0).Contains("2026-11-06"));
-
-        Console.WriteLine($"RESULT calendar fails={fails.Count}");
-        return fails.Count == 0 ? 0 : 1;
-    }
 
     /// <summary>
     /// v1.13「看得见」验证：耗时计算、历史中位数、实时快照、今日明细。
@@ -6366,6 +6342,17 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// v1.42.1 / M9-4：仓库根下的某个文件还在不在。
+    /// 删掉的文件不能再用 ReadRepoSources 去读——File.ReadAllText 会直接抛。
+    /// </summary>
+    private static bool RepoFileExists(string relative)
+    {
+        string root = Path.GetDirectoryName(typeof(QueueService).Assembly.Location) ?? ".";
+        for (int i = 0; i < 5; i++) root = Path.GetDirectoryName(root) ?? root;
+        return File.Exists(Path.Combine(root, relative));
+    }
+
     /// <summary>读仓库里的一个源文件（从程序集位置上溯 5 级到仓库根）。</summary>
     private static string ReadRepoSources(string relative)
     {
@@ -6453,10 +6440,12 @@ internal static class Program
             main.Contains("x:Name=\"BtnPreflight\"", StringComparison.Ordinal)
             && main.Contains("x:Name=\"TbPreflightHint\"", StringComparison.Ordinal));
         // v1.41 / M3-3：标题行原来并排五个 chip、中间靠这条 1px 竖线分组。
-        // 现在那五个收进了一个下拉，一行里只剩一个按钮，没有第二段要对齐，竖线也就没有了。
-        Check("队列卡改成视图下拉",
-            main.Contains("x:Name=\"BtnQueueView\"", StringComparison.Ordinal)
-            && main.Contains("x:Name=\"QueueViewMenu\"", StringComparison.Ordinal));
+        // v1.42 / M8-3：那个「配置组 ▾」下拉按 D10 一起撤掉了，标题行右边现在只剩「已配 N 个」。
+        // 这里改成守「下拉不在、计数在」——既证明它真删了，也证明那片位置没留空。
+        Check("队列卡不再有视图下拉",
+            !main.Contains("x:Name=\"BtnQueueView\"", StringComparison.Ordinal)
+            && !main.Contains("x:Name=\"QueueViewMenu\"", StringComparison.Ordinal)
+            && main.Contains("x:Name=\"TbQueueCount\"", StringComparison.Ordinal));
 
         string palette = ReadRepoSources("Dragon Butler/CommandPalette.xaml");
         Check("命令面板选中态有 Brand 竖条",
@@ -6465,16 +6454,14 @@ internal static class Program
         Check("命令面板提示字号 11.5 / 透明度 0.7",
             palette.Contains("FontSize=\"11.5\" Opacity=\"0.7\"", StringComparison.Ordinal));
 
-        string calendar = ReadRepoSources("Dragon Butler/CalendarWindow.xaml");
-        Check("日历月份标签在上方（不再占一列）",
-            !calendar.Contains("<TextBlock x:Name=\"TbMonthLabels\" Grid.Column=\"0\"", StringComparison.Ordinal));
-        Check("日历图例用 TextSecondary（对比度够）",
-            calendar.Contains("x:Name=\"DotSuccess\"", StringComparison.Ordinal)
-            && !calendar.Contains("TextTertiaryBrush", StringComparison.Ordinal));
-
-        string depends = ReadRepoSources("Dragon Butler/DependsWindow.xaml.cs");
-        Check("依赖矩阵表头 12.5",
-            depends.Contains("TextBlock.FontSizeProperty, 12.5", StringComparison.Ordinal));
+        // v1.42.1 / M9-4：CalendarWindow / DependsWindow 已删，读源码的断言跟着撤。
+        // 这里留一行反向断言：它们的 XAML 不该再出现在仓库里。
+        Check("日历与依赖窗口的源文件确实没了",
+            !RepoFileExists("Dragon Butler/CalendarWindow.xaml")
+            && !RepoFileExists("Dragon Butler/DependsWindow.xaml.cs")
+            && !RepoFileExists("Dragon Butler/WeeklyPlanWindow.xaml.cs")
+            && !RepoFileExists("Dragon Butler/GroupsWindow.xaml.cs")
+            && !RepoFileExists("Dragon Butler/CalendarModel.cs"));
 
         string probe = ReadRepoSources("tests/CoordinatorProbe/RenderProbe.cs");
         Check("渲染工具支持滚到顶（ui top）",

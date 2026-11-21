@@ -1113,7 +1113,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftHome" X="0"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageHome" Margin="14,10,14,22">
+                        <Grid x:Name="PageHome" Margin="14,10,14,78">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -1124,7 +1124,7 @@
                          新用户第一眼看到两排「未配置」，不知道该点哪。
                          现在改成一张会变的主卡：同一块地方按五种状态说五句不同的话，
                          只给一个主按钮。下面的卡片全部往下挪一行，什么都没删。 -->
-                    <Border x:Name="HomeHero" Grid.Row="0" Style="{StaticResource Card}" Padding="20,18,20,18">
+                    <Border x:Name="HomeHero" Grid.Row="0" Style="{StaticResource Card}" Padding="20,14,20,14">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -1140,9 +1140,9 @@
                                            HorizontalAlignment="Left"/>
                                 <!-- v1.20 复盘：跑完之后，把五张表拼成三两句话贴在这里。
                                      不用点开任何窗口就能读完昨晚，这是主卡存在的理由。 -->
-                                <StackPanel x:Name="HomeRecap" Margin="0,14,0,0" Visibility="Collapsed"/>
+                                <StackPanel x:Name="HomeRecap" Margin="0,8,0,0" Visibility="Collapsed"/>
                                 <!-- 引导三步：只在「什么都没配」时出现，配好之后整块不占地方 -->
-                                <StackPanel x:Name="HomeHeroSteps" Margin="0,16,0,0" Visibility="Collapsed"/>
+                                <StackPanel x:Name="HomeHeroSteps" Margin="0,8,0,0" Visibility="Collapsed"/>
                                 <!-- v1.41 / M3-1：首访引导卡。和上面那三步不是一回事：
                                      三步是「一个工具都没配好」时的引导（HomeState.FirstRun 决定）；
                                      这块是「压根没走完开荒」时出现的清单，带勾选状态和跳转。
@@ -1168,7 +1168,7 @@
                     <!-- v1.26：这张 Grid 原来紧贴在主卡下面，行与行之间是 0 间距。
                          两张卡都是 14 圆角、1px 描边，在深色底上两圈边线几乎连成一条，
                          看起来像「叠在一起」。10px 与横向卡片间距（7+7=14）取同一数量级。 -->
-                    <Grid Grid.Row="1" Margin="0,10,0,0">
+                    <Grid Grid.Row="1" Margin="0,8,0,0">
                         <Grid.ColumnDefinitions>
                             <!-- v1.41 / M6-3：左定时卡 : 右任务清单卡 = 5 : 7。
                                  左边回答「什么时候跑」，就一个数字加一句话；右边是要干活的清单，
@@ -1357,9 +1357,11 @@
                         </Border>
 
 
-                        <Border x:Name="QueueCard" Grid.Column="1" Style="{StaticResource Card}" Margin="7,0,0,0" Padding="16,13,16,13">
+                                                <Border x:Name="QueueCard" Grid.Column="1" Style="{StaticResource Card}" Margin="7,0,0,0" Padding="16,13,16,13">
                             <Grid>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="*"/>
@@ -1374,21 +1376,6 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <!-- v1.26：这张卡原来叫「睡前队列」，内容是「一行一个工具 + 勾选框」；
-                                         设置页那边还有一张「我的工具」格子卡，摆的是同一批东西。
-                                         两张卡永远在说同一件事，每次都得来回对照。
-                                         现在合在这里：内容就是格子——
-                                         格子在不在＝今晚跑不跑，格子的顺序＝跑的先后。
-                                         v1.27：名字改成「托管配置」。「我的工具」说的是归属（这是我的东西），
-                                         「托管配置」说的是它替你干什么——一张可以翻页、可以拖、可以加页的桌面，
-                                         摆的是「这台机器交给管家托管的那几样」。 -->
-                                    <!-- 提示语放在标题行下面单独一行，不塞进左列：
-                                         右侧五个 MiniAction 是 Auto 宽，左列只剩一百多像素，
-                                         那句话会被压成三行，标题行跟着变高。 -->
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Path Data="M4 5h11M4 10h11M4 15h7" Stroke="{DynamicResource BrandBrush}" StrokeThickness="1.9"
                                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="14" Height="14" Stretch="Uniform"/>
@@ -1405,60 +1392,30 @@
                                              这句话删掉不损失信息；代码保留控件，仍在跑/度假时用它报个别的情况。 -->
                                         <TextBlock x:Name="TbQueueStatus" VerticalAlignment="Center" Visibility="Collapsed"
                                                    FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"/>
-                                        <!-- v1.35：「配置」从标题行搬到卡片中间那块空白里（见下面 Grid.Row="2"）。
-                                             它会占掉整张卡最显眼的位置，而标题行那一排全是 26 高的小按钮——
-                                             把这张卡最主要的动作做成其中最不起眼的一个，是反的。 -->
-                                        <!-- v1.41 / M3-3：原来这里是五个并列的 chip，每个都是一扇门。
-                                             五个门并排放，读完才能知道哪个是自己要的；改成现在这样——
-                                             平时只说「现在在看什么」，要点开才列全。
-                                             五个入口一个没少，只是从「并排」变成「收进一个下拉」。 -->
-                                        <Button x:Name="BtnQueueView" Style="{StaticResource MiniAction}"
-                                                Margin="10,0,0,0" Click="BtnQueueView_Click"
-                                                ToolTip="换一种看法：计划、日历、今日、依赖、配置组">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock x:Name="TbQueueViewName" Text="配置组" VerticalAlignment="Center"/>
-                                                <TextBlock Text="▾" FontSize="9" Margin="5,0,0,0" VerticalAlignment="Center"/>
-                                            </StackPanel>
-                                            <Button.ContextMenu>
-                                                <ContextMenu x:Name="QueueViewMenu">
-                                                    <!-- 顺序按「从粗到细」：先看整年的日历，再看今天，最后才动配置。 -->
-                                                    <MenuItem Header="计划" Click="BtnWeeklyPlan_Click"
-                                                              ToolTip="按星期配置每天跑哪些工具（只影响定时触发）"/>
-                                                    <MenuItem Header="日历" Click="BtnCalendar_Click"
-                                                              ToolTip="过去一年哪天跑了、跑成没成（方格墙）"/>
-                                                    <MenuItem Header="今日" Click="BtnToday_Click"
-                                                              ToolTip="今天每组花了多久、比往常快还是慢、哪个工具没跑成"/>
-                                                    <Separator/>
-                                                    <MenuItem Header="依赖" Click="BtnDepends_Click"
-                                                              ToolTip="配置「谁必须等谁跑完成」——写明白了就按依赖顺序跑，没跑成不放行"/>
-                                                    <MenuItem Header="配置组" Click="BtnGroupSlice_Click"
-                                                              ToolTip="让某一项只跑指定的几个 BGI 配置组（不设就沿用上面的全局勾选）"/>
-                                                </ContextMenu>
-                                            </Button.ContextMenu>
-                                        </Button>
-                                        <!-- 原来那五个按钮在后台代码里仍按名字引用（RefreshTodayChip 之类），
-                                             挪进菜单后名字不能丢；这里留一组不可见的占位承接事件绑定。 -->
-                                        <StackPanel Visibility="Collapsed">
-                                            <Button x:Name="BtnWeeklyPlan" Click="BtnWeeklyPlan_Click"/>
-                                            <Button x:Name="BtnCalendar" Click="BtnCalendar_Click"/>
-                                            <Button x:Name="BtnToday" Click="BtnToday_Click"/>
-                                            <Button x:Name="BtnDepends" Click="BtnDepends_Click"/>
-                                            <Button x:Name="BtnGroupSlice" Click="BtnGroupSlice_Click"/>
-                                        </StackPanel>
+                                        <!-- v1.42 / M8-4：标题行右侧原来那个「配置组 ▾」下拉整个撤掉了。
+                                             下拉里装的五个视图（计划/日历/今日/依赖/配置组）前四个是占位，
+                                             用户确认「用不上」；「配置组」搬进了 BetterGI 那一行的展开区。
+                                             现在这里只报一句「已配 N 个」——这一行剩下唯一的数字信息。 -->
+                                        <TextBlock x:Name="TbQueueCount" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"/>
                                     </StackPanel>
                                 </Grid>
 
-                                <!-- v1.26：格子搬进来之后，得有一句话说明这格怎么用。
-                                     放在标题行底下单独一行——左列被右边五个按钮挤得只剩一百多像素，
-                                     塞进去会被压成三行。 -->
-                                <TextBlock x:Name="TbGridHint" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,5,0,0"
-                                           Text="点「配置」打开托管桌面：拖拽换顺序、双击直接启动、右键改设置。"
-                                           FontSize="10.5" TextWrapping="Wrap"
+                                <!-- v1.42 / M9-3（D17）：今晚这一趟跑什么、大概多久，挪到卡片头条。
+                                     当脚注时它得滚动才看得见，而「开跑前看见」正是这一行的全部价值。
+                                     时长只用日报同一条链路的历史中位数，样本不够就不写——不猜。 -->
+                                <TextBlock x:Name="TbTonightSummary" Grid.Row="1" Margin="0,6,0,0"
+                                           FontSize="13" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                <!-- v1.42 / M8-5：整张卡只留这一句操作提示。
+                                     原来这里一句、底部还有两句（「依次执行勾选的工具…」「第一步：…」），
+                                     三句说的都是同一件事，读的人得先分辨哪句和自己有关。 -->
+                                <TextBlock x:Name="TbGridHint" Grid.Row="2" Margin="0,5,0,0"
+                                           Text="拖 ≡ 换顺序 · 双击立即跑 · 右键更多"
+                                           FontSize="11" TextWrapping="Wrap"
                                            Foreground="{DynamicResource TextTertiaryBrush}"/>
 
-                                <!-- v1.13：实时条。空闲时整条不占地方（Collapsed），
-                                     跑起来才出现——用户不问"现在在干嘛"的时候，它不存在。 -->
-                                <Border x:Name="LiveStrip" Grid.Row="1" Visibility="Collapsed" Margin="0,10,0,0"
+<Border x:Name="LiveStrip" Grid.Row="3" Visibility="Collapsed" Margin="0,10,0,0"
                                         CornerRadius="8" Background="{DynamicResource BrandSoftBrush}" Padding="10,7,10,7"
                                         ToolTipService.InitialShowDelay="400">
                                     <Border.Triggers>
@@ -1499,32 +1456,13 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- v1.30：桌面搬到独立窗口（TrayConfigWindow）了。
-                                     这张卡从「半屏的格子墙」缩成一行摘要 + 一颗「配置」按钮——
-                                     格子墙在启动页上占的高度比它传达的信息多，
-                                     而「改哪个工具怎么跑」本来也不是一打开就要做的事。
-                                     v1.35：这一行原来是折起来的格子墙，现在是「配置」按钮的家。
-                                     这一行是 *（吃掉剩余高度），所以按钮正好落在卡片中间的空白里——
-                                     标题下面、按日计划上面，整张卡最空也最显眼的地方。 -->
-                                <Grid Grid.Row="2" Margin="0,10,0,10">
-                                    <Button x:Name="BtnOpenTrayConfig" Style="{StaticResource LaunchGhost}"
-                                            Height="38" MinWidth="132" Padding="16,0"
-                                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                                            Click="BtnOpenTrayConfig_Click"
-                                            ToolTip="打开托管配置窗口：拖拽排序、双击启动、右键改设置">
-                                        <StackPanel Orientation="Horizontal">
-                                            <Path Data="M10,3.2 A2.4,2.4 0 1 0 10,8 A2.4,2.4 0 1 0 10,3.2 M10,0.6 L10,2.1 M10,9.1 L10,10.6 M1.5,5.6 L3,5.6 M17,5.6 L18.5,5.6 M4,1.6 L5,2.6 M15,8.6 L16,9.6 M4,9.6 L5,8.6 M15,2.6 L16,1.6"
-                                                  Stroke="{DynamicResource BrandBrush}" StrokeThickness="1.4"
-                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                                  Width="13" Height="12" Stretch="Uniform" VerticalAlignment="Center"/>
-                                            <TextBlock Text="配置" Margin="7,0,0,0" VerticalAlignment="Center"
-                                                       FontSize="13"/>
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
+                                <!-- v1.42 / M8-2：「配置」按钮撤了，托管也不再另开窗口。
+                                     这里换成横向工具行列表——一个工具一行，行里直接能看状态、改设置，
+                                     点开还能勾它今晚跑哪几个配置组。 -->
+                                <StackPanel x:Name="ToolRowHost" Grid.Row="4" Margin="0,4,0,0"/>
 
                                 <!-- 下面这块留空但不删：老代码里还有引用，删了要改十几处。 -->
-                                <Grid Grid.Row="2" Margin="0,10,0,0" Visibility="Collapsed">
+                                <Grid Grid.Row="4" Margin="0,10,0,0" Visibility="Collapsed">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
@@ -1566,15 +1504,12 @@
                                      （RevealCard 的定位锚点）。队列本身的可见表现已经搬到上面的格子里。 -->
                                 <StackPanel x:Name="QueueHost" Visibility="Collapsed"/>
 
-                                <StackPanel Grid.Row="3" Margin="0,10,0,0">
-                                    <TextBlock x:Name="TbPlanSummary" FontSize="10.5" Margin="0,0,0,7" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource TextTertiaryBrush}" Visibility="Collapsed"/>
-                                    <TextBlock x:Name="QueueEmptyHint" Text="第一步：在下方工具卡里添加你使用的工具"
-                                               FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                <!-- v1.42 / M8-5：底部收成四段——先「跑完做什么」，再「开跑」，
+                                     最后一行说「今晚到底要跑什么」。原来这里夹着两句重复的操作说明
+                                     和一行「按日计划：…」，三句话各说一半，谁也不完整。 -->
+                                <StackPanel Grid.Row="5" Margin="0,10,0,0">
                                     <!-- v1.15：这次跑什么。装了几套组合才显示——没建过的人看到的还是原来那块。
-                                         位置放在队列列表和「跑完后」之间：上面是「跑哪些项」，下面是「跑完做什么」，
-                                         这一行是「用哪套参数跑」，语义正好夹在中间。 -->
+                                         位置放在「跑完后」上面：先用哪套参数跑，再决定跑完做什么。 -->
                                     <Grid x:Name="PresetRow" Margin="0,0,0,9" Visibility="Collapsed">
                                         <TextBlock Text="这次跑什么" FontSize="11.5" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextSecondaryBrush}"/>
@@ -1590,20 +1525,36 @@
                                                       SelectionChanged="CbPreset_SelectionChanged"/>
                                         </StackPanel>
                                     </Grid>
+                                    <!-- v1.42 / M8-5：「跑完后」和「跑完收拾一下」是同一类事——
+                                         跑完之后机器会变成什么样，并成一行左右摆。 -->
                                     <Grid Margin="0,0,0,9">
-                                        <TextBlock Text="跑完后" FontSize="11.5" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                        <ComboBox x:Name="CbAfterRun" Style="{StaticResource ThemedCombo}" Width="150"
-                                                  HorizontalAlignment="Right" Height="30" SelectionChanged="CbAfterRun_SelectionChanged"
-                                                  MaxDropDownHeight="320"
-                                                  ToolTip="跑完之后机器会怎样。五项都在下拉里，没有藏在别处的">
-                                            <ComboBoxItem Content="仅通知" Tag="Notify"/>
-                                            <ComboBoxItem Content="再跑一轮" Tag="RunAgain"/>
-                                            <ComboBoxItem Content="打开程序" Tag="OpenApp"/>
-                                            <ComboBoxItem Content="自动睡眠" Tag="Sleep"/>
-                                            <ComboBoxItem Content="自动关机" Tag="Shutdown"/>
-                                        </ComboBox>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="跑完后" FontSize="11.5" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <ComboBox x:Name="CbAfterRun" Style="{StaticResource ThemedCombo}" Width="140"
+                                                      Height="30" Margin="8,0,0,0" SelectionChanged="CbAfterRun_SelectionChanged"
+                                                      MaxDropDownHeight="320"
+                                                      ToolTip="跑完之后机器会怎样。五项都在下拉里，没有藏在别处的">
+                                                <ComboBoxItem Content="仅通知" Tag="Notify"/>
+                                                <ComboBoxItem Content="再跑一轮" Tag="RunAgain"/>
+                                                <ComboBoxItem Content="打开程序" Tag="OpenApp"/>
+                                                <ComboBoxItem Content="自动睡眠" Tag="Sleep"/>
+                                                <ComboBoxItem Content="自动关机" Tag="Shutdown"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="收拾一下" FontSize="11.5" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       ToolTip="关掉工具、把窗口放回原处；关游戏要另外打开。默认全关。"/>
+                                            <Button x:Name="BtnTidyConfig" Content="设置…" Style="{StaticResource MiniAction}"
+                                                    Height="30" Margin="8,0,0,0" Padding="10,0" Click="BtnTidyConfig_Click"/>
+                                        </StackPanel>
                                     </Grid>
+                                    <Grid x:Name="TidyRow" Visibility="Collapsed"/>
                                     <!-- v1.15 / L5：只有选了「打开程序」才要填路径。
                                          平时不显示——一个平时不用的输入框，占了版面还让人以为必须填。 -->
                                     <Grid x:Name="AfterRunAppRow" Margin="0,0,0,9" Visibility="Collapsed">
@@ -1617,17 +1568,7 @@
                                     </Grid>
                                     <Button x:Name="BtnQueueStart" Style="{StaticResource LaunchPrimary}" Height="44"
                                             Content="一键开跑" Click="BtnQueueStart_Click"/>
-                                    <!-- v1.20 / 奇思妙想 #7：跑完收拾一下。放在「跑完后」下面而不是高级设置，
-                                         因为它和那三件事是同一类：跑完之后机器会变成什么样。 -->
-                                    <Grid x:Name="TidyRow" Margin="0,9,0,0">
-                                        <TextBlock Text="跑完收拾一下" FontSize="11.5" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextSecondaryBrush}"
-                                                   ToolTip="关掉工具、把窗口放回原处；关游戏要另外打开。默认全关。"/>
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                            <Button x:Name="BtnTidyConfig" Content="设置…" Style="{StaticResource MiniAction}"
-                                                    Height="26" Padding="10,0" Click="BtnTidyConfig_Click"/>
-                                        </StackPanel>
-                                    </Grid>
+
                                     <!-- v1.6 / F2 接着跑：只补今天没跑成的项，已完成的组不重跑 -->
                                     <Button x:Name="BtnQueueContinue" Style="{StaticResource LaunchGhost}" Height="32"
                                             Content="接着跑（今天还剩 0 项）" Margin="0,7,0,0" Visibility="Collapsed"
@@ -1639,9 +1580,6 @@
                                     <Button x:Name="BtnQueueCancelShutdown" Style="{StaticResource LaunchGhost}" Height="30"
                                             Content="取消关机" Margin="0,7,0,0" Visibility="Collapsed"
                                             Click="BtnQueueCancelShutdown_Click"/>
-                                    <TextBlock x:Name="TbQueueHint" FontSize="10.5" Margin="0,7,0,0" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource TextTertiaryBrush}"
-                                               Text="依次执行勾选的工具；间隔在高级设置里调整。"/>
 
                     <!-- v1.29：工具设置原来在设置页上单独一张卡，和这张卡说的是同一批工具——
                          「哪些要跑」在这边，「每个怎么跑」在那边，用户点一个工具得先想清楚它在哪一页。

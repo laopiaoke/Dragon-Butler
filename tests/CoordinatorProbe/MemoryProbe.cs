@@ -309,10 +309,8 @@ public static class MemoryProbe
 
                         // 各子窗口单独量：新建 → 量 → 关 → 回收 → 再量。
                         // 差值就是「这个窗口值多少」，关后的残留说明内存能不能还回去。
-                        MeasureChild<DependsWindow>("依赖");
-                        MeasureChild<GroupsWindow>("配置组切片");
-                        MeasureChild<WeeklyPlanWindow>("按日计划");
-                        MeasureChild<CalendarWindow>("挂机日历");
+                        // v1.42.1 / M9-4：依赖 / 配置组切片 / 按日计划 / 挂机日历
+                        // 四个窗口已按 D18 删除，不再有可量的对象。
                         MeasureChild<TodayWindow>("今日运行");
                         MeasureChild<LogRulesWindow>("日志规则");
                         MeasureChild<MiniBarWindow>("迷你浮条");

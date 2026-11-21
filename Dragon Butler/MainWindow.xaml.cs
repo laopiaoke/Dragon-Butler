@@ -1025,12 +1025,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
-            bool anyEnabled = queue.Any(e => e.Enabled);
-            QueueEmptyHint.Visibility = anyEnabled ? Visibility.Collapsed : Visibility.Visible;
-
-            SyncToolGrid();
-            RefreshPlanSummary();
+            SyncToolRows();
+            RefreshTonightSummary();
             UpdateQueueButtons();
         }
         catch (Exception ex)
@@ -1200,174 +1196,31 @@ public partial class MainWindow : Window
         BtnQueueCancelShutdown.Visibility = Visibility.Collapsed;
     }
 
-    // ===== v1.5 按日计划 =====
-
-    private void BtnWeeklyPlan_Click(object sender, RoutedEventArgs e) => OpenWeeklyPlan();
-
-    /// <summary>
-    /// v1.41 / M3-3：「当前视图名 + 下拉」取代原来五个并排的 chip。
-    /// 菜单贴着按钮左下角弹，人点的是这里、菜单也从这里长出来；
-    /// 不拦 MenuItem 自己的 Click——它们和以前一样各自开门。
-    /// </summary>
-    private void BtnQueueView_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button btn || btn.ContextMenu == null) return;
-        btn.ContextMenu.PlacementTarget = btn;
-        btn.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-        btn.ContextMenu.IsOpen = true;
-    }
-
-    // ===== v1.9 依赖编排 =====
-
-    private void BtnDepends_Click(object sender, RoutedEventArgs e) => OpenDepends();
-
-    private void OpenDepends()
-    {
-        try
-        {
-            if ((AppState.Settings.Queue ?? new List<QueueEntry>()).Count == 0)
-            {
-                NotifyService.Show(NotifyLevel.Info, "龙管家", "队列里还没有工具：先在下方工具卡添加或勾选一个。");
-                return;
-            }
-            var dlg = new DependsWindow { Owner = this };
-            if (dlg.ShowDialog() == true && dlg.Saved)
-            {
-                RenderQueue();
-                AppState.PublishLog("✓ 已保存依赖编排");
-            }
-        }
-        catch (Exception ex)
-        {
-            LogService.LogEvent("打开依赖编排失败：" + ex.Message);
-        }
-    }
-
-    // ===== v1.9 配置组切片 =====
-
-    private void BtnGroupSlice_Click(object sender, RoutedEventArgs e) => OpenGroupSlice();
-
-    private void OpenGroupSlice()
-    {
-        try
-        {
-            if ((AppState.Settings.Queue ?? new List<QueueEntry>()).Count == 0)
-            {
-                NotifyService.Show(NotifyLevel.Info, "龙管家", "队列里还没有工具：先在下方工具卡添加或勾选一个。");
-                return;
-            }
-            var dlg = new GroupsWindow { Owner = this };
-            if (dlg.ShowDialog() == true && dlg.Saved)
-            {
-                RenderQueue();
-                AppState.PublishLog("✓ 已保存配置组切片");
-            }
-        }
-        catch (Exception ex)
-        {
-            LogService.LogEvent("打开配置组切片失败：" + ex.Message);
-        }
-    }
-
-    private void OpenWeeklyPlan()
-    {
-        try
-        {
-            if ((AppState.Settings.Queue ?? new List<QueueEntry>()).Count == 0)
-            {
-                NotifyService.Show(NotifyLevel.Info, "龙管家", "队列里还没有工具：先在下方工具卡添加或勾选一个。");
-                return;
-            }
-            var dlg = new WeeklyPlanWindow { Owner = this };
-            if (dlg.ShowDialog() == true && dlg.Saved)
-            {
-                RenderQueue();
-                AppState.PublishLog("✓ 已保存按日计划");
-            }
-        }
-        catch (Exception ex)
-        {
-            LogService.LogEvent("打开按日计划失败：" + ex.Message);
-        }
-    }
-
-    /// <summary>v1.8 / F13：打开挂机日历（只读，不改任何设置）。</summary>
-    private void BtnCalendar_Click(object sender, RoutedEventArgs e) => OpenCalendar();
-
-    private void OpenCalendar()
-    {
-        try
-        {
-            var dlg = new CalendarWindow { Owner = this };
-            dlg.ShowDialog();
-        }
-        catch (Exception ex)
-        {
-            LogService.LogEvent("打开挂机日历失败：" + ex.Message);
-        }
-    }
+    // ===== v1.42.1 / M9-4：四个视图窗口连类一起删了 =====
+    //
+    // 「计划 / 日历 / 依赖 / 配置组」原来挂在任务清单卡标题行那个下拉里（V141 的 M3-3）。
+    // M8-3 先撤了入口，M9-4 把四个窗口类也从仓库里删掉——留着入口是隐患，
+    // 留着类更是：六个月后有人「顺手接回去」，被撤掉的视图系统就还魂了。
+    //
+    // 数据侧没跟着删，这几样仍被引擎读：
+    //   · QueueEntry.DependsOn + QueueGraph（Gate / ShouldAbortOnDependencyFail / HasDependencies / Order）
+    //     ——历史用户的依赖关系继续生效，只是没有编辑器能改了；
+    //   · QueueEntry.Groups ——现在由 BetterGI 工具行的展开区读写。
 
     /// <summary>v1.13：打开「今日运行」——今天这一盘跑了什么、各花多久。</summary>
     private void BtnToday_Click(object sender, RoutedEventArgs e) => OpenToday();
 
-    // ===== 托管配置独立窗口（v1.30）=====
-
-    /// <summary>
-    /// 打开托管配置窗口。
-    ///
-    /// <para>
-    /// 原来这张卡本身就是那个桌面——半屏宽的 3×2 格子墙压在启动页上，
-    /// 而「改哪个工具怎么跑」其实一打开程序并不急着做。现在卡缩成一行摘要 + 一颗齿轮，
-    /// 桌面搬进独立窗口：地方更大（3×2 摆得开）、能拖能双击能右键，也不再和定时卡抢宽度。
-    /// </para>
-    /// <para>
-    /// 两份界面共用 <see cref="AppState.Settings.ToolPages"/> 与队列顺序，改哪边都一样。
-    /// </para>
-    /// </summary>
-    private void BtnOpenTrayConfig_Click(object sender, RoutedEventArgs e)
+    private void OpenToday()
     {
         try
         {
-            // 已经开着就把它提到前面，不要叠出第二份
-            foreach (Window w in Application.Current.Windows)
-            {
-                if (w is TrayConfigWindow old && old.IsVisible)
-                {
-                    old.Activate();
-                    return;
-                }
-            }
-
-            var dlg = new TrayConfigWindow { Owner = this };
+            var dlg = new TodayWindow { Owner = this };
             dlg.ShowDialog();
-
-            if (dlg.Changed)
-            {
-                RenderToolGrid();
-                RenderQueue();
-                RefreshToolCards();
-                RefreshHomeHero();
-            }
         }
         catch (Exception ex)
         {
-            AppDialog.Show("打不开托管配置窗口，详情见日志。\n" + ex.Message,
-                kind: AppDialog.Kind.Warning, title: "托管配置", primary: "知道了", owner: this);
-            LogService.LogEvent("打开托管配置窗口失败：" + ex);
+            LogService.LogEvent("打开今日运行失败：" + ex.Message);
         }
-    }
-
-    /// <summary>给托管配置窗口的「今晚队列…」按钮用：回到启动页并定位到队列那块。</summary>
-    internal void RevealQueueFromOutside()
-    {
-        try
-        {
-            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-            Activate();
-            ShowPage(Pager.Home, animate: false);
-            RevealCard(QueueHost);
-        }
-        catch (Exception ex) { LogService.LogEvent("定位队列失败：" + ex.Message); }
     }
 
     // ===== 消息中心（v1.28）=====
@@ -1430,19 +1283,6 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private void OpenToday()
-    {
-        try
-        {
-            var dlg = new TodayWindow { Owner = this };
-            dlg.ShowDialog();
-        }
-        catch (Exception ex)
-        {
-            LogService.LogEvent("打开今日运行失败：" + ex.Message);
-        }
-    }
-
     /// <summary>v1.14：日志规则——规则本体在独立窗口，主界面只留一个入口。</summary>
     private void BtnLogRules_Click(object sender, RoutedEventArgs e) => OpenLogRules();
 
@@ -1462,36 +1302,117 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>队列卡上的一句话摘要：今天按计划跑几项。</summary>
-    private void RefreshPlanSummary()
+    /// <summary>
+    /// v1.42 / M8-7：今晚这一趟跑什么、大概多久。
+    ///
+    /// <para>
+    /// 原来这里是「按日计划：每天全选 · 今天 N 项」——说的是一份已经算好的结论，
+    /// 既不告诉人具体哪几个组，也不告诉人大概要挂多久。现在是「今晚要跑：A + B · 2 项 · 约 47 分钟」，
+    /// 每改一次勾选就重算一次，和上面那张卡说的是同一件事。
+    /// </para>
+    /// <para>
+    /// 时长只在能算出来时才写：按 <see cref="GroupArchive.MedianMinutes"/> 取每个组过去两周的中位数，
+    /// 少于两个样本的组不算。算不出就不写，不猜一个——猜出来的数比没有更糟。
+    /// </para>
+    /// </summary>
+    private void RefreshTonightSummary()
     {
         try
         {
-            var queue = AppState.Settings.Queue ?? new List<QueueEntry>();
-            bool any = queue.Any(e => e.Enabled);
-            TbPlanSummary.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
-            if (!any) return;
+            var tonight = TonightGroups(out int toolCount);
+            if (ToolRowHost == null) return;
 
-            var today = QueueService.PlanForToday(DateTime.Now);
-            int bit = QueueService.WeekdayBit(DateTime.Now);
-            string[] names = { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
+            if (toolCount == 0)
+            {
+                TbTonightSummary.Text = "今晚还没有要跑的工具。";
+                TbTonightSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+                return;
+            }
 
-            if (!QueueService.HasCustomPlan())
+            // 组名太长就只报前两个，剩下的折成「等 N 个组」——一行放不下的时候，
+            // 与其让省略号吃掉最后一个组名，不如自己说清有多少个。
+            var shown = tonight.Take(2).ToList();
+            string label = shown.Count == 0
+                ? "用配置名跑"
+                : string.Join(" + ", shown) + (tonight.Count > shown.Count ? $" 等 {tonight.Count} 个组" : "");
+
+            int? minutes = TonightMinutes(tonight);
+            string tail = minutes.HasValue ? $" · 约 {minutes.Value} 分钟" : "";
+            string count = shown.Count == 0 ? $"{toolCount} 个工具" : $"{tonight.Count} 项";
+
+            TbTonightSummary.Text = $"今晚要跑：{label} · {count}{tail}";
+            TbTonightSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("今晚摘要刷新失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// v1.42 / M8-7：今晚会被真正交给 BetterGI 的那些配置组，按执行顺序。
+    ///
+    /// <para>
+    /// 口径与 <see cref="QueueService.BuildLaunchArguments"/> 完全一致（本项指定 &gt; 配置组合 &gt; 全局），
+    /// 否则摘要上写的和实际跑的会是两拨组——那比不写更糟。
+    /// </para>
+    /// </summary>
+    private static List<string> TonightGroups(out int toolCount)
+    {
+        toolCount = 0;
+        var result = new List<string>();
+        try
+        {
+            var known = BgiDiscovery.Scan().Groups;
+            foreach (var entry in QueueService.PlanForToday(DateTime.Now))
             {
-                TbPlanSummary.Text = $"按日计划：每天全选 · 今天 {today.Count} 项";
-                TbPlanSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+                toolCount++;
+                var profile = ProfileRegistry.Get(entry.ToolId);
+                var knownTool = ToolCatalog.Find(entry.ToolId);
+                // 只有 BetterGI 认「配置组」这个概念，别的工具没有组可勾。
+                if (!string.Equals(entry.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase)) continue;
+                _ = knownTool;
+
+                // v1.42 / M9-2：摘要和执行走同一个函数，别各算一遍。
+                foreach (string g in QueueService.EffectiveGroupsFor(entry.ToolId))
+                {
+                    if (!result.Contains(g, StringComparer.OrdinalIgnoreCase)) result.Add(g);
+                }
             }
-            else if (today.Count == 0)
-            {
-                TbPlanSummary.Text = $"按日计划：今天（{names[bit]}）为空，定时触发会跳过";
-                TbPlanSummary.Foreground = BrushOf("WarningBrush") ?? DotYellow;
-            }
-            else
-            {
-                TbPlanSummary.Text = $"按日计划：今天（{names[bit]}）跑 {today.Count} 项 · "
-                    + string.Join("、", today.Select(t => ProfileRegistry.Get(t.ToolId).DisplayName));
-                TbPlanSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
-            }
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("统计今晚配置组失败：" + ex.Message);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// v1.42 / M8-7：今晚这些组的估计时长（分钟）。
+    /// 取每个组过去 14 天的中位耗时相加；任何一个组没有足够样本就整体返回 null——
+    /// 只加一部分再报个总数，会让人以为整趟跑完只要那么久。
+    /// </summary>
+    private static int? TonightMinutes(IReadOnlyList<string> groups)
+    {
+        if (groups.Count == 0) return null;
+        double total = 0;
+        foreach (string name in groups)
+        {
+            double? median = GroupArchive.MedianMinutes(name, days: 14, minSamples: 2);
+            if (median == null) return null;
+            total += median.Value;
+        }
+        return Math.Max(1, (int)Math.Round(total));
+    }
+
+    /// <summary>v1.42 / M8-2：标题行右侧那句「已配 N 个」。</summary>
+    private void RefreshQueueCount()
+    {
+        try
+        {
+            if (TbQueueCount == null) return;
+            int n = QueueService.PlanForToday(DateTime.Now).Count;
+            TbQueueCount.Text = n == 0 ? "今晚没有工具" : $"已配 {n} 个";
         }
         catch { }
     }
@@ -1635,7 +1556,9 @@ public partial class MainWindow : Window
         {
             var s = AppState.Settings;
             var next = ConfigPresets.Capture(
-                s.Presets, s.DragonConfigName, s.SelectedGroups, "",
+                // v1.42 / M9-2：存组合抓的是「此刻真正会跑的那几个组」，
+                // 不是某一份全局勾选的影子——否则存下来的组合跟实际跑的对不上。
+                s.Presets, s.DragonConfigName, QueueService.EffectiveGroupsFor("bettergi"), "",
                 () => Guid.NewGuid().ToString("N"));
 
             string? why = ConfigPresets.RefuseReason(next, s.Presets);
@@ -1892,6 +1815,623 @@ public partial class MainWindow : Window
         {
             LogService.LogEvent("工具摘要刷新失败：" + ex.Message);
         }
+    }
+
+    // ===== v1.42 / M8-2：横向工具行 =====
+
+    /// <summary>每一行右侧那个状态徽章的 TextBlock（按 toolId 索引，供只改字不重画时用）。</summary>
+    private readonly Dictionary<string, TextBlock> _rowBadges = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>点开着的工具行（展开区）。默认全收起——一打开就看到八行勾选框不是「任务清单」该有的样子。</summary>
+    private readonly HashSet<string> _expandedRows = new(StringComparer.OrdinalIgnoreCase);
+    private string _rowSignature = "";
+    /// <summary>v1.42 / M8-2 ⑤：添加区是否展开（内联图标网格，不另开窗口）。</summary>
+    private bool _addingTool;
+
+    /// <summary>
+    /// 外部状态变化时走这里：名单没变就只改徽章，变了才重画。
+    /// 和原来的 <see cref="SyncToolGrid"/> 同一套思路——那条每秒一次的轮询不该打断展开区里的勾选。
+    /// </summary>
+    private void SyncToolRows()
+    {
+        if (ToolRowHost == null) return;
+        string signature = string.Join("|", ToolButtonIds().Select(id =>
+        {
+            var p = ProfileRegistry.Get(id);
+            var e = QueueEntryOf(id);
+            return id + ":" + (ToolRunner.HasExecutable(p) ? "1" : "0") + (e == null || e.Enabled ? "1" : "0");
+        }));
+        if (signature != _rowSignature)
+        {
+            RenderToolRows();
+            return;
+        }
+        RefreshToolRowStates();
+    }
+
+    private void RenderToolRows()
+    {
+        if (ToolRowHost == null) return;
+        ToolRowHost.Children.Clear();
+        _rowBadges.Clear();
+
+        var ids = ToolButtonIds();
+        for (int i = 0; i < ids.Count; i++)
+        {
+            try { ToolRowHost.Children.Add(BuildToolRow(ProfileRegistry.Get(ids[i]), i + 1)); }
+            catch (Exception ex) { LogService.LogEvent("画工具行失败：" + ids[i] + " " + ex.Message); }
+        }
+        ToolRowHost.Children.Add(BuildAddRow());
+        if (_addingTool)
+        {
+            try { ToolRowHost.Children.Add(BuildAddPanel()); }
+            catch (Exception ex) { LogService.LogEvent("画添加区失败：" + ex.Message); }
+        }
+
+        _rowSignature = string.Join("|", ids.Select(id =>
+        {
+            var p = ProfileRegistry.Get(id);
+            var e = QueueEntryOf(id);
+            return id + ":" + (ToolRunner.HasExecutable(p) ? "1" : "0") + (e == null || e.Enabled ? "1" : "0");
+        }));
+
+        RefreshQueueCount();
+        RefreshTonightSummary();
+    }
+
+    private void RefreshToolRowStates()
+    {
+        foreach (var kv in _rowBadges)
+        {
+            try
+            {
+                var profile = ProfileRegistry.Get(kv.Key);
+                var entry = QueueEntryOf(kv.Key);
+                bool onDuty = entry == null || entry.Enabled;
+                bool ready = ToolRunner.HasExecutable(profile);
+                bool running = QueueService.IsRunning &&
+                               string.Equals(QueueService.CurrentToolId, kv.Key, StringComparison.OrdinalIgnoreCase);
+                ApplyBadge(kv.Value, running, ready, onDuty);
+            }
+            catch { }
+        }
+    }
+
+    private void ApplyBadge(TextBlock badge, bool running, bool ready, bool onDuty)
+    {
+        if (!onDuty)
+        {
+            badge.Text = "今晚不跑";
+            badge.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+            return;
+        }
+        if (running)
+        {
+            badge.Text = "运行中";
+            badge.Foreground = BrushOf("BrandTextBrush") ?? DotGreen;
+            return;
+        }
+        if (ready)
+        {
+            badge.Text = "✓ 已就绪";
+            badge.Foreground = BrushOf("SuccessBrush") ?? DotGreen;
+            return;
+        }
+        badge.Text = "未配置路径";
+        badge.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+    }
+
+    /// <summary>一行工具：≡ 手柄 · 图标 · 名字 · 徽章 · 摘要 · ⌄，展开时下面挂配置组面板。</summary>
+    private UIElement BuildToolRow(ToolProfile profile, int order)
+    {
+        bool ready = ToolRunner.HasExecutable(profile);
+        bool running = QueueService.IsRunning &&
+                       string.Equals(QueueService.CurrentToolId, profile.ToolId, StringComparison.OrdinalIgnoreCase);
+        var entry = QueueEntryOf(profile.ToolId);
+        bool onDuty = entry == null || entry.Enabled;
+        bool expanded = _expandedRows.Contains(profile.ToolId);
+
+        var host = new StackPanel { Margin = new Thickness(0, 0, 0, 4) };
+
+        // v1.42.1 / M9-3（D17）：56 → 52。720 高度下收起态要零滚动，
+        // 一行省 4px、三行省 12px，加上间距收紧正好把 32px 的赤字抹平；
+        // 再矮下去 15 号的 ≡ 手柄和 30 的图标就会顶到边框，所以到 52 为止。
+        var row = new Border
+        {
+            Height = 52,
+            CornerRadius = new CornerRadius(8),
+            Background = expanded ? (BrushOf("CardBg2Brush") ?? Brushes.Transparent) : Brushes.Transparent,
+            BorderBrush = expanded ? (BrushOf("BorderBrush") ?? DotGray) : Brushes.Transparent,
+            BorderThickness = new Thickness(1),
+            Cursor = Cursors.Hand,
+            Tag = profile.ToolId,
+            Opacity = onDuty ? 1.0 : 0.6,
+        };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });   // 手柄
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });   // 图标
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });   // ⌄
+
+        // 拖拽手柄：抓这里才换顺序，抓别处是展开/双击跑
+        var handle = new TextBlock
+        {
+            Text = "≡",
+            FontSize = 15,
+            Margin = new Thickness(8, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = Cursors.SizeAll,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            ToolTip = "按住往上/往下拖，换今晚跑的顺序",
+        };
+        Grid.SetColumn(handle, 0);
+        grid.Children.Add(handle);
+
+        var iconBox = new Border
+        {
+            Width = 30, Height = 30,
+            CornerRadius = new CornerRadius(9),
+            Background = BrushOf("ControlBgBrush") ?? Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 9, 0),
+        };
+        var bitmap = ToolIconService.GetBitmap(profile);
+        iconBox.Child = bitmap != null
+            ? new Image { Source = bitmap, Stretch = Stretch.Uniform, Margin = new Thickness(4) }
+            : (UIElement)new TextBlock
+            {
+                Text = profile.DisplayName.Length > 0 ? profile.DisplayName[..1].ToUpperInvariant() : "?",
+                FontSize = 13, FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
+            };
+        Grid.SetColumn(iconBox, 1);
+        grid.Children.Add(iconBox);
+
+        // 中间：名字 + 徽章一行，摘要一行
+        var mid = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        var titleLine = new StackPanel { Orientation = Orientation.Horizontal };
+        titleLine.Children.Add(new TextBlock
+        {
+            Text = profile.DisplayName,
+            FontSize = 13.5, FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = BrushOf("TextPrimaryBrush") ?? Brushes.White,
+        });
+        var badge = new TextBlock { FontSize = 11, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        ApplyBadge(badge, running, ready, onDuty);
+        titleLine.Children.Add(badge);
+        _rowBadges[profile.ToolId] = badge;
+        mid.Children.Add(titleLine);
+        mid.Children.Add(new TextBlock
+        {
+            Text = BuildToolTileSummary(profile.ToolId, order),
+            FontSize = 11, Margin = new Thickness(0, 2, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        });
+        Grid.SetColumn(mid, 2);
+        grid.Children.Add(mid);
+
+        var chev = new TextBlock
+        {
+            Text = expanded ? "⌃" : "⌄",
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        };
+        Grid.SetColumn(chev, 3);
+        grid.Children.Add(chev);
+
+        row.Child = grid;
+        host.Children.Add(row);
+
+        // 展开区：缩进对齐到图标，背景比卡片深一档
+        if (expanded) host.Children.Add(BuildGroupPanel(profile));
+
+        // 单击任意处（手柄除外）展开/收起；双击＝立即跑这一个
+        row.MouseLeftButtonUp += (s2, e2) =>
+        {
+            if (e2.ChangedButton != MouseButton.Left) return;
+            if (handle.IsMouseOver) return;
+            if (e2.ClickCount >= 2) { RunToolNow(profile.ToolId); return; }
+            if (_expandedRows.Contains(profile.ToolId)) _expandedRows.Remove(profile.ToolId);
+            else _expandedRows.Add(profile.ToolId);
+            RenderToolRows();
+        };
+        row.MouseRightButtonUp += ToolTile_RightClick;
+
+        // 手柄拖拽：按住移动超过 8px 就开始换序
+        int dragIndex = order - 1;
+        Point from = default;
+        bool armed = false;
+        handle.MouseLeftButtonDown += (s3, e3) => { from = e3.GetPosition(ToolRowHost); armed = true; handle.CaptureMouse(); e3.Handled = true; };
+        handle.MouseMove += (s3, e3) =>
+        {
+            if (!armed) return;
+            Point now = e3.GetPosition(ToolRowHost);
+            if (Math.Abs(now.Y - from.Y) < 24) return;
+            armed = false;
+            handle.ReleaseMouseCapture();
+            int target = dragIndex + (now.Y > from.Y ? 1 : -1);
+            MoveToolRow(profile.ToolId, target);
+        };
+        handle.MouseLeftButtonUp += (s3, e3) => { armed = false; handle.ReleaseMouseCapture(); };
+
+        return host;
+    }
+
+    /// <summary>v1.42 / M8-2：把某个工具挪到指定下标（0 起），越界就夹到两端。</summary>
+    private void MoveToolRow(string toolId, int targetIndex)
+    {
+        var order = CurrentToolOrder().ToList();
+        int from = order.FindIndex(x => string.Equals(x, toolId, StringComparison.OrdinalIgnoreCase));
+        if (from < 0) return;
+        targetIndex = Math.Clamp(targetIndex, 0, order.Count - 1);
+        if (targetIndex == from) return;
+        order.RemoveAt(from);
+        order.Insert(targetIndex, toolId);
+        SaveToolOrder(order);
+        RenderToolRows();
+        LogService.LogEvent($"工具顺序：{toolId} 第 {from + 1} → 第 {targetIndex + 1}");
+    }
+
+    /// <summary>
+    /// v1.42 / M8-4：展开区。
+    ///
+    /// <para>
+    /// 配置组只属于 BetterGI，所以只有它这一行会列出勾选框；别的工具展开后只有一句说明 + 「编辑…」。
+    /// 勾选读写的是队列项自己的 <see cref="QueueEntry.Groups"/>——和原来的「配置组」视图同一份存储，
+    /// 也是 <see cref="QueueService.BuildLaunchArguments"/> 里优先级最高的那一层。空列表＝沿用全局勾选。
+    /// </para>
+    /// </summary>
+    private UIElement BuildGroupPanel(ToolProfile profile)
+    {
+        var panel = new Border
+        {
+            Margin = new Thickness(42, 2, 0, 8),
+            Padding = new Thickness(12, 10, 12, 10),
+            CornerRadius = new CornerRadius(8),
+            Background = BrushOf("ControlBgBrush") ?? Brushes.Transparent,
+            BorderBrush = BrushOf("BorderBrush") ?? DotGray,
+            BorderThickness = new Thickness(1),
+        };
+        var stack = new StackPanel();
+        panel.Child = stack;
+
+        bool isBgi = string.Equals(profile.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase);
+        if (!isBgi)
+        {
+            var line = new Grid();
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var note = new TextBlock
+            {
+                Text = "这个工具没有配置组。程序位置和完成方式在「编辑…」里改。",
+                FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            };
+            Grid.SetColumn(note, 0);
+            line.Children.Add(note);
+            var edit = new Button
+            {
+                Content = "编辑…", Style = TryFindResource("MiniAction") as Style,
+                Height = 26, Padding = new Thickness(10, 0, 10, 0),
+                Margin = new Thickness(10, 0, 0, 0),
+            };
+            edit.Click += (_, _) => OpenToolLaunch(profile.ToolId);
+            Grid.SetColumn(edit, 1);
+            line.Children.Add(edit);
+            stack.Children.Add(line);
+            return panel;
+        }
+
+        var known = new List<string>();
+        try { var scan = BgiDiscovery.Scan(); if (scan.Ok) known = scan.Groups; } catch { }
+        if (known.Count == 0)
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = "还没识别到配置组。确认 BetterGI 的位置后点「重新识别」。",
+                FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            });
+            var row2 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            var openDir = new Button { Content = "打开目录", Style = TryFindResource("MiniAction") as Style, Height = 26, Padding = new Thickness(10, 0, 10, 0) };
+            openDir.Click += BtnOpenGroupDir_Click;
+            var rescan = new Button { Content = "重新识别", Style = TryFindResource("MiniAction") as Style, Height = 26, Padding = new Thickness(10, 0, 10, 0), Margin = new Thickness(8, 0, 0, 0) };
+            rescan.Click += BtnRescanGroups_Click;
+            row2.Children.Add(openDir);
+            row2.Children.Add(rescan);
+            stack.Children.Add(row2);
+            return panel;
+        }
+
+        var entry = QueueEntryOf("bettergi");
+        // 勾选顺序即执行顺序：先把本项自己写过的组按原序排好，再把全局勾选里剩下的补进来。
+        var order2 = GroupSlicing.Sanitize(entry?.Groups, known);
+        var favorites = AppState.Settings.FavoriteGroups ?? Array.Empty<string>();
+        var shown = GroupFavorites.Sort(known, favorites);
+
+        var wrap = new WrapPanel();
+        var boxes = new Dictionary<string, CheckBox>(StringComparer.OrdinalIgnoreCase);
+        var footerCount = new TextBlock
+        {
+            FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        };
+
+        void Renumber()
+        {
+            for (int k = 0; k < order2.Count; k++)
+            {
+                if (boxes.TryGetValue(order2[k], out var cb2))
+                {
+                    string star = GroupFavorites.IsFavorite(favorites, order2[k]) ? "★ " : "";
+                    cb2.Content = $"{star}{k + 1}. {order2[k]}";
+                }
+            }
+            foreach (var kv in boxes)
+            {
+                if (order2.Contains(kv.Key, StringComparer.OrdinalIgnoreCase)) continue;
+                string star = GroupFavorites.IsFavorite(favorites, kv.Key) ? "★ " : "";
+                kv.Value.Content = star + kv.Key;
+            }
+            int n = order2.Count;
+            footerCount.Text = n == 0
+                ? "今晚 0 项 · 不勾＝按配置名跑"
+                : $"今晚 {n} 项";
+            footerCount.Foreground = n > 0
+                ? (BrushOf("BrandTextBrush") ?? DotGreen)
+                : (BrushOf("TextTertiaryBrush") ?? DotGray);
+        }
+
+        void Persist()
+        {
+            var target = QueueEntryOf("bettergi");
+            if (target == null) return;
+            target.Groups = order2.ToList();
+            AppState.SaveSettings();
+            Renumber();
+            RefreshTonightSummary();
+        }
+
+        foreach (string name in shown)
+        {
+            var cb = new CheckBox
+            {
+                Style = TryFindResource("GroupCheck") as Style,
+                Margin = new Thickness(0, 4, 8, 0),
+                Tag = name,
+                IsChecked = order2.Contains(name, StringComparer.OrdinalIgnoreCase),
+            };
+            string star = GroupFavorites.IsFavorite(favorites, name) ? "★ " : "";
+            int at = order2.FindIndex(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+            cb.Content = at >= 0 ? $"{star}{at + 1}. {name}" : star + name;
+            boxes[name] = cb;
+            cb.Checked += (_, _) =>
+            {
+                if (!order2.Contains(name, StringComparer.OrdinalIgnoreCase)) order2.Add(name);
+                Persist();
+            };
+            cb.Unchecked += (_, _) =>
+            {
+                order2.RemoveAll(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+                Persist();
+            };
+            wrap.Children.Add(cb);
+        }
+        stack.Children.Add(wrap);
+
+        var footer = new Grid { Margin = new Thickness(0, 8, 0, 0) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var all = new Button { Content = "全选", Style = TryFindResource("LinkButton") as Style, FontSize = 11 };
+        all.Click += (_, _) =>
+        {
+            foreach (string name in shown) if (!order2.Contains(name, StringComparer.OrdinalIgnoreCase)) order2.Add(name);
+            foreach (var kv in boxes) kv.Value.IsChecked = true;
+            Persist();
+        };
+
+        var none = new Button { Content = "全部取消", Style = TryFindResource("LinkButton") as Style, FontSize = 11, Margin = new Thickness(10, 0, 0, 0) };
+        none.Click += (_, _) =>
+        {
+            order2.Clear();
+            foreach (var kv in boxes) kv.Value.IsChecked = false;
+            Persist();
+        };
+
+        // 先拼好左边这一组再一次性挂上去。逐个 Add 到一个已经进过父容器的控件上，
+        // WPF 会报「元素已经是另一个元素的逻辑子元素」，整行跟着画不出来。
+        var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(all);
+        left.Children.Add(none);
+        Grid.SetColumn(left, 0);
+        footer.Children.Add(left);
+
+        Grid.SetColumn(footerCount, 2);
+        footer.Children.Add(footerCount);
+        stack.Children.Add(footer);
+
+        Renumber();
+        return panel;
+    }
+
+    /// <summary>v1.42 / M8-2：列表末尾的虚线「+ 添加工具」。</summary>
+    private UIElement BuildAddRow()
+    {
+        var row = new Border
+        {
+            Height = 40,
+            Margin = new Thickness(0, 4, 0, 0),
+            CornerRadius = new CornerRadius(8),
+            Cursor = Cursors.Hand,
+            ToolTip = "从内置清单里挑一个，或者添加任意 exe",
+        };
+        var dash = new System.Windows.Shapes.Rectangle
+        {
+            Stroke = BrushOf("BorderStrongBrush") ?? DotGray,
+            StrokeThickness = 1,
+            StrokeDashArray = new DoubleCollection { 3, 3 },
+            RadiusX = 8, RadiusY = 8,
+            Fill = Brushes.Transparent,
+        };
+        var label = new TextBlock
+        {
+            Text = "＋ 添加工具",
+            FontSize = 11.5,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        };
+        var layer = new Grid();
+        layer.Children.Add(dash);
+        layer.Children.Add(label);
+        row.Child = layer;
+        row.MouseLeftButtonUp += (_, _) => { _addingTool = !_addingTool; RenderToolRows(); };
+        row.MouseEnter += (_, _) => label.Foreground = BrushOf("BrandTextBrush") ?? DotGreen;
+        row.MouseLeave += (_, _) => label.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+        return row;
+    }
+
+    /// <summary>
+    /// v1.42 / M8-2 ⑤：添加工具的图标网格——用的就是向导第 1 步那套格子。
+    ///
+    /// <para>
+    /// 不另开窗口：这张卡本身就是「这台机器交给管家托管的那几样」，加一样东西在卡片里就地完成，
+    /// 人才不会觉得「加完还得回去找」。格子在＝已经加过，点了直接跳它的路径设置。
+    /// </para>
+    /// </summary>
+    private UIElement BuildAddPanel()
+    {
+        var panel = new Border
+        {
+            Margin = new Thickness(0, 6, 0, 4),
+            Padding = new Thickness(12, 10, 12, 10),
+            CornerRadius = new CornerRadius(8),
+            Background = BrushOf("ControlBgBrush") ?? Brushes.Transparent,
+            BorderBrush = BrushOf("BorderBrush") ?? DotGray,
+            BorderThickness = new Thickness(1),
+        };
+        var stack = new StackPanel();
+        panel.Child = stack;
+
+        stack.Children.Add(new TextBlock
+        {
+            Text = "加一个工具。已经在清单里的会打勾——点它直接去改路径。",
+            FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        });
+
+        var wrap = new WrapPanel { Margin = new Thickness(0, 9, 0, 0) };
+        var existing = new HashSet<string>(ToolButtonIds(), StringComparer.OrdinalIgnoreCase);
+
+        // 来源与向导一致：内置清单 + 已经有档案的自定义工具。
+        var candidates = new List<ToolProfile>();
+        foreach (var known in ToolCatalog.All)
+        {
+            try { candidates.Add(ProfileRegistry.Get(known.ToolId)); } catch { }
+        }
+        foreach (var p in ProfileRegistry.All)
+        {
+            if (p == null || string.IsNullOrWhiteSpace(p.ToolId)) continue;
+            if (candidates.Any(c => string.Equals(c.ToolId, p.ToolId, StringComparison.OrdinalIgnoreCase))) continue;
+            candidates.Add(p);
+        }
+
+        foreach (var profile in candidates)
+        {
+            bool added = existing.Contains(profile.ToolId);
+            var tile = new Border
+            {
+                Width = 84,
+                Margin = new Thickness(0, 0, 6, 6),
+                Padding = new Thickness(4, 7, 4, 6),
+                CornerRadius = new CornerRadius(8),
+                Background = added ? (BrushOf("BrandSoftBrush") ?? Brushes.Transparent) : Brushes.Transparent,
+                BorderBrush = added ? (BrushOf("BrandBrush") ?? DotGreen) : (BrushOf("BorderBrush") ?? DotGray),
+                BorderThickness = new Thickness(1.2),
+                Cursor = Cursors.Hand,
+            };
+            var known = ToolCatalog.Find(profile.ToolId);
+            tile.ToolTip = added
+                ? profile.DisplayName + "（已在清单里，点一下去改它的设置）"
+                : (string.IsNullOrWhiteSpace(known?.Blurb) ? profile.DisplayName : profile.DisplayName + "\n" + known!.Blurb);
+
+            var box = new StackPanel();
+            var iconBox = new Border
+            {
+                Width = 38, Height = 38,
+                CornerRadius = new CornerRadius(10),
+                Background = BrushOf("CardBg2Brush") ?? Brushes.Transparent,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            var bmp = ToolIconService.GetBitmap(profile);
+            iconBox.Child = bmp != null
+                ? new Image { Source = bmp, Stretch = Stretch.Uniform, Margin = new Thickness(5) }
+                : (UIElement)new TextBlock
+                {
+                    Text = profile.DisplayName.Length > 0 ? profile.DisplayName[..1] : "?",
+                    FontSize = 16, FontWeight = FontWeights.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
+                };
+            box.Children.Add(iconBox);
+            box.Children.Add(new TextBlock
+            {
+                Text = (added ? "✓ " : "") + profile.DisplayName,
+                FontSize = 10.5,
+                Margin = new Thickness(0, 5, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 76, MaxHeight = 28,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Foreground = BrushOf("TextPrimaryBrush") ?? Brushes.White,
+            });
+            tile.Child = box;
+
+            string id = profile.ToolId;
+            tile.MouseLeftButtonUp += (_, _) =>
+            {
+                if (!existing.Contains(id))
+                {
+                    SaveToolOrder(ToolGrid.Append(CurrentToolOrder(), id));
+                    var entry = QueueEntryOf(id);
+                    if (entry != null) entry.Enabled = true;
+                    AppState.SaveSettings();
+                    AppState.PublishLog($"✓ 已加入清单：{profile.DisplayName}");
+                    LogService.LogEvent($"添加工具：{id}");
+                }
+                _addingTool = false;
+                RenderQueue();
+                RenderToolRows();
+                RefreshToolCards();
+                OpenToolLaunch(id);
+            };
+            wrap.Children.Add(tile);
+        }
+        stack.Children.Add(wrap);
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+        var custom = new Button { Content = "其它 exe…", Style = TryFindResource("MiniAction") as Style, Height = 28, Padding = new Thickness(11, 0, 11, 0) };
+        custom.Click += (s2, e2) => { _addingTool = false; RenderToolRows(); BtnAddCustomTool_Click(null!, new RoutedEventArgs()); };
+        buttons.Children.Add(custom);
+        var cancel = new Button { Content = "收起", Style = TryFindResource("LinkButton") as Style, FontSize = 11, Margin = new Thickness(12, 0, 0, 0) };
+        cancel.Click += (_, _) => { _addingTool = false; RenderToolRows(); };
+        buttons.Children.Add(cancel);
+        stack.Children.Add(buttons);
+
+        return panel;
     }
 
     private void RefreshToolCards()
@@ -3112,55 +3652,105 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// v1.42 / M8-2：工具行的右键菜单。六项，按「现在就要它做点什么」排前面。
+    ///
+    /// <para>
+    /// 「跳过这次」和「今晚不跑它」是两件事，菜单上就得分得清：
+    /// 前者只作用这一趟（队列跑完就清掉，<see cref="QueueService.ToggleSkipOnce"/>），
+    /// 后者是持久开关（写进 <see cref="QueueEntry.Enabled"/>，明天照旧不跑）。
+    /// 文案跟着各自的状态变，不用打开别的地方确认现在是哪种。
+    /// </para>
+    /// </summary>
     private void ToolTile_RightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (sender is not Border tile || tile.Tag is not string toolId) return;
+        if (sender is not FrameworkElement tile || tile.Tag is not string toolId) return;
         e.Handled = true;
 
-        var menu = new ContextMenu
-        {
-            Background = BrushOf("CardBg2Brush") ?? BrushOf("CardBgBrush"),
-            BorderBrush = BrushOf("BorderStrongBrush") ?? BrushOf("BorderBrush"),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(4),
-        };
+        var profile = ProfileRegistry.Get(toolId);
+        string name = string.IsNullOrWhiteSpace(profile.DisplayName) ? toolId : profile.DisplayName;
+        var entry = QueueEntryOf(toolId);
+        bool onDuty = entry == null || entry.Enabled;
 
-        // v1.41 / M3-7：先放「现在就要它做点什么」的四件。右键一张工具卡，
-        // 十次里有八次问的是「能不能单独跑一下 / 今晚能不能不跑 / 它到底怎么跑的」，
-        // 而改顺序、改启动设置是要动配置的，放后面——临时动作和改配置不该混在一起。
+        var menu = new ContextMenu();
+
+        // 1) 马上跑一次
         menu.Items.Add(MenuItem("立即跑这一个", () => RunToolNow(toolId)));
+
+        // 2) 只作用于这一趟
         menu.Items.Add(MenuItem(
             QueueService.IsSkippedOnce(toolId) ? "这次还是跑" : "跳过这次",
             () => ToggleSkipOnce(toolId)));
-        menu.Items.Add(MenuItem("改间隔…", () => RevealIntervalSetting()));
-        menu.Items.Add(MenuItem("查看日志", () => OpenLogView(LogFilter.ForTool(toolId))));
+
+        // 3) 持久开关，到明天也还算数
+        if (onDuty)
+        {
+            menu.Items.Add(MenuItem("今晚不跑它", () => ToggleQueueEnabled(toolId)));
+        }
+        else
+        {
+            menu.Items.Add(MenuItem("今晚跑它", () => ToggleQueueEnabled(toolId)));
+        }
+
         menu.Items.Add(new Separator());
 
-        menu.Items.Add(MenuItem("改启动设置", () => OpenToolLaunch(toolId)));
-        // v1.26：格子现在表示「今晚按什么顺序跑」，所以菜单说的是队列里的位置，
-        // 不是屏幕上往左往右——2 列 4 行的时候「往右一格」和「下一个跑」是两件事，
-        // 说成左右会让人以为只是挪格子。
-        menu.Items.Add(MenuItem("往前挪一个", () => MoveTool(toolId, -1)));
-        menu.Items.Add(MenuItem("往后挪一个", () => MoveTool(toolId, 1)));
-        menu.Items.Add(MenuItem("移到最后", () => MoveToolToEnd(toolId)));
+        // 4-5) 改它是怎么跑的
+        menu.Items.Add(MenuItem("改间隔…", () => RevealIntervalSetting()));
+        menu.Items.Add(MenuItem("编辑…", () => OpenToolLaunch(toolId)));
 
-        // v1.26：原来队列行上的勾选框没了，这个开关得有个地方放。
-        var entry = QueueEntryOf(toolId);
-        if (entry != null)
-        {
-            menu.Items.Add(new Separator());
-            menu.Items.Add(MenuItem(
-                entry.Enabled ? "今晚不跑它" : "今晚跑它",
-                () => ToggleQueueEnabled(toolId)));
-        }
+        // 6) 它刚才干了什么
+        menu.Items.Add(MenuItem("查看日志", () => OpenLogView(LogFilter.ForTool(toolId))));
+
+        menu.Items.Add(new Separator());
+
+        // 7) 从今晚清单里拿掉。内置工具只「移出清单」，自定义工具才真的删档案。
+        menu.Items.Add(MenuItem("移除…", () => RemoveFromList(toolId)));
+
+        menu.PlacementTarget = tile;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// v1.42 / M8-2：把工具从今晚清单里移除。
+    ///
+    /// <para>
+    /// 内置工具只关队列项，档案和配置原样留着——下次在「＋ 添加工具」里点它就能加回来。
+    /// 自定义工具走原来的「彻底删掉」，那条路会一并清档案，问法也更重。
+    /// </para>
+    /// </summary>
+    private void RemoveFromList(string toolId)
+    {
+        var profile = ProfileRegistry.Get(toolId);
+        string name = string.IsNullOrWhiteSpace(profile.DisplayName) ? toolId : profile.DisplayName;
 
         if (!ProfileRegistry.IsBuiltIn(toolId))
         {
-            menu.Items.Add(new Separator());
-            menu.Items.Add(MenuItem("从桌面移除（并删除这个工具）", () => RemoveToolCompletely(toolId)));
+            RemoveToolCompletely(toolId);
+            return;
         }
-        tile.ContextMenu = menu;
-        menu.IsOpen = true;
+
+        bool ok = AppDialog.Show(
+            $"把 {name} 从今晚清单移除？配置会保留，随时可以再加回来。",
+            kind: AppDialog.Kind.Question,
+            title: "移除",
+            primary: "移除",
+            secondary: "算了",
+            owner: this);
+        if (!ok) return;
+
+        var entry = QueueEntryOf(toolId);
+        if (entry != null)
+        {
+            entry.Enabled = false;
+            AppState.SaveSettings();
+        }
+        _expandedRows.Remove(toolId);
+        RenderQueue();
+        RenderToolRows();
+        RefreshToolCards();
+        AppState.PublishLog($"✓ 已从今晚清单移除：{name}");
+        LogService.LogEvent($"移出清单：{toolId}");
     }
 
     /// <summary>
@@ -5629,9 +6219,21 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// v1.42 / M9-2：写勾选的唯一入口。所有地方都从这里写，事实源就只有一份。
+    /// 顺手回写渲染展开区/摘要，省得调用方各记一遍。
+    /// </summary>
+    private static void WriteGroups(IEnumerable<string> groups)
+    {
+        var entry = QueueEntryOf("bettergi");
+        if (entry == null) return;
+        entry.Groups = groups.ToList();
+        AppState.SaveSettings();
+    }
     private void SyncGroupSelection()
     {
-        var settings = AppState.Settings.SelectedGroups ?? Array.Empty<string>();
+        // v1.42 / M9-2：唯一事实源是 bettergi 那一项的 QueueEntry.Groups，不再是全局勾选。
+        var settings = (QueueEntryOf("bettergi")?.Groups ?? new List<string>()).ToArray();
         bool same = settings.Length == _selectedOrder.Count;
         if (same)
         {
@@ -5649,8 +6251,7 @@ public partial class MainWindow : Window
         _selectedOrder.RemoveAll(n => !valid.Contains(n));
         if (_selectedOrder.Count != before)
         {
-            AppState.Settings.SelectedGroups = _selectedOrder.ToArray();
-            AppState.SaveSettings();
+            WriteGroups(_selectedOrder);
         }
 
         foreach (var item in _groupPicks)
@@ -5952,17 +6553,17 @@ public partial class MainWindow : Window
                 AppState.SaveSettings();
             }
 
-            var selected = AppState.Settings.SelectedGroups ?? Array.Empty<string>();
-            if (selected.Length == 0) return;
+            // v1.42 / M9-2：收敛的也是唯一事实源。
+            var selected = (QueueEntryOf("bettergi")?.Groups ?? new List<string>());
+            if (selected.Count == 0) return;
             var valid = groups.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var kept = selected.Where(valid.Contains).ToArray();
-            if (kept.Length == selected.Length) return;
-            AppState.Settings.SelectedGroups = kept;
-            AppState.SaveSettings();
-            AppState.PublishLog(kept.Length == 0
+            var kept = selected.Where(valid.Contains).ToList();
+            if (kept.Count == selected.Count) return;
+            WriteGroups(kept);
+            AppState.PublishLog(kept.Count == 0
                 ? "⚠ 原勾选的配置组在 BetterGI 中已不存在，已自动取消勾选"
-                : $"⚠ 已移除 {selected.Length - kept.Length} 个在 BetterGI 中已不存在的配置组");
-            LogService.LogEvent($"配置组同步：移除失效勾选 {selected.Length - kept.Length} 个");
+                : $"⚠ 已移除 {selected.Count - kept.Count} 个在 BetterGI 中已不存在的配置组");
+            LogService.LogEvent($"配置组同步：移除失效勾选 {selected.Count - kept.Count} 个");
         }
         catch { }
     }
@@ -5984,8 +6585,7 @@ public partial class MainWindow : Window
                 g.Order = idx + 1;
             }
 
-            AppState.Settings.SelectedGroups = _selectedOrder.ToArray();
-            AppState.SaveSettings();
+            WriteGroups(_selectedOrder);
             UpdateGroupSummary();
             RenderGroupPicker();
             AppState.PublishLog(_selectedOrder.Count > 0
@@ -8168,11 +8768,9 @@ public partial class MainWindow : Window
                 case "view.advanced": RevealCard(TgSentinel); break;
                 // v1.41：日志不再是一页。这条命令现在直接开日志视图（全量）。
                 case "view.log": OpenLogView(LogFilter.None); break;
-                case "view.calendar": OpenCalendar(); break;
                 case "view.today": OpenToday(); break;
                 case "view.logrules": OpenLogRules(); break;
-                case "view.depends": OpenDepends(); break;
-                case "view.groups": OpenGroupSlice(); break;
+                // v1.42 / M8-3：view.calendar / view.depends / view.groups 三条命令随四个视图窗口的入口一起撤掉。
                 case "view.preflight": OpenPreflight(); break;
                 case "view.handover": OpenHandover(); break;
                 case "view.presets": OpenPresets(); break;

@@ -172,7 +172,18 @@ public class AppSettings
     /// </summary>
     public string NotifyQueueTemplate { get; set; } = "";
 
-    /// <summary>勾选的配置组（BGI 专用；非空时按 --startGroups 执行）</summary>
+    /// <summary>
+    /// BGI 专用：勾选的配置组，非空时按 --startGroups 执行。
+    ///
+    /// <para>
+    /// <b>deprecated: 勾选状态已单源化至 QueueEntry.Groups。</b>
+    /// v1.42 / M9-2 之前，勾选状态存在两份——这里一份、bettergi 那一项自己的 Groups 一份，
+    /// 于是「勾了但没生效」「显示的跟跑的对不上」这类事故只是时间问题。
+    /// 现在真正决定执行的是 QueueEntry.Groups；这一份只为兼容旧 settings.json 而保留，
+    /// 不再写入，也不再有任何读取点（升级时由 <see cref="LoadSettings"/> 里的 v17 迁移搬到新位置）。
+    /// 确认老用户都升上来之前不要删字段——删了会让他们的配置在反序列化时静默丢失。
+    /// </para>
+    /// </summary>
     public string[] SelectedGroups { get; set; } = Array.Empty<string>();
 
     /// <summary>
@@ -236,9 +247,10 @@ public class AppSettings
     /// <summary>
     /// 当前配置结构版本号。14 = v1.6 补跑窗口与队列续跑字段；
     /// 15 = v1.25 通知默认改成「不推送」；
-    /// 16 = v1.41 加 <see cref="OnboardingCompleted"/> 与主窗位置大小（见 <see cref="LoadSettings"/> 里的迁移）。
+    /// 16 = v1.41 加 <see cref="OnboardingCompleted"/> 与主窗位置大小（见 <see cref="LoadSettings"/> 里的迁移）；
+    /// 17 = v1.42 勾选状态单源化（把 <see cref="SelectedGroups"/> 搬进 QueueEntry.Groups）。
     /// </summary>
-    public const int CurrentVersion = 16;
+    public const int CurrentVersion = 17;
 
     /// <summary>各工具档案（键为 ToolId）。旧配置无此节时为空字典。</summary>
     public Dictionary<string, ToolProfile> Tools { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -563,6 +575,25 @@ public static class AppState
                 if (Settings.FirstRunDone) Settings.OnboardingCompleted = true;
                 Settings.Version = 16;
             }
+
+            // v1.42 / M9-2：勾选单源化。旧的全局勾选搬进 bettergi 那一项自己的 Groups。
+            // 不搬会出真事：以前「全局勾了 A、B」的人，升级后本项 Groups 仍是空的，
+            // 于是 Effective 拿不到组，退回按配置名跑——他会发现每天跑的组突然不对了，
+            // 而界面上什么都没变。迁移只在「本项还没写过」时做，绝不覆盖用户已有的勾选。
+            if (Settings.Version < 17)
+            {
+                if ((Settings.SelectedGroups?.Length ?? 0) > 0)
+                {
+                    var bgiEntry = (Settings.Queue ?? new List<QueueEntry>())
+                        .FirstOrDefault(e => string.Equals(e.ToolId, "bettergi", StringComparison.OrdinalIgnoreCase));
+                    if (bgiEntry != null && (bgiEntry.Groups?.Count ?? 0) == 0)
+                    {
+                        bgiEntry.Groups = (Settings.SelectedGroups ?? Array.Empty<string>()).ToList();
+                        LogService.LogEvent($"勾选单源化：旧全局勾选 {bgiEntry.Groups.Count} 个已搬进 bettergi 的 Groups");
+                    }
+                }
+                Settings.Version = 17;
+            }
         }
         catch (Exception ex)
         {
@@ -603,7 +634,10 @@ public static class AppState
                     var bgi = ProfileRegistry.BetterGi.Clone();
                     if (!string.IsNullOrWhiteSpace(Settings.BgiPath)) bgi.ExecutablePath = Settings.BgiPath;
                     bgi.CustomData["dragonConfigName"] = Settings.DragonConfigName ?? "";
-                    bgi.CustomData["selectedGroups"] = string.Join("|", Settings.SelectedGroups ?? Array.Empty<string>());
+                    // v1.42 / M9-2（D16）：停止往旧存储写勾选镜像。
+                    // 这个键从来没有读取点（ToolRunner 不读 CustomData），写它只会多一份会飘的副本。
+                    // 这里顺手把历史遗留那份清掉：它若还在，将来有人翻 bettergi.json 会以为勾选存在那里。
+                    bgi.CustomData.Remove("selectedGroups");
                     Settings.Tools ??= new Dictionary<string, ToolProfile>(StringComparer.OrdinalIgnoreCase);
                     Settings.Tools["bettergi"] = bgi;
                 }
