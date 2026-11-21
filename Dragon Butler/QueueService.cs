@@ -676,6 +676,9 @@ public static class QueueService
     public static async Task<QueueItemResult> RunItemAsync(ToolProfile profile, QueueTrigger trigger, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
+        // v1.40：记下开始的时刻，耗时账本靠它去 GroupArchive 里挑「这一趟开过哪些配置组」。
+        // 放在秒表旁边是因为两者必须是同一个瞬间——差几秒就会把上一项的组算到这一项头上。
+        DateTime startedAt = DateTime.Now;
         int attempts = 0;
         int maxAttempts = 1 + Math.Max(0, profile.RetryCount);
         QueueItemResult last = new()
@@ -733,6 +736,18 @@ public static class QueueService
 
         // v1.6 / F2：把终态记进台账，「接着跑」靠它判断今天哪些项还没成
         RunJournal.Record(last);
+
+        // v1.40：同一时刻给耗时账本记一笔。两台账各答各的问题——
+        // RunJournal 记「最后成没成」，DurationLedger 记「花了多久、哪个配置组最费时间」。
+        // 放在 RunJournal 之后而不是之前：那两行先落盘，即使这里抛异常也还有结果可查。
+        try
+        {
+            DurationLedger.Record(profile.ToolId, profile.DisplayName, last.Elapsed, startedAt);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("记耗时失败（不影响这次运行）：" + ex.Message);
+        }
 
         // v1.9 / P2：只有真跑成了才更新版本基线——更新坏掉的那一版不该被当成"正常"
         if (last.State == ToolRunState.Done

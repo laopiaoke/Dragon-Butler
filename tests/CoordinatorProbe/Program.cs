@@ -2242,43 +2242,49 @@ internal static class Program
         }
 
         // ---- 1) 基本常量 ----
-        Check("常量/共四页", Pager.Count == 4, Pager.Count.ToString());
-        Check("常量/打开落在主页", Pager.Home == 1, Pager.Home.ToString());
+        Check("常量/共五页", Pager.Count == 5, Pager.Count.ToString());
+        Check("常量/打开落在主页", Pager.Home == 2, Pager.Home.ToString());
+        Check("常量/汇报在日志右边", Pager.Report == 1 && Pager.Log == 0);
+        Check("常量/设置与插件在最后", Pager.Settings == 3 && Pager.Plugins == 4);
 
         // ---- 2) 夹取：不环绕 ----
         Check("夹取/负数变 0", Pager.Clamp(-3) == 0);
-        Check("夹取/超界变 3", Pager.Clamp(9) == 3);
+        Check("夹取/超界变 4", Pager.Clamp(9) == 4);
         Check("夹取/合法值不动", Pager.Clamp(1) == 1);
 
         // ---- 3) 每页摆位 ----
-        var atHome = Pager.Offsets(1);
-        Check("摆位/主页时自己为 0", atHome[1] == 0, atHome[1].ToString());
-        Check("摆位/主页时日志页为 -1", atHome[0] == -1, atHome[0].ToString());
-        Check("摆位/主页时设置页为 +1", atHome[2] == 1, atHome[2].ToString());
-        Check("摆位/主页时插件页为 +2", atHome[3] == 2, atHome[3].ToString());
-        var atRun = Pager.Offsets(0);
-        Check("摆位/日志页时主页在 +1", atRun[1] == 1, atRun[1].ToString());
-        Check("摆位/日志页时设置页在 +2", atRun[2] == 2, atRun[2].ToString());
-        Check("摆位/日志页时插件页在 +3", atRun[3] == 3, atRun[3].ToString());
-        var atSettings = Pager.Offsets(2);
-        Check("摆位/设置页时主页在 -1", atSettings[1] == -1, atSettings[1].ToString());
-        Check("摆位/设置页时日志页在 -2", atSettings[0] == -2, atSettings[0].ToString());
-        Check("摆位/设置页时插件页在 +1", atSettings[3] == 1, atSettings[3].ToString());
-        Check("摆位/越界按夹取算", Pager.Offsets(99)[3] == 0, Pager.Offsets(99)[3].ToString());
+        var atHome = Pager.Offsets(2);
+        Check("摆位/主页时自己为 0", atHome[2] == 0, atHome[2].ToString());
+        Check("摆位/主页时汇报页为 -1", atHome[1] == -1, atHome[1].ToString());
+        Check("摆位/主页时日志页为 -2", atHome[0] == -2, atHome[0].ToString());
+        Check("摆位/主页时设置页为 +1", atHome[3] == 1, atHome[3].ToString());
+        Check("摆位/主页时插件页为 +2", atHome[4] == 2, atHome[4].ToString());
+        var atLog = Pager.Offsets(0);
+        Check("摆位/日志页时汇报在 +1", atLog[1] == 1, atLog[1].ToString());
+        Check("摆位/日志页时主页在 +2", atLog[2] == 2, atLog[2].ToString());
+        Check("摆位/日志页时设置页在 +3", atLog[3] == 3, atLog[3].ToString());
+        Check("摆位/日志页时插件页在 +4", atLog[4] == 4, atLog[4].ToString());
+        var atSettings = Pager.Offsets(3);
+        Check("摆位/设置页时主页在 -1", atSettings[2] == -1, atSettings[2].ToString());
+        Check("摆位/设置页时汇报页在 -2", atSettings[1] == -2, atSettings[1].ToString());
+        Check("摆位/设置页时日志页在 -3", atSettings[0] == -3, atSettings[0].ToString());
+        Check("摆位/设置页时插件页在 +1", atSettings[4] == 1, atSettings[4].ToString());
+        Check("摆位/越界按夹取算", Pager.Offsets(99)[4] == 0, Pager.Offsets(99)[4].ToString());
 
         // ---- 4) 横滑 ----
         const double W = 1000;   // 阈值 = max(80, 120) = 120
-        Check("滑/往左滑去下一页", Pager.Swipe(1, -300, W) == 2, Pager.Swipe(1, -300, W).ToString());
-        Check("滑/往右滑回上一页", Pager.Swipe(1, 300, W) == 0, Pager.Swipe(1, 300, W).ToString());
-        Check("滑/距离不够不动", Pager.Swipe(1, -50, W) == 1, Pager.Swipe(1, -50, W).ToString());
-        Check("滑/刚好到阈值算翻页", Pager.Swipe(1, -120, W) == 2, Pager.Swipe(1, -120, W).ToString());
-        Check("滑/差一点点不算", Pager.Swipe(1, -119, W) == 1, Pager.Swipe(1, -119, W).ToString());
+        Check("滑/往左滑去下一页", Pager.Swipe(2, -300, W) == 3, Pager.Swipe(2, -300, W).ToString());
+        Check("滑/往右滑回上一页", Pager.Swipe(2, 300, W) == 1, Pager.Swipe(2, 300, W).ToString());
+        Check("滑/距离不够不动", Pager.Swipe(2, -50, W) == 2, Pager.Swipe(2, -50, W).ToString());
+        Check("滑/刚好到阈值算翻页", Pager.Swipe(2, -120, W) == 3, Pager.Swipe(2, -120, W).ToString());
+        Check("滑/差一点点不算", Pager.Swipe(2, -119, W) == 2, Pager.Swipe(2, -119, W).ToString());
         Check("滑/第一页往右滑停住", Pager.Swipe(0, 500, W) == 0, Pager.Swipe(0, 500, W).ToString());
-        Check("滑/最后一页往左滑停住", Pager.Swipe(3, -500, W) == 3, Pager.Swipe(3, -500, W).ToString());
-        Check("滑/设置页往左到插件页", Pager.Swipe(2, -300, W) == 3, Pager.Swipe(2, -300, W).ToString());
-        Check("滑/窄窗口阈值地板 80", Pager.Swipe(1, -100, 400) == 2, Pager.Swipe(1, -100, 400).ToString());
-        Check("滑/窄窗口 79 不算", Pager.Swipe(1, -79, 400) == 1, Pager.Swipe(1, -79, 400).ToString());
-        Check("滑/宽度为 0 不崩", Pager.Swipe(1, -200, 0) == 2, Pager.Swipe(1, -200, 0).ToString());
+        Check("滑/最后一页往左滑停住", Pager.Swipe(4, -500, W) == 4, Pager.Swipe(4, -500, W).ToString());
+        Check("滑/日志页往左到汇报页", Pager.Swipe(0, -300, W) == 1, Pager.Swipe(0, -300, W).ToString());
+        Check("滑/设置页往左到插件页", Pager.Swipe(3, -300, W) == 4, Pager.Swipe(3, -300, W).ToString());
+        Check("滑/窄窗口阈值地板 80", Pager.Swipe(2, -100, 400) == 3, Pager.Swipe(2, -100, 400).ToString());
+        Check("滑/窄窗口 79 不算", Pager.Swipe(2, -79, 400) == 2, Pager.Swipe(2, -79, 400).ToString());
+        Check("滑/宽度为 0 不崩", Pager.Swipe(2, -200, 0) == 3, Pager.Swipe(2, -200, 0).ToString());
 
         // ---- 5) 阈值函数本身 ----
         Check("阈值/宽窗口按 12%", Math.Abs(Pager.SwipeThreshold(1000) - 120) < 0.01, Pager.SwipeThreshold(1000).ToString());
@@ -2287,23 +2293,28 @@ internal static class Program
 
         // ---- 6) 页码名字 ----
         Check("名字/0 是日志", Pager.Name(0) == "日志", Pager.Name(0));
-        Check("名字/1 是主页", Pager.Name(1) == "主页", Pager.Name(1));
-        Check("名字/2 是设置", Pager.Name(2) == "设置", Pager.Name(2));
-        Check("名字/3 是插件", Pager.Name(3) == "插件", Pager.Name(3));
+        Check("名字/1 是汇报", Pager.Name(1) == "汇报", Pager.Name(1));
+        Check("名字/2 是主页", Pager.Name(2) == "主页", Pager.Name(2));
+        Check("名字/3 是设置", Pager.Name(3) == "设置", Pager.Name(3));
+        Check("名字/4 是插件", Pager.Name(4) == "插件", Pager.Name(4));
         Check("名字/越界也认", Pager.Name(99) == "插件", Pager.Name(99));
 
         // ---- 7) 接线：窗口必须真的用这几样东西 ----
         string mainXaml = ReadRepoSources("Dragon Butler/MainWindow.xaml");
         string mainCs = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
-        Check("接线/底栏有四个页面按钮", mainXaml.Contains("SegPageRun") && mainXaml.Contains("SegPageHome")
-                                          && mainXaml.Contains("SegPageSettings") && mainXaml.Contains("SegPagePlugins"));
-        Check("接线/四页各有一个平移量", mainXaml.Contains("ShiftRun") && mainXaml.Contains("ShiftHome")
-                                         && mainXaml.Contains("ShiftSettings") && mainXaml.Contains("ShiftPlugins"));
+        Check("接线/底栏有五个页面按钮", mainXaml.Contains("SegPageRun") && mainXaml.Contains("SegPageReport")
+                                          && mainXaml.Contains("SegPageHome") && mainXaml.Contains("SegPageSettings")
+                                          && mainXaml.Contains("SegPagePlugins"));
+        Check("接线/五页各有一个平移量", mainXaml.Contains("ShiftRun") && mainXaml.Contains("ShiftReport")
+                                         && mainXaml.Contains("ShiftHome") && mainXaml.Contains("ShiftSettings")
+                                         && mainXaml.Contains("ShiftPlugins"));
         Check("接线/切页走 Pager.Clamp", mainCs.Contains("Pager.Clamp("));
         Check("接线/摆位走 Pager.Offsets", mainCs.Contains("Pager.Offsets("));
         Check("接线/横滑走 Pager.Swipe", mainCs.Contains("Pager.Swipe("));
         Check("接线/有触摸横滑", mainXaml.Contains("IsManipulationEnabled=\"True\""));
-        Check("接线/命令面板能跨页定位", mainCs.Contains("ShowPage(2)") && mainCs.Contains("ShowPage(0)"));
+        // v1.40：命令面板定位改成走 Pager 常量，不再写死 0/2
+        Check("接线/命令面板能跨页定位", mainCs.Contains("ShowPage(Pager.Log)") && mainCs.Contains("ShowPage(Pager.Settings)"));
+        Check("接线/初始页与 Pager.Home 一致", mainCs.Contains("private int _page = Pager.Home;"));
 
         Console.WriteLine($"RESULT pager fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
@@ -2901,9 +2912,10 @@ internal static class Program
 
         // ---- 11c) v1.29 底部导航栏 + 两卡合并 + 插件卡 ----
         // v1.34：三项变四项，NavBtn 的出现次数从 5（1 处定义 + 3 处引用 + 1）变成 6。
-        Check("导航/四个按钮搬到底部",
+        // v1.40：加「汇报」后变五项 → 7（1 处定义 + 5 处引用 + 1）。
+        Check("导航/五个按钮搬到底部",
             mainXaml.Contains("Style=\"{StaticResource NavBtn}\"") &&
-            mainXaml.Split("NavBtn").Length == 6);
+            mainXaml.Split("NavBtn").Length == 7);
         Check("导航/标题栏不再有三页切换",
             !mainXaml.Contains("Style=\"{StaticResource SegBtn}\" Checked=\"SegPage_Checked\"")); 
         // v1.32 那条横贯的 Border 换成了悬浮的 Grid，判据跟着改：底栏占第 2 行、状态条在第 3 行
@@ -3083,18 +3095,20 @@ internal static class Program
         Check("导航/四项", mainXaml.Contains("SegPageRun") && mainXaml.Contains("SegPageHome")
                           && mainXaml.Contains("SegPageSettings") && mainXaml.Contains("SegPagePlugins"));
         Check("导航/第四页有自己的平移量", mainXaml.Contains("x:Name=\"ShiftPlugins\""));
-        Check("导航/摆位认得第四页", mainCs.Contains("(ShiftPlugins, offsets[3])"));
-        Check("导航/同步认得第四页", mainCs.Contains("(SegPagePlugins, 3)"));
+        // v1.40：插件页从第 3 页挪到第 4 页（汇报插在日志与主页之间），偏移下标跟着后移一位
+        Check("导航/摆位认得第四页", mainCs.Contains("(ShiftPlugins, offsets[4])"));
+        Check("导航/同步认得第四页", mainCs.Contains("(SegPagePlugins, Pager.Plugins)"));
         Check("导航/「运行」改叫「日志」", mainXaml.Contains("Text=\"日志\"") && !mainXaml.Contains("Text=\"运行\""));
         Check("导航/「启动」改叫「主页」", mainXaml.Contains("Text=\"主页\"") && !mainXaml.Contains("Text=\"启动\""));
         // v1.35：日志图标从「两半页」改成「带折角的纸 + 三行字」，具体在下面的 11m 段逐条盯着。
         Check("导航/插件用的是拼图", mainXaml.Contains("A1.6,1.6 0 0 1 11,3"));
         Check("导航/外壳是玻璃不是实色块", mainXaml.Contains("#D9181C22") && mainXaml.Contains("BlurRadius=\"22\""));
-        Check("分页/一共四页", Pager.Count == 4);
-        Check("分页/第四页叫插件", Pager.Name(3) == "插件");
+        Check("分页/一共五页", Pager.Count == 5);
+        Check("分页/第四页叫插件", Pager.Name(4) == "插件");
         Check("分页/第一页叫日志", Pager.Name(0) == "日志");
-        Check("分页/第二页叫主页", Pager.Name(1) == "主页");
-        Check("分页/翻到第四页就到头", Pager.Clamp(9) == 3);
+        Check("分页/第二页叫汇报", Pager.Name(1) == "汇报");
+        Check("分页/第三页叫主页", Pager.Name(2) == "主页");
+        Check("分页/翻到第五页就到头", Pager.Clamp(9) == 4);
         Check("插件页/有自己的一页", mainXaml.Contains("x:Name=\"PagePlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
         Check("插件页/从设置页撤走了", !mainXaml.Contains("x:Name=\"BtnFoldPlugins\""));
         Check("插件页/说清能做什么不能做什么", mainXaml.Contains("插件能做什么、不能做什么"));
@@ -3258,6 +3272,99 @@ internal static class Program
         Check("换页/别人抓着鼠标就不掺和", mainCs.Contains("Mouse.Captured != null && !ReferenceEquals(Mouse.Captured, PageClip)"));
         Check("换页/拖动时四页跟着走", mainCs.Contains("DragPages(dx * 0.85)"));
         Check("换页/松手按同一套阈值判", SliceBetween(mainCs, "private void PageClip_PreviewMouseLeftButtonUp", "\n    }").Contains("Pager.Swipe(_page, _pageDragShift, PageClip.ActualWidth)"));
+        // ---- 11p) v1.40 汇报页 + 滚动显隐导航 + 五页导航 ----
+        string pagerCs = ReadRepoSources("Dragon Butler/Pager.cs");
+        string durCs = ReadRepoSources("Dragon Butler/DurationLedger.cs");
+        string queueCs = ReadRepoSources("Dragon Butler/QueueService.cs");
+
+        // ① 时长账本是独立一份，别指望 RunJournal 记得住
+        Check("账本/有自己的一份文件", durCs.Contains("durations.json"));
+        Check("账本/与日记本分开存", durCs.Contains("Paths.Config(\"durations.json\")"));
+        Check("账本/留 60 天", durCs.Contains("KeepDays = 60"));
+        Check("账本/探针能换路径", durCs.Contains("public static string? PathOverride"));
+        Check("账本/记一次能累加", durCs.Contains("entry.Runs += 1;") && durCs.Contains("entry.Seconds += seconds;"));
+        Check("账本/不到半秒也算一动", durCs.Contains("if (seconds <= 0) seconds = 1;"));
+        Check("账本/最费时间的排最前", durCs.Contains("OrderByDescending(e => e.Seconds)"));
+        Check("账本/没跑完的组不记", durCs.Contains("if (rec.Start == null || rec.End == null) continue;"));
+        Check("账本/组名按开始的时刻挑", durCs.Contains("CompareOrdinal(rec.Start") );
+        Check("账本/写入不炸掉队列", queueCs.Contains("记耗时失败（不影响这次运行）"));
+        Check("账本/秒表与开始时刻同一个瞬间", queueCs.Contains("DateTime startedAt = DateTime.Now;"));
+        Check("账本/先记结果再记时长", queueCs.IndexOf("RunJournal.Record(last);", StringComparison.Ordinal) <
+                                        queueCs.IndexOf("DurationLedger.Record(", StringComparison.Ordinal));
+
+        // ② 五页：汇报在日志与主页之间
+        Check("分页/汇报插在日志与主页之间", Pager.Log == 0 && Pager.Report == 1 && Pager.Home == 2);
+        Check("分页/名字对得上五页", pagerCs.Contains("1 => \"汇报\""));
+
+        // ③ 汇报页自己
+        Check("汇报页/有自己的一页", mainXaml.Contains("x:Name=\"PageReport\""));
+        Check("汇报页/有合计时长", mainXaml.Contains("x:Name=\"TbReportTotal\""));
+        Check("汇报页/有最近七天的柱子", mainXaml.Contains("x:Name=\"ReportBars\""));
+        Check("汇报页/每个工具一块", mainXaml.Contains("x:Name=\"ReportToolHost\""));
+        Check("汇报页/按配置组一块", mainXaml.Contains("x:Name=\"ReportGroupHost\""));
+        Check("汇报页/说清数是怎么来的", mainXaml.Contains("这个数是哪来的"));
+        Check("汇报页/切过去才刷", mainCs.Contains("if (index == Pager.Report) RefreshReportPage();"));
+        Check("汇报页/0 秒那根柱子也留印子", SliceBetween(mainCs, "private void RenderReportBars", "private void RenderReportTools").Contains("? 3 :"));
+        Check("汇报页/占比条固定宽度不拉伸", mainCs.Contains("160 * frac"));
+        Check("汇报页/59 秒不当成 0 分钟", SliceBetween(mainCs, "private static string Minutes", "if (h > 0)").Contains("(seconds + 30) / 60"));
+
+        // ④ 滚动显隐导航
+        Check("导航/胶囊能挪位置", mainXaml.Contains("x:Name=\"NavShellShift\""));
+        Check("导航/五个滚动区都盯着", System.Text.RegularExpressions.Regex.Matches(mainXaml, "ScrollChanged=\"PageScrollChanged\"").Count == 5);
+        Check("导航/往下滚就收起来", SliceBetween(mainCs, "private void PageScrollChanged", "SetNavHidden(shouldHide").Contains("VerticalChange > 2"));
+        Check("导航/往上滚就放回来", SliceBetween(mainCs, "private void PageScrollChanged", "SetNavHidden(shouldHide").Contains("VerticalChange < -2"));
+        Check("导航/滚到顶一定看得见", mainCs.Contains("e.VerticalOffset <= 0.5"));
+        Check("导航/位移和透明度一起动", SliceBetween(mainCs, "private void SetNavHidden", "var ease").Contains("NavShell.Opacity = opacity"));
+        Check("导航/收起来是 220ms", mainCs.Contains("FromMilliseconds(220)"));
+        Check("导航/页面不再给胶囊留一条死边", !mainXaml.Contains("Margin=\"14,10,14,96\""));
+
+        // ⑤ 账本行为：换到临时文件，别碰用户真实的 durations.json
+        string durSandbox = Path.Combine(Path.GetTempPath(), "dragon-duration-probe.json");
+        string? durOld = DurationLedger.PathOverride;
+        try
+        {
+            try { if (File.Exists(durSandbox)) File.Delete(durSandbox); } catch { }
+            DurationLedger.PathOverride = durSandbox;
+            DurationLedger.ClearForTest();
+
+            var now = DateTime.Now;
+            DurationLedger.Record("bettergi", "BetterGI", TimeSpan.FromMinutes(30), now.AddMinutes(-30));
+            DurationLedger.Record("bettergi", "BetterGI", TimeSpan.FromMinutes(15), now.AddMinutes(-15));
+            var day = DurationLedger.GetDay(now);
+            Check("账本行为/同一个工具合并成一行", day.Count == 1, day.Count.ToString());
+            Check("账本行为/时长累加", day.Count == 1 && day[0].Seconds == 2700, day.Count == 1 ? day[0].Seconds.ToString() : "n/a");
+            Check("账本行为/次数累加", day.Count == 1 && day[0].Runs == 2, day.Count == 1 ? day[0].Runs.ToString() : "n/a");
+            Check("账本行为/Total 是 TimeSpan", day.Count == 1 && Math.Abs(day[0].Total.TotalMinutes - 45) < 0.01);
+
+            DurationLedger.Record("ok-ww", "ok-ww", TimeSpan.FromHours(2), now.AddHours(-2));
+            var day2 = DurationLedger.GetDay(now);
+            Check("账本行为/最费时间的排最前", day2.Count == 2 && day2[0].ToolId == "ok-ww", day2.Count > 0 ? day2[0].ToolId : "n/a");
+            Check("账本行为/合计按秒相加", Math.Abs(DurationLedger.TotalOf(now).TotalMinutes - 165) < 0.01,
+                DurationLedger.TotalOf(now).TotalMinutes.ToString());
+
+            Check("账本行为/没跑过的那天是空的", DurationLedger.GetDay(now.AddDays(-400)).Count == 0);
+            Check("账本行为/最近七天给七格", DurationLedger.Recent(7).Count == 7, DurationLedger.Recent(7).Count.ToString());
+            Check("账本行为/最近七天最后一格是今天", DurationLedger.Recent(7)[6].Day.Date == now.Date);
+            Check("账本行为/落盘了", File.Exists(durSandbox));
+
+            // 重新载入：值要还在
+            DurationLedger.Load();
+            var day3 = DurationLedger.GetDay(now);
+            Check("账本行为/重启后还记得", day3.Count == 2, day3.Count.ToString());
+        }
+        finally
+        {
+            DurationLedger.PathOverride = durOld;
+            DurationLedger.ClearForTest();
+            try { if (File.Exists(durSandbox)) File.Delete(durSandbox); } catch { }
+        }
+
+        // v1.40：窗口高度不再由「最高的那一页」决定。
+        // 改回 SizeToContent 会把设置页那 1334 的高度当窗口高，每页都被拉长、短的那页留白。
+        Check("窗口/高度写死在窗口上", mainXaml.Contains("Width=\"980\" Height=\"780\""));
+        Check("窗口/不再跟着内容长", !SliceBetween(mainXaml, "<Window ", ">").Contains("SizeToContent"));
+        Check("窗口/每页各滚各的", mainXaml.Contains("VerticalScrollBarVisibility=\"Auto\""));
+
         // ---- 12) v1.23 修的三处，逐条盯住别改回去 ----
         // ① 右键「移除」必须真的删，不能只是打开设置窗（v1.22 就是这么错的）
         Check("接线/移除菜单真的删", mainCs.Contains("() => RemoveToolCompletely(toolId)"));

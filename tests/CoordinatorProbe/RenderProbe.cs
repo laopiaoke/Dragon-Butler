@@ -43,11 +43,9 @@ internal static class RenderProbe
 
             window.UpdateLayout();
 
-            // 注：主窗是 SizeToContent="Height"，但 WPF 会把窗口高度夹在工作区以内（这台机器约 792），
-            // 所以「整页长图」这条路由走不通——下面那两张卡本来就是要滚动才看得到的。
+            // 注：v1.40 起主窗是固定高度（Height="780"），WPF 仍会把它夹在工作区以内（这台机器 816-24）。
+            // 高度传 0 表示「按窗口现在的实际高度截」，截出来的就是用户平时看到的那一屏。
             // 想看清底部就换 ui top / 展开折叠卡，别试图把窗口拉得比屏幕还高。
-
-            // SizeToContent 的窗口高度由内容决定，硬编码会把下方留成空白
             int realWidth = width > 0 ? width : (int)Math.Ceiling(window.ActualWidth);
             int realHeight = height > 0 ? height : (int)Math.Ceiling(window.ActualHeight);
             if (realWidth <= 0) realWidth = 640;
@@ -118,6 +116,40 @@ internal static class RenderProbe
             var pill = typeof(MainWindow).GetMethod("MoveNavPill",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             pill?.Invoke(w, new object[] { 3, false });
+            w.UpdateLayout();
+        }
+        catch (Exception ex) { Console.WriteLine("SWITCH-PAGE-FAIL " + ex.Message); }
+    }
+
+    /// <summary>
+    /// v1.40：汇报有了自己的一页（导航第二项，日志与主页之间）。
+    /// 与插件页同一套做法：先 ShowPage，再把标签块一步到位，否则截图会拍到「底还在上一格」。
+    /// </summary>
+    /// <summary>
+    /// v1.40：把导航胶囊直接摆到终点（要么藏在下面，要么在原位）。
+    /// 渲染截图要的是稳定画面，动画本身靠 220ms 的消息泵推进，截不到。
+    /// </summary>
+    private static void SettleNav(MainWindow w, bool hide)
+    {
+        try
+        {
+            var m = typeof(MainWindow).GetMethod("SetNavHidden",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            m?.Invoke(w, new object[] { hide, false });
+        }
+        catch (Exception ex) { Console.WriteLine("SETTLE-NAV-FAIL " + ex.Message); }
+    }
+
+    private static void SwitchToReportPage(MainWindow w)
+    {
+        try
+        {
+            var m = typeof(MainWindow).GetMethod("ShowPage",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            m?.Invoke(w, new object[] { Pager.Report, false });
+            var pill = typeof(MainWindow).GetMethod("MoveNavPill",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            pill?.Invoke(w, new object[] { Pager.Report, false });
             w.UpdateLayout();
         }
         catch (Exception ex) { Console.WriteLine("SWITCH-PAGE-FAIL " + ex.Message); }
@@ -675,10 +707,9 @@ internal static class RenderProbe
                         SeedSampleArchive();
                         SeedHeroState("ready");
                         var w = new MainWindow();
-                        // 主窗是 SizeToContent="Height"，只设 Height 会被内容顶穿——
-                        // 那样截到的 480 只是长图的上半截，底部导航在画面外，等于没验。
-                        // 这里显式改成 Manual，窗口才真的只有 480 高。
-                        w.SizeToContent = SizeToContent.Manual;
+                        // v1.40 起主窗是固定高度（Height="780"），不再 SizeToContent。
+                        // 以前这里要先改成 Manual，否则只设 Height 会被内容顶穿、
+                        // 截到的 480 只是长图上半截、底部导航在画面外，等于没验。
                         w.Width = 900;
                         w.Height = 480;
                         w.UpdateLayout();
@@ -691,6 +722,11 @@ internal static class RenderProbe
                             {
                                 if (pass == 0) sh.ScrollToTop(); else sh.ScrollToEnd();
                             }
+                            w.UpdateLayout();
+                            // v1.40：导航栏会跟着滚动方向躲开。ScrollChanged 已经触发过，
+                            // 但 220ms 的动画要靠消息泵推进，截图这一刻它才刚起步。
+                            // 拍「稳定后的样子」才对——直接把它摆到终点，别拍到半路。
+                            SettleNav(w, hide: pass != 0);
                             w.UpdateLayout();
                             string nm = pass == 0 ? "small_top.png" : "small_bottom.png";
                             bool ok = Save(w, Path.Combine(spot, nm), 900, 480);
@@ -967,6 +1003,35 @@ internal static class RenderProbe
                         try { if (Directory.Exists(sandbox)) Directory.Delete(sandbox, true); } catch { }
                     }
 
+                    // v1.40：汇报页要证明的是「它真的把时长拆开说了」——
+                    // 合计、每个工具各多久、占比条、按配置组拆、最近七天柱子。
+                    // 数据用 SeedForTest 直接塞内存（不落盘），否则截图会污染用户真实的账本。
+                    if (mode == "report" || mode == "all")
+                    {
+                        SeedSampleQueue();
+                        var now = DateTime.Now;
+                        DurationLedger.ClearForTest();
+                        DurationLedger.SeedForTest(now, "bettergi", "BetterGI", 4380, 2, "08:12:05",
+                            new Dictionary<string, int> { { "每日委托", 1680 }, { "清体力", 2700 } });
+                        DurationLedger.SeedForTest(now, "march7th", "三月七助手", 1560, 1, "08:19:40",
+                            new Dictionary<string, int> { { "每日委托", 1560 } });
+                        DurationLedger.SeedForTest(now, "ok-ww", "ok-ww", 2870, 3, "09:04:11",
+                            new Dictionary<string, int> { { "清体力", 2870 } });
+                        DurationLedger.SeedForTest(now.AddDays(-1), "bettergi", "BetterGI", 3900, 2);
+                        DurationLedger.SeedForTest(now.AddDays(-1), "ok-ww", "ok-ww", 2100, 2);
+                        DurationLedger.SeedForTest(now.AddDays(-2), "bettergi", "BetterGI", 1200, 1);
+                        DurationLedger.SeedForTest(now.AddDays(-4), "march7th", "三月七助手", 3400, 2);
+
+                        var w = new MainWindow();
+                        w.ShowActivated = false;
+                        w.Show();
+                        SwitchToReportPage(w);
+                        w.UpdateLayout();
+                        bool ok = Save(w, Path.Combine(spot, "report.png"), 980, 0);
+                        Console.WriteLine($"RENDER report={ok}");
+                        w.Close();
+                        DurationLedger.ClearForTest();
+                    }
                     // v1.21：点开一个格子之后的启动设置窗，四张分别是
                     // BetterGI（文档写过参数）/ ok-ww（实战见过）/ 绝区零（全要自己填）/ 自定义工具（什么都没有）
                     if (mode == "launch" || mode == "all")
@@ -1188,8 +1253,8 @@ internal static class RenderProbe
                             {
                                 if (w.FindName(name) is FrameworkElement fe) fe.Visibility = Visibility.Visible;
                             }
-                            // 主窗是 SizeToContent="Height" 且内容装在 ScrollViewer 里，
-                            // 光设高度没用——得动滚动条，否则长图上下两端总有一头看不见。
+                            // 内容装在 ScrollViewer 里，光设窗口高度没用——
+                            // 得动滚动条，否则长图上下两端总有一头看不见。
                             w.UpdateLayout();
                             // v1.22：高级/系统/通知三张卡都在右页（设置页），先把页面切过去再滚。
                             SwitchToSettingsPage(w);

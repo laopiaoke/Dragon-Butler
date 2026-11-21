@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:DragonButler"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="一条龙管家" Width="980" SizeToContent="Height" MinWidth="900" MinHeight="480"
+        Title="一条龙管家" Width="980" Height="780" MinWidth="900" MinHeight="480"
         WindowStyle="None" ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBgBrush}"
@@ -12,6 +12,12 @@
         AllowDrop="True" DragOver="OnWindowDragOver" Drop="OnWindowDrop"
         DragLeave="OnWindowDragLeave"
         Closing="Window_Closing">
+
+    <!-- v1.40：窗口改成固定高度 780，不再 SizeToContent="Height"。
+         以前窗口高度等于「最高的那一页」（设置页 1334）再被 MaxHeight 夹到工作区，
+         结果每一页都被撑到上限，主页下面空出一大块——用户说的「浪费空间」就是这个。
+         现在窗口自己定高、每页各滚各的，谁长谁滚，短的那页不留白。
+         代价是矮屏（工作区 < 800）上窗口会被夹，所以导航做了「上滑显示、下滑收起」。 -->
 
     <!-- 自绘标题栏 + 系统级缩放边框；圆角交给 Win11 DWM（Win10 退化为直角） -->
     <shell:WindowChrome.WindowChrome>
@@ -1074,12 +1080,12 @@
                          这一页回答一个问题：「刚才到底怎么样了」。
                          以前这些答案散在「今日」窗口、日志、托盘提示里，要自己去找；
                          现在一左滑就在眼前，三句话说完，想追细节再点按钮。 -->
-                    <ScrollViewer x:Name="ScrollRun" VerticalScrollBarVisibility="Auto"
+                    <ScrollViewer x:Name="ScrollRun" VerticalScrollBarVisibility="Auto" ScrollChanged="PageScrollChanged"
                                   HorizontalScrollBarVisibility="Disabled">
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftRun" X="-980"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageRun" Margin="14,10,14,96">
+                        <Grid x:Name="PageRun" Margin="14,10,14,22">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -1126,12 +1132,12 @@
 
                     <!-- ===== 中页：启动 =====
                          「接下来几点跑、跑哪些」。打开程序就停在这一页。 -->
-                    <ScrollViewer x:Name="ScrollHome" VerticalScrollBarVisibility="Auto"
+                    <ScrollViewer x:Name="ScrollHome" VerticalScrollBarVisibility="Auto" ScrollChanged="PageScrollChanged"
                                   HorizontalScrollBarVisibility="Disabled">
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftHome" X="0"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageHome" Margin="14,10,14,96">
+                        <Grid x:Name="PageHome" Margin="14,10,14,22">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -1865,12 +1871,12 @@
                          工具、通知、系统这些「配一次就不常动」的东西全在这页。
                          它们以前压在中页下面，得滚很久；现在右滑一步就到，
                          而中页从此只剩「今晚跑什么」这件事。 -->
-                    <ScrollViewer x:Name="ScrollSettings" VerticalScrollBarVisibility="Auto"
+                    <ScrollViewer x:Name="ScrollSettings" VerticalScrollBarVisibility="Auto" ScrollChanged="PageScrollChanged"
                                   HorizontalScrollBarVisibility="Disabled">
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftSettings" X="980"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageSettings" Margin="14,10,14,96">
+                        <Grid x:Name="PageSettings" Margin="14,10,14,22">
                             <!-- v1.35：设置页从「一摞等宽长条」改成两列卡片墙。
                                  一张卡一件事：卡里有图标、有副标题、有一根细线把标题和内容分开，
                                  行与行之间靠留白与极淡分隔线区分，不再每一行套一个方块。
@@ -2571,12 +2577,12 @@
                          以前它是设置页里一张折叠卡，默认收起、还和通知卡挤同一排。
                          可插件是「要往里放东西」的地方——折叠着的入口等于让人自己猜它存在。
                          现在给它一整页：进来就看得见装了什么、装在哪、为什么没加载。 -->
-                    <ScrollViewer x:Name="ScrollPlugins" VerticalScrollBarVisibility="Auto"
+                    <ScrollViewer x:Name="ScrollPlugins" VerticalScrollBarVisibility="Auto" ScrollChanged="PageScrollChanged"
                                   HorizontalScrollBarVisibility="Disabled">
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftPlugins" X="1960"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PagePlugins" Margin="14,10,14,96">
+                        <Grid x:Name="PagePlugins" Margin="14,10,14,22">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -2621,6 +2627,102 @@
                             </Border>
                         </Grid>
                     </ScrollViewer>
+                    <!-- ===== 第五页：汇报（v1.40）=====
+                         和日志页回答的是同一类问题——「已经发生的事」。
+                         日志答「成没成、为什么没成」，这一页答「花了多久、时间去哪了」。
+                         时长必须由队列记（它本来就拿秒表算超时和重试），
+                         从日志里猜会碰上「中途卡住算多久」「重试算一次还是两次」这种没法猜的问题，
+                         所以另立了一本账 DurationLedger，只记跑完的结果。 -->
+                    <ScrollViewer x:Name="ScrollReport" VerticalScrollBarVisibility="Auto" ScrollChanged="PageScrollChanged"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="ShiftReport" X="2450"/>
+                        </ScrollViewer.RenderTransform>
+                        <Grid x:Name="PageReport" Margin="14,10,14,22">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="18,16,18,16">
+                                <StackPanel>
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Path Data="M3,17 L3,10 M8,17 L8,4 M13,17 L13,11 M18,17 L18,7"
+                                                  Stroke="{DynamicResource TextTertiaryBrush}" StrokeThickness="1.8"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                  Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center"/>
+                                            <TextBlock Text="今天一共跑了多久" FontSize="13.5" FontWeight="SemiBold"
+                                                       Margin="8,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                            <TextBlock x:Name="TbReportSummary" Text="" FontSize="10.5"
+                                                       Margin="10,2,0,0" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                        </StackPanel>
+                                        <Button Content="刷新" Style="{StaticResource MiniAction}"
+                                                HorizontalAlignment="Right" Click="BtnReportRefresh_Click"
+                                                ToolTip="重新读一遍今天的账本"/>
+                                    </Grid>
+
+                                    <TextBlock x:Name="TbReportTotal" Text="还没跑过" FontSize="30" FontWeight="SemiBold"
+                                               Margin="0,12,0,0" HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock x:Name="TbReportHint" Text="" FontSize="11.5" TextWrapping="Wrap"
+                                               Margin="0,6,0,0" LineHeight="18" MaxWidth="560"
+                                               HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+
+                                    <!-- 最近 7 天：柱子用纯视觉的方式画（一个 Border 撑高度），不放 Chart。
+                                         目的是「这几天有没有变多」，看个趋势就够。 -->
+                                    <StackPanel x:Name="ReportBars" Orientation="Horizontal"
+                                                Margin="0,16,0,0" Height="56" HorizontalAlignment="Left"/>
+                                    <TextBlock x:Name="TbReportBarsHint" Text="" FontSize="10.5"
+                                               Margin="0,4,0,0" HorizontalAlignment="Left"
+                                               Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                                <StackPanel>
+                                    <Grid>
+                                        <TextBlock Text="每个工具" FontSize="13.5" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock x:Name="TbReportToolHint" Text="" FontSize="10.5"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <StackPanel x:Name="ReportToolHost" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                                <StackPanel>
+                                    <Grid>
+                                        <TextBlock Text="按配置组" FontSize="13.5" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                        <TextBlock x:Name="TbReportGroupHint" Text="" FontSize="10.5"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                                    </Grid>
+                                    <StackPanel x:Name="ReportGroupHost" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,10,0,0" Padding="18,14,18,14">
+                                <StackPanel>
+                                    <TextBlock Text="这个数是哪来的" FontSize="13.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock FontSize="11.5" TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="19"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="每次工具跑完，队列把自己掐的秒表读数和开始时那一刻记下来，就是你看到的这个数。跳过的不算、中途手动停下的那次算到停为止。"/>
+                                    <TextBlock FontSize="11.5" TextWrapping="Wrap" Margin="0,6,0,0" LineHeight="19"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               Text="配置组那一段是「这次跑的时候，BetterGI 内部正好在哪个组上」。组还没结束的不计——宁可少记一个组，也不给一个猜出来的数。"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
                 </Grid>
             </Border>
 
@@ -2648,10 +2750,14 @@
             <Grid Grid.Row="1" Panel.ZIndex="20" Background="Transparent"
                   VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14">
                 <Border x:Name="NavShell" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        RenderTransformOrigin="0.5,0.5"
                         CornerRadius="27" Padding="5" Height="58"
                         PreviewMouseLeftButtonDown="NavShell_PreviewMouseLeftButtonDown"
                         PreviewMouseMove="NavShell_PreviewMouseMove"
                         PreviewMouseLeftButtonUp="NavShell_PreviewMouseLeftButtonUp">
+                    <Border.RenderTransform>
+                        <TranslateTransform x:Name="NavShellShift" Y="0"/>
+                    </Border.RenderTransform>
                     <!-- 液态玻璃外壳：三层。外面不写 Background，让底下的卡片透上来一点。 -->
                     <Border.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
@@ -2697,9 +2803,30 @@
                             </StackPanel>
                         </RadioButton>
 
+                        <!-- 汇报：四根柱子高低不一（「这几天各花了多久」）。
+                             v1.40 新增，插在日志与主页之间——它和日志回答的是同一类问题：
+                             日志答「成没成、为什么没成」，汇报答「花了多久、时间去哪了」。
+                             放在主页左边，是因为它属于「回头看」，而不是「现在要做什么」。
+                             为什么不用时钟：时钟说的是「现在几点」，这一页说的是「已经用掉多少」，
+                             柱状图一眼能看出多寡，时钟要读秒针。 -->
+                        <RadioButton x:Name="SegPageReport" Tag="1"
+                                     Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
+                                     ToolTip="今天每个工具、每个配置组各跑了多久">
+                            <StackPanel>
+                                <Grid Width="18" Height="18" HorizontalAlignment="Center">
+                                    <Path Data="M3,17 L3,10 M8,17 L8,4 M13,17 L13,11 M18,17 L18,7"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                          StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Stretch="Uniform"/>
+                                </Grid>
+                                <TextBlock Text="汇报" HorizontalAlignment="Center" Margin="0,3,0,0" FontSize="10.5"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                            </StackPanel>
+                        </RadioButton>
+
                         <!-- 主页：房子（「接下来几点跑」，每天回来的那一页）。
                              v1.34 之前叫「启动」——但进门的那一页不只是「启动」，它是整个软件的正门。 -->
-                        <RadioButton x:Name="SegPageHome" Tag="1" IsChecked="True"
+                        <RadioButton x:Name="SegPageHome" Tag="2" IsChecked="True"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="定时、托管配置、一键开跑">
                             <StackPanel>
@@ -2713,7 +2840,7 @@
                         </RadioButton>
 
                         <!-- 设置：两根滑杆（「把东西配好」） -->
-                        <RadioButton x:Name="SegPageSettings" Tag="2"
+                        <RadioButton x:Name="SegPageSettings" Tag="3"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="工具、通知、系统和插件">
                             <StackPanel>
@@ -2737,7 +2864,7 @@
                         <!-- 插件：一块拼图 + 插口。
                              v1.34 新增。它以前是设置页里一张默认收起的折叠卡——要往里放东西的入口，
                              折叠着等于让人自己猜它存在。 -->
-                        <RadioButton x:Name="SegPagePlugins" Tag="3"
+                        <RadioButton x:Name="SegPagePlugins" Tag="4"
                                      Style="{StaticResource NavBtn}" Checked="SegPage_Checked"
                                      ToolTip="装了哪些、装在哪、为什么没加载">
                             <StackPanel>

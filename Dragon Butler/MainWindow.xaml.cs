@@ -134,6 +134,8 @@ public partial class MainWindow : Window
         LoadSettingsToUi();
         RebuildCustomToolCards();
         RefreshPlugins();
+        // 汇报页只在切过去时刷一次（见 ShowPage），构造时不读盘：
+        // DurationLedger 是懒加载的，主窗上屏那一瞬去读 60 天的账本纯属浪费。
         RenderQueue();
         RefreshToolCards();
         RefreshShield();
@@ -1261,7 +1263,7 @@ public partial class MainWindow : Window
         {
             if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
             Activate();
-            ShowPage(1, animate: false);
+            ShowPage(Pager.Home, animate: false);
             RevealCard(QueueHost);
         }
         catch (Exception ex) { LogService.LogEvent("定位队列失败：" + ex.Message); }
@@ -3798,11 +3800,11 @@ public partial class MainWindow : Window
     // ===== 三页切换（v1.22）=====
 
     /// <summary>
-    /// 当前停在哪一页：0 = 运行，1 = 启动（打开就在这），2 = 设置。
+    /// 当前停在哪一页：0 = 日志，1 = 汇报（v1.40），2 = 主页（打开就在这），3 = 设置，4 = 插件。
     /// 存成字段而不是读控件状态，是因为切页动画期间 RadioButton 已经变了、页面还没到位，
     /// 中间会有一瞬间两者不一致，靠控件判断会把自己绊一下。
     /// </summary>
-    private int _page = 1;
+    private int _page = Pager.Home;
 
     /// <summary>可视区宽度变了（首次上屏、改窗口大小）：把三页重新摆到各自位置，不动画。</summary>
     private void OnPageClipSized(object sender, SizeChangedEventArgs e)
@@ -3823,8 +3825,8 @@ public partial class MainWindow : Window
         var offsets = Pager.Offsets(index);
         var transforms = new (TranslateTransform? T, int Offset)[]
         {
-            (ShiftRun, offsets[0]), (ShiftHome, offsets[1]),
-            (ShiftSettings, offsets[2]), (ShiftPlugins, offsets[3]),
+            (ShiftRun, offsets[0]), (ShiftReport, offsets[1]), (ShiftHome, offsets[2]),
+            (ShiftSettings, offsets[3]), (ShiftPlugins, offsets[4]),
         };
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         var dur = TimeSpan.FromMilliseconds(260);
@@ -3847,8 +3849,9 @@ public partial class MainWindow : Window
 
     private void SegPage_Checked(object sender, RoutedEventArgs e)
     {
-        // 构造期间 XAML 里的 IsChecked="True" 就会触发一次，那时三个平移量还没建好
-        if (ShiftRun == null || ShiftHome == null || ShiftSettings == null || ShiftPlugins == null) return;
+        // 构造期间 XAML 里的 IsChecked="True" 就会触发一次，那时几个平移量还没建好
+        if (ShiftRun == null || ShiftReport == null || ShiftHome == null
+            || ShiftSettings == null || ShiftPlugins == null) return;
         if (sender is RadioButton rb && int.TryParse(rb.Tag as string, out int want)) ShowPage(want);
     }
 
@@ -3949,8 +3952,8 @@ public partial class MainWindow : Window
         var offsets = Pager.Offsets(_page);
         var transforms = new (TranslateTransform? T, int Offset)[]
         {
-            (ShiftRun, offsets[0]), (ShiftHome, offsets[1]),
-            (ShiftSettings, offsets[2]), (ShiftPlugins, offsets[3]),
+            (ShiftRun, offsets[0]), (ShiftReport, offsets[1]), (ShiftHome, offsets[2]),
+            (ShiftSettings, offsets[3]), (ShiftPlugins, offsets[4]),
         };
         foreach (var (t, offset) in transforms)
         {
@@ -3981,6 +3984,8 @@ public partial class MainWindow : Window
             // 切到运行页时顺手刷一遍：那一页的东西是「刚才怎么样了」，
             // 用户往往是刚回来才看它，进页不刷就会看到上一次的旧话。
             if (index == 0) RefreshRunPage();
+            // 汇报页同理：这一页摆的是「今天到现在为止」，隔一夜再看会全是昨天的数。
+            if (index == Pager.Report) RefreshReportPage();
         }
         catch (Exception ex)
         {
@@ -3993,7 +3998,8 @@ public partial class MainWindow : Window
     {
         var pairs = new (RadioButton? Btn, int Index)[]
         {
-            (SegPageRun, 0), (SegPageHome, 1), (SegPageSettings, 2), (SegPagePlugins, 3),
+            (SegPageRun, Pager.Log), (SegPageReport, Pager.Report), (SegPageHome, Pager.Home),
+            (SegPageSettings, Pager.Settings), (SegPagePlugins, Pager.Plugins),
         };
         foreach (var (btn, i) in pairs)
         {
@@ -4109,6 +4115,69 @@ public partial class MainWindow : Window
 
     private void BtnRunToday_Click(object sender, RoutedEventArgs e) => OpenToday();
 
+    // ===== 滚动显隐导航栏（v1.40）=====
+    //
+    // 为什么要有：窗口默认高度收到「内容刚好放下」之后，胶囊就会压住最后一行。
+    // 与其在每页底部永远留 96px 的死空间，不如让胶囊自己躲开——
+    // 往下滚（人正在往下看）就让开，往上滚（人想看别的）就回来。
+    //
+    // 判据只看「这一下滚动的方向」，不看绝对位置：
+    // 在页面中部来回微调滚动条时，绝对位置几乎不变，按方向判才不会闪。
+    // 另外「滚到顶部/底部」直接定死状态——那里再滚也不会有新内容，按方向判会卡住。
+
+    private const double NavHideOffset = 74;     // 藏起来要挪多远：58 胶囊 + 14 边距 + 2 呼吸
+    private bool _navHidden;
+
+    private void PageScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (NavShellShift == null || NavShell == null) return;
+        if (Math.Abs(e.VerticalChange) < 0.5) return;     // 只是横向或改尺寸，不算滚动
+
+        bool shouldHide = _navHidden;
+        if (e.VerticalOffset <= 0.5)
+        {
+            shouldHide = false;                            // 顶到头：一定要看得见
+        }
+        else if (Math.Abs(e.VerticalChange) > 0.5)
+        {
+            // 往下滚 = 内容在往上走 = 人正在看下面 → 收；往上滚 → 放出来。
+            // 阈值 2px：滚轮的每一格都会触发一次，太灵敏会让胶囊发抖。
+            if (e.VerticalChange > 2) shouldHide = true;
+            else if (e.VerticalChange < -2) shouldHide = false;
+        }
+
+        if (shouldHide == _navHidden) return;
+        SetNavHidden(shouldHide, animate: true);
+    }
+
+    /// <summary>
+    /// 把胶囊藏起来或放回去。位移和透明度一起动：
+    /// 只位移会留一块模糊的阴影在那儿，只调透明度又会像「凭空消失」。
+    /// </summary>
+    private void SetNavHidden(bool hidden, bool animate)
+    {
+        if (NavShellShift == null || NavShell == null) return;
+        _navHidden = hidden;
+        double target = hidden ? NavHideOffset : 0;
+        double opacity = hidden ? 0 : 1;
+
+        if (!animate)
+        {
+            NavShellShift.BeginAnimation(TranslateTransform.YProperty, null);
+            NavShellShift.Y = target;
+            NavShell.BeginAnimation(OpacityProperty, null);
+            NavShell.Opacity = opacity;
+            return;
+        }
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var dur = TimeSpan.FromMilliseconds(220);
+        NavShellShift.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(target, dur) { EasingFunction = ease, FillBehavior = FillBehavior.HoldEnd });
+        NavShell.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(opacity, dur) { EasingFunction = ease, FillBehavior = FillBehavior.HoldEnd });
+    }
+
     private void BtnRunLog_Click(object sender, RoutedEventArgs e)
     {
         try { AppState.PublishLog("日志在 " + LogService.Dir); } catch { }
@@ -4176,6 +4245,281 @@ public partial class MainWindow : Window
             LogService.LogEvent("运行页刷新失败：" + ex.Message);
         }
     }
+
+    // ===== 汇报页（v1.40）=====
+    //
+    // 这一页只回答一个问题：「时间去哪了」。
+    // 数字全部来自 DurationLedger（每次工具跑完由队列记一笔），
+    // 这里只负责排版，不做任何推算——推算出来的时长没人敢信。
+    //
+    // 和日志页的分工：日志答「成没成、为什么没成」，这一页答「花了多少」。
+    // 两页都摆「已经发生的事」，所以挨着放。
+
+    /// <summary>把秒数说成人话。一小时以内按分钟，超过按时分。</summary>
+    private static string Minutes(int seconds)
+    {
+        if (seconds <= 0) return "0";
+        if (seconds < 60) return $"{seconds} 秒";
+        int totalMinutes = (seconds + 30) / 60;      // 四舍五入到分钟：59 秒不该显示成「0 分钟」
+        int h = totalMinutes / 60;
+        int m = totalMinutes % 60;
+        if (h > 0) return m > 0 ? $"{h} 小时 {m} 分" : $"{h} 小时";
+        return $"{m} 分钟";
+    }
+
+    private void RefreshReportPage()
+    {
+        try
+        {
+            var now = DateTime.Now;
+            var today = DurationLedger.GetDay(now);
+
+            if (today.Count == 0)
+            {
+                TbReportTotal.Text = "还没跑过";
+                TbReportSummary.Text = "";
+                TbReportHint.Text = QueueService.IsRunning
+                    ? "这一轮还在跑，跑完一项就会记一笔。"
+                    : "今晚跑一次，明天这里就有数了。";
+            }
+            else
+            {
+                int totalSeconds = today.Sum(e => e.Seconds);
+                int runCount = today.Sum(e => e.Runs);
+                TbReportTotal.Text = Minutes(totalSeconds);
+                TbReportSummary.Text = $"{today.Count} 个工具 · 一共 {runCount} 次";
+                // 只挑一句最值得说的，不堆排比句。
+                var top = today[0];
+                TbReportHint.Text = today.Count == 1
+                    ? $"{top.Name} 一项就把它跑完了。"
+                    : $"最费时间的是 {top.Name}，占了 {Minutes(top.Seconds)}。";
+            }
+
+            RenderReportBars(now);
+            RenderReportTools(today);
+            RenderReportGroups(today);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("汇报页刷新失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 最近 7 天：一天一根柱子，高的那天跑得久。
+    /// 用 Border 撑高度而不是画 Chart——这一块只想让人看出「有没有变多」，
+    /// 加个坐标系反而要多读好几眼。
+    /// </summary>
+    private void RenderReportBars(DateTime now)
+    {
+        ReportBars.Children.Clear();
+        var recent = DurationLedger.Recent(7);
+        if (recent.Count == 0)
+        {
+            TbReportBarsHint.Text = "";
+            return;
+        }
+
+        double max = recent.Max(r => r.Total.TotalSeconds);
+        if (max <= 0) max = 1;
+
+        foreach (var (day, total) in recent)
+        {
+            bool isToday = day.Date == now.Date;
+            double seconds = total.TotalSeconds;
+            // 最小 3px：0 秒的那天也要留个印子，不然那根柱子整个消失，
+            // 看上去像「那天不存在」，而不是「那天没跑」。
+            double h = seconds <= 0 ? 3 : Math.Max(3, 48 * seconds / max);
+
+            var col = new StackPanel
+            {
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Bottom,
+            };
+
+            var bar = new Border
+            {
+                Width = 22,
+                Height = h,
+                CornerRadius = new CornerRadius(4, 4, 2, 2),
+                Background = seconds > 0
+                    ? (isToday ? BrushOf("BrandBrush") : BrushOf("BorderStrongBrush"))
+                    : BrushOf("BorderBrush"),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                ToolTip = $"{day:MM-dd}　{(seconds > 0 ? Minutes((int)Math.Round(seconds)) : "没跑")}",
+            };
+            col.Children.Add(bar);
+
+            col.Children.Add(new TextBlock
+            {
+                Text = day.ToString("dd"),   // 只留日，省地方
+                FontSize = 9.5,
+                Margin = new Thickness(0, 4, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Foreground = isToday ? BrushOf("TextPrimaryBrush") : BrushOf("TextTertiaryBrush"),
+            });
+
+            ReportBars.Children.Add(col);
+        }
+
+        var best = recent.OrderByDescending(r => r.Total.TotalSeconds).First();
+        TbReportBarsHint.Text = best.Total.TotalSeconds > 0
+            ? $"最近 7 天，{best.Day:MM-dd} 跑得最久（{Minutes((int)Math.Round(best.Total.TotalSeconds))}）。"
+            : "最近 7 天都还没跑过。";
+    }
+
+    /// <summary>每个工具一行：名字、占比条、总时长、跑了几次。</summary>
+    private void RenderReportTools(List<DurationEntry> today)
+    {
+        ReportToolHost.Children.Clear();
+        if (today.Count == 0)
+        {
+            TbReportToolHint.Text = "";
+            return;
+        }
+
+        int total = today.Sum(e => e.Seconds);
+        TbReportToolHint.Text = total > 0 ? $"合计 {Minutes(total)}" : "";
+
+        foreach (var e in today)
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var left = new StackPanel();
+            left.Children.Add(new TextBlock
+            {
+                Text = e.Name.Length > 0 ? e.Name : e.ToolId,
+                FontSize = 12.5,
+                Foreground = BrushOf("TextPrimaryBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+
+            // 占比条：固定 160 宽，只用来横向比较，不随窗口拉伸——
+            // 一拉伸它就跟右边那个数字对不齐了。
+            double frac = total > 0 ? (double)e.Seconds / total : 0;
+            var trackHost = new Grid
+            {
+                Width = 160,
+                Margin = new Thickness(0, 6, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            trackHost.Children.Add(new Border
+            {
+                Height = 4,
+                CornerRadius = new CornerRadius(2),
+                Background = BrushOf("ControlBgBrush"),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = 160,
+            });
+            trackHost.Children.Add(new Border
+            {
+                Height = 4,
+                CornerRadius = new CornerRadius(2),
+                Background = BrushOf("BrandBrush"),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = Math.Max(2, 160 * frac),
+            });
+            left.Children.Add(trackHost);
+
+            Grid.SetColumn(left, 0);
+            row.Children.Add(left);
+
+            var right = new StackPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 0, 0, 0) };
+            right.Children.Add(new TextBlock
+            {
+                Text = Minutes(e.Seconds),
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Foreground = BrushOf("TextPrimaryBrush"),
+            });
+            right.Children.Add(new TextBlock
+            {
+                Text = e.Runs > 1 ? $"{e.Runs} 次" : (e.LastAt ?? ""),
+                FontSize = 10,
+                Margin = new Thickness(0, 3, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Foreground = BrushOf("TextTertiaryBrush"),
+            });
+
+            Grid.SetColumn(right, 1);
+            row.Children.Add(right);
+
+            ReportToolHost.Children.Add(row);
+        }
+    }
+
+    /// <summary>
+    /// 按配置组：把所有工具在同一组上的时间加起来。
+    /// 一个组可能被好几个工具各自跑过（BetterGI 和三月七助手都可能进「每日委托」），
+    /// 所以这里求的是「这个组一共被占用多久」，不是某一个工具在它上面花了多久。
+    /// </summary>
+    private void RenderReportGroups(List<DurationEntry> today)
+    {
+        ReportGroupHost.Children.Clear();
+
+        var merged = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var e in today)
+        {
+            foreach (var kv in e.Groups)
+            {
+                merged.TryGetValue(kv.Key, out int had);
+                merged[kv.Key] = had + kv.Value;
+            }
+        }
+
+        if (merged.Count == 0)
+        {
+            TbReportGroupHint.Text = "";
+            ReportGroupHost.Children.Add(new TextBlock
+            {
+                Text = today.Count == 0
+                    ? "还没有数据。"
+                    : "今天还没记到配置组。跑的时候 BetterGI 那边没报组名，或者那一组还没结束——只有整组跑完的才算数。",
+                FontSize = 11.5,
+                LineHeight = 18,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = BrushOf("TextSecondaryBrush"),
+            });
+            return;
+        }
+
+        TbReportGroupHint.Text = $"{merged.Count} 个组";
+
+        foreach (var kv in merged.OrderByDescending(k => k.Value))
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var name = new TextBlock
+            {
+                Text = kv.Key,
+                FontSize = 12,
+                Foreground = BrushOf("TextSecondaryBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(name, 0);
+            row.Children.Add(name);
+
+            var secs = new TextBlock
+            {
+                Text = Minutes(kv.Value),
+                FontSize = 12,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Foreground = BrushOf("TextPrimaryBrush"),
+            };
+            Grid.SetColumn(secs, 1);
+            row.Children.Add(secs);
+
+            ReportGroupHost.Children.Add(row);
+        }
+    }
+
+    private void BtnReportRefresh_Click(object sender, RoutedEventArgs e) => RefreshReportPage();
 
     // ===== 开跑前体检（v1.19）=====
     //
@@ -6889,13 +7233,19 @@ public partial class MainWindow : Window
             // 判断顺序从里到外：先进页，再展开折叠卡，最后才滚。
             if (PageRun != null && (PageRun == target || PageRun.IsAncestorOf(target)))
             {
-                ShowPage(0);
+                ShowPage(Pager.Log);
+                target.BringIntoView();
+                return;
+            }
+            if (PageReport != null && (PageReport == target || PageReport.IsAncestorOf(target)))
+            {
+                ShowPage(Pager.Report);
                 target.BringIntoView();
                 return;
             }
             if (PageSettings != null && (PageSettings == target || PageSettings.IsAncestorOf(target)))
             {
-                ShowPage(2);
+                ShowPage(Pager.Settings);
             }
 
             // 折叠卡里的元素是 Collapsed 的，先展开父级（只往上找一层已知的折叠体）
