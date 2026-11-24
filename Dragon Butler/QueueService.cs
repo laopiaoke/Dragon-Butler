@@ -64,6 +64,17 @@ public static class QueueService
     private static CancellationTokenSource? _cts;
     private static bool _shutdownPending;
 
+    /// <summary>
+    /// v1.43 / 任务二：待关机状态的有效期。
+    ///
+    /// <para>
+    /// 只有布尔值的话，状态没法自己过期：用户在外面用 shutdown /a 撤了、
+    /// 或者干脆让电脑关掉了，这个 true 会一直留着，界面上「取消关机」按钮永不消失——
+    /// 点下去还是「已取消关机」，而其实早就没事了。
+    /// </para>
+    /// </summary>
+    private static DateTime _shutdownPendingUntil;
+
     /// <summary>队列状态变化（开始/结束/换项），UI 刷新用。</summary>
     public static event Action? StateChanged;
 
@@ -86,7 +97,13 @@ public static class QueueService
     public static bool IsWaitingIdle { get; internal set; }
 
     /// <summary>是否已排定关机（60 秒倒计时内）。</summary>
-    public static bool IsShutdownPending { get { lock (Gate) return _shutdownPending; } }
+    public static bool IsShutdownPending
+    {
+        get
+        {
+            lock (Gate) return _shutdownPending && DateTime.Now <= _shutdownPendingUntil;
+        }
+    }
 
     /// <summary>最近一次队列结果（UI 展示用）。</summary>
     public static List<QueueItemResult> LastResults { get; } = new();
@@ -94,26 +111,79 @@ public static class QueueService
     /// <summary>等待电脑空闲时，用户点「立即开始」；返回 true 表示已请求。</summary>
     public static void SkipIdleWait() => IdleGuard.RequestSkip();
 
-    /// <summary>取消已排定的关机（关机倒计时内可用）。</summary>
-    public static void CancelShutdown()
+    /// <summary>
+    /// 取消已排定的关机（关机倒计时内可用）。
+    ///
+    /// <para>
+    /// v1.43 / 任务二：返回「取消到底成没成」，而且**先确认成功再清状态**。
+    /// 原来的写法是先把 _shutdownPending 抹掉再去叫 shutdown /a，失败了也不回头，
+    /// 于是界面上按钮消失、用户以为取消了，60 秒后电脑照关——这比不做还糟。
+    /// </para>
+    /// <para>
+    /// shutdown /a 在没有倒计时时会返回非 0（「没有进行中的关机」），这也是真实结果，
+    /// 但它说明「此刻确实没有待办关机」——所以这种情况照样清状态，只是文案不同。
+    /// </para>
+    /// </summary>
+    /// <returns>取消命令被系统接受（或本来就没有待办关机）返回 true。</returns>
+    public static bool CancelShutdown()
     {
-        if (!_shutdownPending) return;
-        _shutdownPending = false;
+        if (!_shutdownPending)
+        {
+            // 状态本来就是干净的，不用叫命令，也不用提示。
+            return false;
+        }
+
+        bool aborted;
+        string detail;
         try
         {
             var psi = new ProcessStartInfo("shutdown", "/a")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
             };
-            Process.Start(psi);
-            LogService.LogEvent("已取消关机倒计时（shutdown /a）");
-            NotifyService.Show(NotifyLevel.Info, "龙管家", "已取消关机，电脑继续运行。");
+            using Process? proc = Process.Start(psi);
+            if (proc == null)
+            {
+                detail = "系统没有返回进程";
+                aborted = false;
+            }
+            else
+            {
+                // 有超时，否则一个卡住的 shutdown 会把 UI 线程拖死。
+                if (!proc.WaitForExit(5000))
+                {
+                    detail = "shutdown /a 5 秒没有返回";
+                    aborted = false;
+                }
+                else
+                {
+                    aborted = proc.ExitCode == 0;
+                    detail = aborted ? "" : $"shutdown /a 退出码 {proc.ExitCode}";
+                }
+            }
         }
         catch (Exception ex)
         {
-            LogService.LogEvent("取消关机失败：" + ex.Message);
+            aborted = false;
+            detail = ex.Message;
         }
+
+        if (aborted)
+        {
+            lock (Gate) _shutdownPending = false;
+            LogService.LogEvent("已取消关机倒计时（shutdown /a）");
+            NotifyService.Show(NotifyLevel.Info, "龙管家", "已取消关机，电脑继续运行。");
+            NotifyShutdownStateChanged();
+            return true;
+        }
+
+        // 失败：状态和按钮都留着，让人还能再点一次、还能手动处理。
+        LogService.LogEvent($"取消关机失败：{detail}");
+        NotifyService.Show(NotifyLevel.Warning, "龙管家", $"没能取消关机（{detail}）。倒计时可能还在，请再点一次或手动运行 shutdown /a。");
+        return false;
     }
 
     /// <summary>测试用：覆盖工具间隔（null=按设置）。</summary>
@@ -396,6 +466,10 @@ public static class QueueService
             catch { }
 
             int finished = 0;
+            // v1.43 / 任务一：「依赖没跑成 → 整队中止」也是一种「这一趟没跑完」的事实。
+            // 原来这里只 break，什么都不留，收尾那边看到的是「跑过的都成功了」，
+            // 于是 AnyFailed=false → 关机照做。事实必须带出去。
+            string? dependencyAbort = null;
             // v1.9 / P2：这一轮里成没成，依赖门只认本轮结果 + 今天台账（跨轮次也能接着跑）
             var doneThisRun = new HashSet<string>(RunJournal.DoneToolsToday(), StringComparer.OrdinalIgnoreCase);
             var failedThisRun = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -449,7 +523,12 @@ public static class QueueService
                         Skipped = true,
                     });
                     RaiseState();
-                    if (abort) break;
+                    if (abort)
+                    {
+                        // 中止原因要能在收尾时说清：谁、等谁、没等到。
+                        dependencyAbort = $"{profile.DisplayName} 的依赖没跑成（{gate.Reason}）";
+                        break;
+                    }
                     continue;
                 }
 
@@ -531,7 +610,7 @@ public static class QueueService
                 }
             }
 
-            FinishQueue(trigger, finished);
+            FinishQueue(trigger, finished, dependencyAbort);
             return finished;
         }
         finally
@@ -637,7 +716,52 @@ public static class QueueService
     }
 
     /// <summary>关机已排定（供取消按钮判断）。</summary>
-    internal static void MarkShutdownPending() => _shutdownPending = true;
+    internal static void MarkShutdownPending()
+    {
+        lock (Gate)
+        {
+            _shutdownPending = true;
+            // 60 秒倒计时 + 5 秒余量：命令发出去到系统真正关机之间有一点延迟，
+            // 有效期卡得太死会让按钮在最后一秒闪一下又回来。
+            _shutdownPendingUntil = DateTime.Now.AddSeconds(65);
+        }
+        NotifyShutdownStateChanged();
+    }
+
+    /// <summary>
+    /// v1.43 / 任务二 / P2-3：把过期的待关机状态抹掉（界面每次刷新时顺手调一次）。
+    ///
+    /// <para>
+    /// 外部程序执行了 shutdown /a、或者倒计时走完了，这里都读不出来——
+    /// 但两种情况都能从「时间过了」推出来。到点就清，按钮不会永远留在那儿。
+    /// </para>
+    /// </summary>
+    /// <returns>状态是否发生了变化。</returns>
+    public static bool ExpireShutdownPendingIfStale()
+    {
+        lock (Gate)
+        {
+            if (!_shutdownPending || DateTime.Now <= _shutdownPendingUntil) return false;
+            _shutdownPending = false;
+        }
+        LogService.LogEvent("待关机状态已过期（倒计时结束或被外部取消），界面复位");
+        NotifyShutdownStateChanged();
+        return true;
+    }
+
+    /// <summary>
+    /// v1.43 / 任务二：待关机状态变了就通知界面重算一次。
+    ///
+    /// <para>
+    /// 「取消关机」按钮的可见性完全跟着 IsShutdownPending 走。不主动通知的话，
+    /// 关机排上之后按钮要等到下一次别的状态刷新才出现——那可能是几十秒后，
+    /// 而倒计时只有 60 秒。
+    /// </para>
+    /// </summary>
+    internal static void NotifyShutdownStateChanged()
+    {
+        try { StateChanged?.Invoke(); } catch { }
+    }
 
     /// <summary>请求停止当前队列（运行中工具按"用户中止"处理并结束进程）。</summary>
     public static void Stop()
@@ -1151,17 +1275,38 @@ public static class QueueService
         return (false, "");
     }
 
-    /// <summary>收尾：汇总通知 + 跑完动作。</summary>
-    private static void FinishQueue(QueueTrigger trigger, int finished)
+    /// <summary>
+    /// 收尾：汇总通知 + 跑完动作。
+    ///
+    /// <para>
+    /// v1.43 / 任务一：收尾要拿到的不是「跑过的那几项怎么样」，而是「这一趟到底怎么样」。
+    /// 原来只看 ran（= 非跳过项），于是两种真实情况被抹平了：
+    /// 全部跳过会变成 total=0 / 没有失败，依赖门中止会变成「跑过的都成功了」。
+    /// 两者都会让睡眠/关机的授权判定以为「一切正常」。
+    /// </para>
+    /// </summary>
+    /// <param name="dependencyAbort">依赖没跑成导致整队中止时的原因；没有中止为 null。</param>
+    private static void FinishQueue(QueueTrigger trigger, int finished, string? dependencyAbort)
     {
         var ran = LastResults.Where(r => !r.Skipped).ToList();
         int total = ran.Count;
         int ok = ran.Count(r => r.State == ToolRunState.Done);
         bool anyHalted = ran.Any(r => r.State == ToolRunState.Halted);
         bool anyStalled = ran.Any(r => r.State == ToolRunState.Stalled);
-        bool anyFailed = ran.Any(r => r.State is ToolRunState.Failed or ToolRunState.Timeout
+        // v1.43 / 任务一：依赖门中止也是失败——它意味着「该跑的没跑」。
+        bool dependencyFailed = dependencyAbort != null;
+        bool anyFailed = dependencyFailed || ran.Any(r => r.State is ToolRunState.Failed or ToolRunState.Timeout
             or ToolRunState.Halted or ToolRunState.Stalled);
+        // 一个工具都没实际执行：全是「这次不跑」或被前置检查挡掉。
+        bool nothingRan = total == 0 && !dependencyFailed;
         TimeSpan elapsed = TimeSpan.FromSeconds(ran.Sum(r => r.Elapsed.TotalSeconds));
+
+        // v1.43 / P2-2：总结先落日志，再打现场包。
+        // 原来的顺序是先 Capture 再写「队列结束」，于是最该看的那一行永远进不了包。
+        string summaryLine = $"队列结束：{ok}/{total} 成功（实际执行 {finished} 项），耗时 {FormatDuration(elapsed)}，触发 {trigger}，停止={_stopRequested}"
+            + (dependencyFailed ? $"，依赖中止：{dependencyAbort}"
+                : nothingRan ? "，没有可执行项" : "");
+        LogService.LogEvent(summaryLine);
 
         // v1.6 / F3：有事才留现场——成功时打一份包只是往硬盘扔垃圾。
         // 先打包再发通知，这样通知正文里能直接给出文件夹路径。
@@ -1176,9 +1321,16 @@ public static class QueueService
                 if (blamed != null) blamedProfile = ProfileRegistry.Get(blamed.ToolId);
             }
             catch { }
-            string why = blamed == null ? "队列失败" : $"{blamed.DisplayName} {blamed.State}（{blamed.Reason}）";
+            // 依赖中止时 blamed 是 null（中止那一项本身记为 Skipped），原因在 dependencyAbort 里。
+            string why = dependencyAbort ?? (blamed == null ? "队列失败" : $"{blamed.DisplayName} {blamed.State}（{blamed.Reason}）");
             string? dir = IncidentBundle.Capture("队列结束：" + why, blamedProfile);
-            if (!string.IsNullOrEmpty(dir)) bundleNote = " 现场：" + dir;
+            if (!string.IsNullOrEmpty(dir))
+            {
+                bundleNote = " 现场：" + dir;
+                // P2-2：把最终队列总结作为独立证据写进包。
+                // 只靠 log.txt 的尾巴不够——收尾这几行常常刚好被后来的日志挤出去。
+                try { File.WriteAllText(Path.Combine(dir, "queue-summary.txt"), summaryLine); } catch { }
+            }
         }
 
         string text;
@@ -1186,7 +1338,7 @@ public static class QueueService
         if (anyHalted)
         {
             var h = ran.First(r => r.State == ToolRunState.Halted);
-            text = $"【龙管家】{h.DisplayName}报告完成但进程未退出，队列已暂停等你处理。原因：{h.Reason}";
+            text = $"【龙管家】「{h.DisplayName}」这次没法确认结果，队列已暂停等你处理。原因：{h.Reason}";
         }
         else if (anyStalled && !AppState.Settings.StallAutoKill)
         {
@@ -1198,9 +1350,17 @@ public static class QueueService
             var st = ran.First(r => r.State == ToolRunState.Stalled);
             text = $"【龙管家】队列结束：{ok}/{total} 成功。⚠ {st.DisplayName} 疑似挂起，已自动终止并继续。原因：{st.Reason}";
         }
-        else if (total == 0)
+        else if (dependencyFailed)
         {
-            text = "【龙管家】队列结束：没有可执行项。";
+            // 中止不是「跑完了」：说清停在哪、为什么停、还差什么。
+            text = total == 0
+                ? $"【龙管家】队列停在中途：{dependencyAbort}。一项都没跑成，今晚不算完成。"
+                : $"【龙管家】队列停在中途：{dependencyAbort}。前面 {ok}/{total} 项成功，剩下的没跑，今晚不算完成。";
+        }
+        else if (nothingRan)
+        {
+            // 全部被跳过（这次不跑 / 前置检查挡掉）：一项都没执行，不是「跑完了」。
+            text = "【龙管家】队列结束：没有可执行项，今晚一个都没跑。";
         }
         else if (ok == total)
         {
@@ -1248,7 +1408,7 @@ public static class QueueService
         // 只替换一句正文，标题、级别、跑完动作都不动——改正文不该牵出别的事。
         string custom = NotifyTemplate.Render(
             NotifyTemplate.OneLine(AppState.Settings.NotifyQueueTemplate),
-            BuildTemplateValues(ok, total, elapsed, ran, bundleNote, harvestNote));
+            BuildTemplateValues(ok, total, elapsed, ran, bundleNote, harvestNote, dependencyAbort));
         if (custom.Length > 0) text = custom;
 
         NotifyService.Show(level, "龙管家", text);
@@ -1257,22 +1417,22 @@ public static class QueueService
         // 通知里那些【】、路径、退出码念出来没法听。默认关，见 AppSettings.SpeechEnabled。
         try
         {
-            if (ok == total && total > 0)
+            if (nothingRan) SpeechService.Speak("队列结束了，今晚没有可执行项。");
+            else if (dependencyFailed) SpeechService.Speak("队列停在中途，有一项依赖没跑成。", 30);
+            else if (ok == total && total > 0)
                 SpeechService.Speak($"一条龙跑完了，{total} 项全部成功，用时 {FormatDuration(elapsed)}。");
             else if (total > 0)
                 SpeechService.Speak($"一条龙跑完了，{total} 项里成功 {ok} 项，有失败。", 30);
         }
         catch { }
 
-
-        LogService.LogEvent($"队列结束：{ok}/{total} 成功，耗时 {FormatDuration(elapsed)}，触发 {trigger}，停止={_stopRequested}");
-
         // 记录到设置（界面"上次执行"用）
         try
         {
             AppState.Settings.LastRunAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
             AppState.Settings.LastRunSeconds = (int)elapsed.TotalSeconds;
-            AppState.Settings.LastRunOk = ok == total && total > 0;
+            // 依赖中止/一项没跑都不算「上次跑成功了」。
+            AppState.Settings.LastRunOk = ok == total && total > 0 && !dependencyFailed;
             AppState.SaveSettings();
         }
         catch { }
@@ -1296,6 +1456,8 @@ public static class QueueService
             Success = ok,
             HasFailure = anyFailed,
             Stopped = _stopRequested,
+            NothingRan = nothingRan,
+            DependencyAbortReason = dependencyAbort,
         });
 
         // v1.41 / M3-7：「这次不跑」只活一趟，队列结束就清空。
@@ -1306,17 +1468,31 @@ public static class QueueService
     /// v1.15 / L6：给通知模板填值。
     /// 「原因」取第一项没跑成的原因，「现场」「收益」沿用内置正文那两段（带前导空格，
     /// 用户把它们放在句子中间读起来也不会粘在一起）。
+    ///
+    /// <para>
+    /// v1.43 / 任务一：「结果」不再只分成功/有失败——依赖中止、一项没跑都是单独一类，
+    /// 用户模板里那句「{结果}」得能看出这一趟到底怎么了。
+    /// </para>
     /// </summary>
     private static Dictionary<string, string> BuildTemplateValues(
-        int ok, int total, TimeSpan elapsed, List<QueueItemResult> ran, string bundleNote, string harvestNote)
+        int ok, int total, TimeSpan elapsed, List<QueueItemResult> ran, string bundleNote, string harvestNote,
+        string? dependencyAbort)
     {
-        string reason = "";
-        var bad = ran.FirstOrDefault(r => r.State != ToolRunState.Done);
-        if (bad != null) reason = bad.DisplayName + " " + bad.Reason;
+        string reason = dependencyAbort ?? "";
+        if (reason.Length == 0)
+        {
+            var bad = ran.FirstOrDefault(r => r.State != ToolRunState.Done);
+            if (bad != null) reason = bad.DisplayName + " " + bad.Reason;
+        }
+
+        string result;
+        if (dependencyAbort != null) result = "中止";
+        else if (total == 0) result = "没跑";
+        else result = ok == total ? "成功" : "有失败";
 
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["结果"] = ok == total && total > 0 ? "成功" : "有失败",
+            ["结果"] = result,
             ["成功"] = ok.ToString(),
             ["总数"] = total.ToString(),
             ["耗时"] = FormatDuration(elapsed),
@@ -1463,6 +1639,19 @@ public sealed class AfterRunContext
 
     /// <summary>是否被用户停止。</summary>
     public bool Stopped { get; init; }
+
+    /// <summary>
+    /// v1.43 / 任务一：这一趟一个工具都没实际执行（全被跳过）。
+    ///
+    /// <para>
+    /// 光看 Total=0 分不出「今晚没事可做」和「整队被依赖门中止」——后者是失败。
+    /// 两种要分开，否则没跑会被当成跑完了。
+    /// </para>
+    /// </summary>
+    public bool NothingRan { get; init; }
+
+    /// <summary>依赖没跑成导致整队中止时的原因；没中止则为 null。</summary>
+    public string? DependencyAbortReason { get; init; }
 }
 
 /// <summary>
@@ -1486,10 +1675,27 @@ public static class AfterRunActionService
     /// <para>纯函数，便于断言。</para>
     /// </summary>
     public static bool ShouldRun(string? action, bool hasFailure, bool stopped, bool runOnFailure)
+        => ShouldRun(action, hasFailure, stopped, runOnFailure, nothingRan: false, dependencyAbort: false);
+
+    /// <summary>
+    /// v1.43 / 任务一：把「这一趟到底跑没跑成」带进授权判定。
+    ///
+    /// <para>
+    /// 多两个参数，是因为原来只有「有没有失败」一维，判不出下面两种：
+    /// 全部被跳过（一个都没跑）、依赖门中止（跑了前面、后面没跑）。
+    /// 前者不该关机，后者还该算失败。
+    /// </para>
+    /// </summary>
+    public static bool ShouldRun(string? action, bool hasFailure, bool stopped, bool runOnFailure,
+        bool nothingRan, bool dependencyAbort)
     {
         string a = action ?? "Notify";
         if (string.Equals(a, "Notify", StringComparison.OrdinalIgnoreCase)) return false;
         if (stopped) return false;
+        // v1.43 / 任务一：一个工具都没实际跑过 → 打开程序、再跑一轮照做，睡眠/关机一律不做。
+        // 「今晚没事可做」不是关机理由，更不在「失败后仍执行」的授权范围里。
+        if (nothingRan && IsDestructive(a)) return false;
+        if (dependencyAbort) hasFailure = true;
         if (IsDestructive(a) && hasFailure && !runOnFailure) return false;
         return true;
     }
@@ -1556,7 +1762,21 @@ public static class AfterRunActionService
             try
             {
                 LogService.LogEvent("跑完动作：执行睡眠");
-                SetSuspendState(false, false, false);
+                // v1.43 / 任务二：SetSuspendState 是布尔返回值，失败必须说出来。
+                // 原来只写「执行睡眠」就完事，日志里看起来像睡成功了，
+                // 而人第二天早上发现电脑还亮着，却没有一行能查的记录。
+                if (!SetSuspendState(false, false, false))
+                {
+                    int err = Marshal.GetLastWin32Error();
+                    LogService.LogEvent(err != 0
+                        ? $"睡眠失败：系统拒绝（Win32 {err}）"
+                        : "睡眠失败：系统没有进入睡眠");
+                    NotifyService.Show(NotifyLevel.Warning, "龙管家", "要睡眠的时候系统没答应，电脑还醒着。");
+                }
+                else
+                {
+                    LogService.LogEvent("已进入睡眠");
+                }
             }
             catch (Exception ex)
             {
@@ -1574,19 +1794,51 @@ public static class AfterRunActionService
             }
             try
             {
-                LogService.LogEvent("跑完动作：60 秒后关机");
                 var psi = new ProcessStartInfo("shutdown", "/s /t 60")
                 {
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 };
-                Process.Start(psi);
+                // v1.43 / 任务二：Process.Start 返回非空只说明「进程起来了」，
+                // 不代表 shutdown 接受了这次请求。必须等它退出再按退出码判断，
+                // 否则报了「60 秒后关机」，倒计时根本不存在，用户也没地方取消。
+                bool accepted;
+                string detail = "";
+                using (Process? proc = Process.Start(psi))
+                {
+                    if (proc == null)
+                    {
+                        accepted = false;
+                        detail = "系统没有返回进程";
+                    }
+                    else if (!proc.WaitForExit(5000))
+                    {
+                        accepted = false;
+                        detail = "shutdown 5 秒没有返回";
+                    }
+                    else
+                    {
+                        accepted = proc.ExitCode == 0;
+                        detail = accepted ? "" : $"shutdown 退出码 {proc.ExitCode}";
+                    }
+                }
+
+                if (!accepted)
+                {
+                    LogService.LogEvent($"关机失败：{detail}");
+                    NotifyService.Show(NotifyLevel.Warning, "龙管家", $"该关机了，但没能排上（{detail}）。电脑还开着。");
+                    return;
+                }
+
                 QueueService.MarkShutdownPending();
+                LogService.LogEvent("关机已排定：60 秒后关机");
                 NotifyService.Show(NotifyLevel.Warning, "龙管家", "队列完成，60 秒后将关机，可在队列卡点「取消关机」。");
+                QueueService.NotifyShutdownStateChanged();
             }
             catch (Exception ex)
             {
                 LogService.LogEvent("关机失败：" + ex.Message);
+                NotifyService.Show(NotifyLevel.Warning, "龙管家", "该关机了，但命令没能执行。电脑还开着。");
             }
         }
     }

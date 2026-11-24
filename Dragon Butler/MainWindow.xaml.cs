@@ -533,7 +533,8 @@ public partial class MainWindow : Window
     {
         var s = AppState.Settings;
         TbConfigName.Text = s.DragonConfigName;
-        TbEventUrl.Text = $"http://127.0.0.1:{s.BgiWebhookPort}/webhook";
+        // v1.43 / 任务三：地址不许硬编码。监听到底起没起、绑在哪，只有 Hub 知道。
+        RefreshEventUrl();
         LoadNotifyFields();
 
         _suppressToggle = true;
@@ -1103,7 +1104,11 @@ public partial class MainWindow : Window
         catch { }
 
         BtnQueueIdleSkip.Visibility = QueueService.IsWaitingIdle ? Visibility.Visible : Visibility.Collapsed;
+        // v1.43 / 任务二 / P2-3：先让过期状态自己复位，再决定按钮画不画。
+        // 顺带把 IsEnabled 打开——上一次取消失败可能把它留在不可点状态。
+        QueueService.ExpireShutdownPendingIfStale();
         BtnQueueCancelShutdown.Visibility = QueueService.IsShutdownPending ? Visibility.Visible : Visibility.Collapsed;
+        if (BtnQueueCancelShutdown.Visibility == Visibility.Visible) BtnQueueCancelShutdown.IsEnabled = true;
         RefreshContinueButton();
         RefreshProgress();
 
@@ -1192,8 +1197,16 @@ public partial class MainWindow : Window
 
     private void BtnQueueCancelShutdown_Click(object sender, RoutedEventArgs e)
     {
-        QueueService.CancelShutdown();
+        // v1.43 / 任务二：按钮的可见性交给真实状态，不在这里无条件隐藏。
+        // 取消失败时它必须留着——那是人唯一能重试的地方；
+        // 成功时 QueueService 会主动通知，这条线跟着重算。
+        if (!QueueService.CancelShutdown())
+        {
+            BtnQueueCancelShutdown.IsEnabled = true;
+            return;
+        }
         BtnQueueCancelShutdown.Visibility = Visibility.Collapsed;
+        BtnQueueCancelShutdown.IsEnabled = true;
     }
 
     // ===== v1.42.1 / M9-4：四个视图窗口连类一起删了 =====
@@ -7082,18 +7095,63 @@ public partial class MainWindow : Window
         LogService.LogEvent("局域网面板：" + (on ? "开启" : "关闭"));
 
         // 监听前缀在启动时就定了（回环 / 所有网卡），改开关要重启监听才生效
-        WebhookHub.Start(AppState.Settings.BgiWebhookPort, on);
-        if (on)
+        WebhookBindResult bind = WebhookHub.Start(AppState.Settings.BgiWebhookPort, on);
+        RefreshEventUrl();
+        if (!on)
+        {
+            TbLanPanelHint.Text = "打开后同一 Wi-Fi 下的手机浏览器可以看进度和最近一条事件，但没有任何按钮——只能看，不能指挥。";
+            return;
+        }
+
+        // v1.43 / 任务三：三种结果分开说。
+        // 以前无论哪一种都报「手机浏览器打开 http://192.168.x.x」，
+        // 于是「开关打开了、手机连不上」这个问题永远找不到原因。
+        if (!bind.Started)
+        {
+            // 连回环都没绑上，局域网当然更没有。开关状态留着，但把话说清楚。
+            TbLanPanelHint.Text = $"监听没能启动（{bind.Error}）。面板现在打不开，地址也不能复制给别人。";
+            AppState.PublishLog("局域网面板没能启动：" + bind.Error);
+            NotifyService.Show(NotifyLevel.Warning, "龙管家",
+                $"面板没能启动（{bind.Error}）。可能是端口 {bind.Port} 被别的程序占着，换个端口再试。");
+        }
+        else if (!bind.Wildcard)
+        {
+            // 通配被系统拒了、退回回环。这时候只有本机能开。
+            TbLanPanelHint.Text = $"只在你这台电脑上能用：{bind.Prefix}。想让手机打开，得用管理员身份运行一次：" +
+                $"netsh http add urlacl url=http://+:{bind.Port}/ user=Everyone";
+            AppState.PublishLog("局域网面板仅本机可用（通配绑定失败）：" + bind.Prefix);
+            NotifyService.Show(NotifyLevel.Warning, "龙管家",
+                "面板开了，但只在你这台电脑上能打开——手机连不上。想让局域网能访问，需要用管理员身份运行 netsh 授权（提示里有命令）。");
+        }
+        else
         {
             string addr = WebhookHub.PanelAddress();
+            if (addr.Length == 0) addr = bind.Prefix;
             AppState.PublishLog("局域网面板已开启：" + addr);
             NotifyService.Show(NotifyLevel.Info, "龙管家", "局域网面板已开启，手机浏览器打开：\n" + addr);
             TbLanPanelHint.Text = "手机连同一个 Wi-Fi，浏览器打开：" + addr;
         }
-        else
+    }
+
+    /// <summary>
+    /// v1.43 / 任务三：把「事件推送地址」那一格写成真实状态。
+    ///
+    /// <para>
+    /// 这一格是给用户往 BetterGI 里抄的，抄错就等于完成判定少一路信号。
+    /// 监听没起来时宁可写「没起来」，也不能摆一个看着像能用的地址。
+    /// </para>
+    /// </summary>
+    private void RefreshEventUrl()
+    {
+        WebhookBindResult bind = WebhookHub.LastBind;
+        if (!bind.Started)
         {
-            TbLanPanelHint.Text = "打开后同一 Wi-Fi 下的手机浏览器可以看进度和最近一条事件，但没有任何按钮——只能看，不能指挥。";
+            TbEventUrl.Text = $"（监听没起来：{bind.Error}）";
+            return;
         }
+        // 通配时也用回环地址：BGI 和本程序在同一台机器上，回环最稳，
+        // 也不会因为网卡换了 IP 而失效。
+        TbEventUrl.Text = $"http://127.0.0.1:{bind.Port}/webhook";
     }
 
     private void BtnCopyToken_Click(object sender, RoutedEventArgs e)
@@ -7113,10 +7171,14 @@ public partial class MainWindow : Window
     {
         ApiTokenRow.Visibility = s.ControlApiEnabled ? Visibility.Visible : Visibility.Collapsed;
         if (s.ControlApiEnabled) TbApiToken.Text = AppState.EnsureControlToken();
+        RefreshEventUrl();
         if (s.LanPanelEnabled)
         {
+            // v1.43 / 任务三：只有「真绑上了通配」才写成手机可访问。
+            // 没绑上通配时，开关那一侧已经给了「仅本机」的解释，不要用假地址把它盖掉。
             string addr = WebhookHub.PanelAddress();
-            if (addr.Length > 0) TbLanPanelHint.Text = "手机连同一个 Wi-Fi，浏览器打开：" + addr;
+            if (addr.Length > 0 && WebhookHub.IsLanAvailable)
+                TbLanPanelHint.Text = "手机连同一个 Wi-Fi，浏览器打开：" + addr;
         }
     }
 

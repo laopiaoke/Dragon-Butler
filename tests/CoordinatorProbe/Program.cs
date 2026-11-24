@@ -38,6 +38,7 @@ internal static class Program
             "failed" => Run("failed", stub, CompletionSignalKind.ProcessExit0, "--seconds 2 --exit 3", 5, 0),
             "timeout" => Run("timeout", stub, CompletionSignalKind.ProcessExit0, "--hang", 1, 0),
             "halted" => RunHalted(stub),
+            "signals" => RunSignalArbiter(),
             "haltedlog" => Run("haltedlog", stub, CompletionSignalKind.LogPattern, "--hang", 5, 1),
             "logpattern" => RunLogPattern(stub),
             "args" => RunArgs(),
@@ -305,6 +306,119 @@ internal static class Program
         for (int i = 0; i < 10 && hit == null; i++) { Thread.Sleep(300); watcher.Pump(); }
         Console.WriteLine(hit == null ? "RESULT logpattern hit=False" : "RESULT logpattern hit=True");
         return hit == null ? 1 : 0;
+    }
+
+    /// <summary>
+    /// v1.43 / 任务一 A：信号仲裁的行为回归。
+    ///
+    /// <para>
+    /// 这一组不看源码里有没有某个字符串，而是真的构造一个 RunCoordinator、
+    /// 用可控信号源一条一条把信号喂进去，看它最后停在哪个状态。
+    /// 理由很直白：这次要封的坑是「崩溃被当成成功」，而那种错在源码里
+    /// 看起来完全正常——`Move(Done, ...)` 那一行当年也长得一本正经。
+    /// </para>
+    /// </summary>
+    private static int RunSignalArbiter()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        ToolProfile Profile(CompletionSignalKind primary, int grace = 5) => new()
+        {
+            ToolId = "signals",
+            DisplayName = "信号探针",
+            ExecutablePath = "x.exe",
+            PrimarySignal = primary,
+            MaxDurationMinutes = 30,
+            PostExitGraceMinutes = grace,
+        };
+
+        // 不启动真进程：LaunchSucceeded 只需要一个 Process 句柄做日志里的 pid，
+        // 传 null 时 SafePid 会兜住返回 -1，状态机照常进 Running。
+        ToolRunContext Ctx(ToolProfile p) => new() { Profile = p, Arguments = "" };
+
+        ToolRunState Drive(ToolProfile p, params CompletionSignal[] signals)
+        {
+            using var coord = new RunCoordinator(p, _ => { });
+            var src = new FakeSource();
+            coord.SetPrimary(src);
+            coord.BeginLaunch();
+            coord.LaunchSucceeded(null!, Ctx(p));
+            foreach (var s in signals) src.Fire(s);
+            return coord.State;
+        }
+
+        static CompletionSignal Sig(CompletionSignalKind kind, int? exit = null, string source = "probe") => new()
+        {
+            Kind = kind,
+            ExitCode = exit,
+            SourceId = source,
+            Confidence = SignalConfidence.High,
+            Detail = "probe",
+        };
+
+        // ① 主信号是日志锚点，进程却崩了：这是最要命的一条。
+        Check("仲裁/崩溃退出判失败",
+            Drive(Profile(CompletionSignalKind.LogPattern), Sig(CompletionSignalKind.ProcessExit0, 3, "process-exit"))
+                == ToolRunState.Failed);
+
+        // ② 主信号先到、随后发现进程非零退出：不能翻成 Done。
+        Check("仲裁/主信号后崩溃不翻完成",
+            Drive(Profile(CompletionSignalKind.LogPattern),
+                  Sig(CompletionSignalKind.LogPattern),
+                  Sig(CompletionSignalKind.ProcessExit0, 5, "process-exit"))
+                == ToolRunState.Failed);
+
+        // ③ 锁存之后再来副信号，也不许授权完成。
+        Check("仲裁/锁存后副信号不翻完成",
+            Drive(Profile(CompletionSignalKind.LogPattern),
+                  Sig(CompletionSignalKind.ProcessExit0, 9, "process-exit"),
+                  Sig(CompletionSignalKind.GameProcessExit, null, "game-exit"))
+                == ToolRunState.Failed);
+
+        // ④ 正常路径不能被误伤：主信号 + 零退出 = 完成。
+        Check("仲裁/主信号加零退出算完成",
+            Drive(Profile(CompletionSignalKind.LogPattern),
+                  Sig(CompletionSignalKind.LogPattern),
+                  Sig(CompletionSignalKind.ProcessExit0, 0, "process-exit"))
+                == ToolRunState.Done);
+
+        // ⑤ 主信号本身就是进程退出时，零退出直接完成。
+        Check("仲裁/零退出主信号算完成",
+            Drive(Profile(CompletionSignalKind.ProcessExit0), Sig(CompletionSignalKind.ProcessExit0, 0, "process-exit"))
+                == ToolRunState.Done);
+
+        // ⑥ 只有零退出、主信号还没来：按宁等勿进转 Resolving，不许 Done。
+        Check("仲裁/只有零退出先等主信号",
+            Drive(Profile(CompletionSignalKind.LogPattern), Sig(CompletionSignalKind.ProcessExit0, 0, "process-exit"))
+                == ToolRunState.Resolving);
+
+        // ⑦ 游戏进程消失不能单独证明任务成功。
+        Check("仲裁/游戏退出不单独算完成",
+            Drive(Profile(CompletionSignalKind.LogPattern), Sig(CompletionSignalKind.GameProcessExit, null, "game-exit"))
+                == ToolRunState.Running);
+
+        // ⑧ 宽限为 0 时主信号到了也只能悬置。
+        Check("仲裁/宽限为零就悬置",
+            Drive(Profile(CompletionSignalKind.Webhook, grace: 0), Sig(CompletionSignalKind.Webhook))
+                == ToolRunState.Halted);
+
+        Console.WriteLine("RESULT signals fails=" + fails.Count);
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>可手动点火的信号源：由测试决定什么时候抛哪一种信号。</summary>
+    private sealed class FakeSource : ICompletionSignalSource
+    {
+        public string SourceId => "probe";
+        public event Action<CompletionSignal>? SignalRaised;
+        public void Start(ToolRunContext ctx) { }
+        public void Stop() { }
+        public void Fire(CompletionSignal signal) => SignalRaised?.Invoke(signal);
     }
 
     /// <summary>测试用手动信号源：延时后抛一次主信号。</summary>
@@ -3710,6 +3824,33 @@ internal static class Program
         Check("判定/打开程序不是破坏性", !AfterRunActionService.IsDestructive("OpenApp"));
         Check("判定/仅通知不是破坏性", !AfterRunActionService.IsDestructive("Notify"));
 
+        // ===== v1.43 / 任务一 B + 任务二：收尾授权与关机状态 =====
+        //
+        // 六参这条路线是任务一的收口：原来只有「有没有失败、有没有被停」两个维度，
+        // 于是「一项都没跑」和「依赖没成整队中止」这两种都落进了「没失败」的桶里，
+        // 关机照做。下面这几条把这两个桶单独钉住。
+        Check("判定/全跳过不关机", !AfterRunActionService.ShouldRun("Shutdown", false, false, false,
+            nothingRan: true, dependencyAbort: false));
+        Check("判定/全跳过不睡眠", !AfterRunActionService.ShouldRun("Sleep", false, false, false,
+            nothingRan: true, dependencyAbort: false));
+        Check("判定/全跳过照样发通知", !AfterRunActionService.ShouldRun("Notify", false, false, false,
+            nothingRan: true, dependencyAbort: false));
+        Check("判定/全跳过后台仍可再跑一轮", AfterRunActionService.ShouldRun("RunAgain", false, false, false,
+            nothingRan: true, dependencyAbort: false));
+        Check("判定/依赖中折算作失败", !AfterRunActionService.ShouldRun("Shutdown", false, false, false,
+            nothingRan: false, dependencyAbort: true));
+        Check("判定/依赖中止但勾了失败也跑", AfterRunActionService.ShouldRun("Shutdown", false, false, true,
+            nothingRan: false, dependencyAbort: true));
+        Check("判定/依赖中止仍可打开程序", AfterRunActionService.ShouldRun("OpenApp", false, false, false,
+            nothingRan: false, dependencyAbort: true));
+        Check("判定/被停止优先于依赖中止", !AfterRunActionService.ShouldRun("Shutdown", false, true, true,
+            nothingRan: false, dependencyAbort: true));
+
+        // 关机状态的生命周期：倒计时结束后界面不能永远留着「取消关机」
+        Check("关机状态/默认不在待机", !QueueService.IsShutdownPending);
+        Check("关机状态/过期复位不报错", !QueueService.ExpireShutdownPendingIfStale());
+        Check("关机状态/没在待机时取消返回 false", !QueueService.CancelShutdown());
+
         // ---- 原有 DRYRUN：关机只写日志，不真关 ----
         AppState.Settings.AfterRunAction = "Shutdown";
         AppState.Settings.AfterRunDryRun = true;
@@ -4219,6 +4360,17 @@ internal static class Program
     /// <summary>晨报：默认关；开启后播报昨日摘要；同一天不重复；无运行日不播报。</summary>
     private static int RunMorning()
     {
+        // v1.43：把时长账本临时指到别处。
+        //
+        // 这条断言问的是「同一份结构化数据 → 界面和推送数出同一个数字」，
+        // 不是在问「今天这台机器上一共跑了多少秒」。可账本是全局共享的：
+        // 前面几组探针（queue / dag / stall…）跑完都会往今天这条里记一笔，
+        // 于是合计会随时间漂——刚装好的机器上是 11520，跑过几轮之后变成 11524。
+        // 那种漂不是回归，却会让这条断言变成「看运气」，所以先把账本隔离出去。
+        string? ledgerBackup = DurationLedger.PathOverride;
+        string tempLedger = Path.Combine(Path.GetTempPath(), "probe-durations-" + Guid.NewGuid().ToString("N")[..8] + ".json");
+        DurationLedger.PathOverride = tempLedger;
+        DurationLedger.Load();
         bool defaultOff = new AppSettings().MorningReportEnabled == false;
 
         string yesterday = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
@@ -4260,6 +4412,10 @@ internal static class Program
 
         // 归档里两组：A 01:00→02:30 = 90 分 = 5400 秒，B 02:30→04:12 = 102 分 = 6120 秒。
         // 工具账本没有记录，所以工具数是 0，合计从组归档那一侧补上（DailyReport 的内置回退）。
+        // 报告已经按隔离账本算完，这里把路径还回去，别影响后面的组。
+        DurationLedger.PathOverride = ledgerBackup;
+        try { if (File.Exists(tempLedger)) File.Delete(tempLedger); } catch { }
+        DurationLedger.Load();
         bool ok = defaultOff
                   && report.Groups.Count == 2
                   && report.TotalSeconds == 5400 + 6120
@@ -4536,6 +4692,56 @@ internal static class Program
         }
         Check("全库只有一个文件创建 HttpListener", listenerFiles == 1, "找到 " + listenerFiles + " 个文件");
 
+        // ===== v1.43 / 任务四：报文分类与应答状态码 =====
+        //
+        // 这一段是任务书四的核心验收：非法报文不能拿到和成功事件一样的 200。
+        // Parse 被特意做成静态纯函数，就是为了让这组断言不必真起 HttpListener
+        // （CI 里没有桌面会话，起监听会因为端口和权限不稳）。
+        var okEvent = WebhookListener.Parse("{\"event\":\"dragon.end\",\"name\":\"一条龙\"}");
+        Check("报文/合法事件 200", okEvent.Status == 200 && okEvent.Accepted, okEvent.Status.ToString());
+        Check("报文/合法事件带出事件", okEvent.Event != null && okEvent.Event!.Kind == SentinelEventKind.DragonEnded);
+        Check("报文/合法事件带出名字", okEvent.Event != null && okEvent.Event!.Payload == "一条龙");
+
+        var badJson = WebhookListener.Parse("{not json");
+        Check("报文/非法 JSON 400", badJson.Status == 400 && !badJson.Accepted, badJson.Status.ToString());
+        Check("报文/非法 JSON 不带事件", badJson.Event == null);
+
+        Check("报文/空报体 400", WebhookListener.Parse("").Status == 400);
+        Check("报文/null 报体 400", WebhookListener.Parse(null).Status == 400);
+        Check("报文/JSON 数组 400", WebhookListener.Parse("[1,2,3]").Status == 400);
+        Check("报文/JSON 字符串 400", WebhookListener.Parse("\"dragon.end\"").Status == 400);
+        Check("报文/缺 event 400", WebhookListener.Parse("{\"name\":\"x\"}").Status == 400);
+        Check("报文/空 event 400", WebhookListener.Parse("{\"event\":\"\"}").Status == 400);
+
+        // 未知事件必须被明确拒绝，不能映射成 DragonEnded 伪装成功
+        var unknown = WebhookListener.Parse("{\"event\":\"dragon.exploded\"}");
+        Check("报文/未知事件 400", unknown.Status == 400 && !unknown.Accepted, unknown.Status.ToString());
+        Check("报文/未知事件不带事件", unknown.Event == null);
+        // 回应里不能把请求方输入整段吐回去（限长）
+        Check("报文/拒绝正文限长", unknown.Body.Length <= 80, unknown.Body.Length.ToString());
+
+        // 六个已知事件都得认得
+        foreach (var pair in new (string Ev, SentinelEventKind Kind)[]
+                 {
+                     ("dragon.start", SentinelEventKind.DragonStarted),
+                     ("dragon.end", SentinelEventKind.DragonEnded),
+                     ("group.start", SentinelEventKind.GroupStarted),
+                     ("group.end", SentinelEventKind.GroupEnded),
+                     ("task.error", SentinelEventKind.GroupError),
+                     ("task.cancel", SentinelEventKind.GroupError),
+                 })
+        {
+            var r = WebhookListener.Parse("{\"event\":\"" + pair.Ev + "\"}");
+            Check("报文/认得 " + pair.Ev, r.Status == 200 && r.Event != null && r.Event!.Kind == pair.Kind);
+        }
+
+        // 坏报文不会影响下一次好报文（Parse 无状态，这里是显式确认）
+        for (int i = 0; i < 5; i++) WebhookListener.Parse("{bad");
+        Check("报文/坏报文之后仍能收", WebhookListener.Parse("{\"event\":\"dragon.end\"}").Status == 200);
+
+        // 绑定结果自身的口径
+        var notStarted = WebhookBindResult.NotStarted(18235, "端口被占用");
+        Check("绑定/未启动的口径", !notStarted.Started && !notStarted.Wildcard && notStarted.Error.Length > 0);
         Console.WriteLine("RESULT api fails=" + fails.Count + (fails.Count > 0 ? " [" + string.Join(", ", fails) + "]" : ""));
         return fails.Count == 0 ? 0 : 1;
     }
@@ -4900,7 +5106,7 @@ internal static class Program
             }
 
             Check("有 env.json", File.Exists(Path.Combine(dir, "env.json")));
-            Check("有 log.txt", File.Exists(Path.Combine(dir, "log.txt")));
+            Check("有 log.txt", File.Exists(Path.Combine(dir, "log.txt")), "日志目录=" + LogService.Dir + " 今日文件=" + File.Exists(Path.Combine(LogService.Dir, DateTime.Now.ToString("yyyy-MM-dd") + "_运行.log")));
 
             string env = File.ReadAllText(Path.Combine(dir, "env.json"));
             Check("env 里有失败原因", env.Contains("模拟一次失败"));
@@ -4911,6 +5117,97 @@ internal static class Program
             Check("不泄露密码", !env.Contains(FakePass));
             Check("不泄露邮箱", !env.Contains(FakeMail));
             Check("敏感字段确实被替换", env.Contains(IncidentBundle.Redacted));
+
+            // ===== v1.43 / 任务六：结构化脱敏与采集完整性 =====
+            //
+            // 这一段的每一条都对应任务书六里点名的故障：
+            // 以前 Tools 里每个工具都退化成 "DragonButler.ToolProfile"（看着有内容，其实没内容），
+            // 路径与启动参数明文进包（用户名、令牌都在里面），
+            // 而端口和热键反倒被误盖成 ***（排障最需要的两格反而看不见）。
+
+            // 纯函数层：谁算敏感、谁不算
+            Check("脱敏/端口不算敏感", !IncidentBundle.IsSensitiveKey("BgiWebhookPort") && !IncidentBundle.IsSensitiveKey("NotifyEmailPort"));
+            Check("脱敏/热键不算敏感", !IncidentBundle.IsSensitiveKey("HotkeyStart") && !IncidentBundle.IsSensitiveKey("HotkeyEnabled"));
+            Check("脱敏/账号算敏感", IncidentBundle.IsSensitiveKey("NotifyEmailUser") && IncidentBundle.IsSensitiveKey("NotifyTelegramChat"));
+            Check("脱敏/路径算敏感", IncidentBundle.IsSensitiveKey("BgiPath") && IncidentBundle.IsSensitiveKey("CustomBgImage") && IncidentBundle.IsSensitiveKey("AfterRunAppPath"));
+            Check("脱敏/参数算敏感", IncidentBundle.IsSensitiveKey("LaunchArguments") || IncidentBundle.IsSensitiveKey("Arguments"));
+
+            string rp = IncidentBundle.RedactPath(@"C:\Users\someone-zz\Games\BetterGI\BetterGI.exe");
+            Check("路径只留文件名", rp.EndsWith("BetterGI.exe", StringComparison.Ordinal) && !rp.Contains("someone-zz"), rp);
+
+            string rt = IncidentBundle.RedactText("--startOneDragon --token=ZZARGS-abc123 --workdir C:\\Users\\bob-zz\\BGI");
+            Check("自由文本盖令牌", !rt.Contains("ZZARGS-abc123"), rt);
+            Check("自由文本盖用户名", !rt.Contains("bob-zz"), rt);
+            Check("自由文本留结构", rt.Contains("--startOneDragon"), rt);
+
+            // 结构层：Tools 要摊开成真字段，而不是类型名
+            var oldTools = s.Tools;
+            string oldHotkey = s.HotkeyStart;
+            int oldPort = s.BgiWebhookPort;
+            try
+            {
+                s.HotkeyStart = "Ctrl+Alt+Q";
+                s.BgiWebhookPort = 39271;
+                s.Tools = new Dictionary<string, ToolProfile>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["probe-tool"] = new ToolProfile
+                    {
+                        ToolId = "probe-tool",
+                        DisplayName = "探针工具",
+                        ExecutablePath = @"C:\Users\someone-zz\Games\BetterGI\BetterGI.exe",
+                        LaunchArguments = "--startOneDragon --token=ZZARGS-token-445566",
+                        CustomData = new Dictionary<string, string>
+                        {
+                            ["customFilePath"] = @"C:\Users\someone-zz\secret.txt",
+                            ["apiToken"] = "ZZCUSTOM-token-abcdef",
+                        },
+                    },
+                };
+
+                string? dir2 = IncidentBundle.Capture("探针：结构化脱敏", null, includeScreenshot: true);
+                Check("结构化/包生成成功", dir2 != null && Directory.Exists(dir2));
+                if (dir2 != null && Directory.Exists(dir2))
+                {
+                    string env2 = File.ReadAllText(Path.Combine(dir2, "env.json"));
+                    Check("结构化/工具不再是类型名", !env2.Contains("DragonButler.ToolProfile", StringComparison.Ordinal));
+                    Check("结构化/能看到工具字段", env2.Contains("\"LaunchArguments\"") && env2.Contains("\"ExecutablePath\""), "");
+                    Check("结构化/用户名不漏", !env2.Contains("someone-zz", StringComparison.Ordinal));
+                    Check("结构化/启动参数里的令牌不漏", !env2.Contains("ZZARGS-token-445566", StringComparison.Ordinal));
+                    Check("结构化/CustomData 里的令牌不漏", !env2.Contains("ZZCUSTOM-token-abcdef", StringComparison.Ordinal));
+                    Check("结构化/启动参数保留结构", env2.Contains("--startOneDragon", StringComparison.Ordinal));
+                    Check("结构化/端口保留", env2.Contains("39271", StringComparison.Ordinal));
+                    Check("结构化/热键保留", env2.Contains("Ctrl+Alt+Q", StringComparison.Ordinal));
+                    Check("完整性/包里写着采集结果", env2.Contains("\"采集结果\"", StringComparison.Ordinal));
+                    Check("完整性/截图这块有交代", env2.Contains("screen.png", StringComparison.Ordinal));
+                    Check("完整性/日志这块有交代", env2.Contains("log.txt", StringComparison.Ordinal));
+                    try { Directory.Delete(dir2, true); } catch { }
+                }
+                else
+                {
+                    fails += 9;
+                }
+            }
+            finally
+            {
+                s.Tools = oldTools;
+                s.HotkeyStart = oldHotkey;
+                s.BgiWebhookPort = oldPort;
+            }
+
+            // 截图这一块要能自证：CI 里没有桌面会话，抓不到很正常，
+            // 但包里必须写明为什么没有——「没采到」和「没发生」不能长得一样。
+            try
+            {
+                var cap = ScreenshotMonitor.CaptureEx();
+                bool explained = cap.Buf != null
+                    ? (cap.Scope.Length > 0 && cap.W > 0 && cap.H > 0)
+                    : !string.IsNullOrEmpty(cap.Error);
+                Check("截图/结果与说明对得上", explained, cap.Buf != null ? cap.Scope : (cap.Error ?? "(空)"));
+            }
+            catch (Exception ex)
+            {
+                Check("截图/结果与说明对得上", false, ex.Message);
+            }
 
             // 保留策略：多抓几份，检查只留最新 N 份
             var dirsBefore = Directory.GetDirectories(IncidentBundle.Root).Length;

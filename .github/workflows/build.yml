@@ -105,6 +105,11 @@ jobs:
             harvest  = "G1 收益账本 + G5 晨报补跑提示"
             mcp      = "G3 MCP 接口"
             uirules  = "v1.12 观感规则断言"
+            # v1.43：这三组治的都是「会自己动手关机 / 把崩溃当成功」那类病，
+            # 不能只靠人记得跑——进了 CI 才算真闸门。
+            signals  = "v1.43 信号仲裁（崩溃不许当成功）"
+            afterrun = "v1.43 收尾授权（全跳过/依赖中止不许关机）"
+            migrate  = "v1.43 勾选单源化迁移"
           }
           $bad = @()
           foreach ($name in $groups.Keys) {

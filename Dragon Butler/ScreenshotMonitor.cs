@@ -63,6 +63,7 @@ public sealed class ScreenshotMonitor
     private const int SRCCOPY = 0x00CC0020;
     private const int SM_CXSCREEN = 0;
     private const int SM_CYSCREEN = 1;
+    private const int SM_CMONITORS = 80;
     private const int Dim = 64;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -137,6 +138,28 @@ public sealed class ScreenshotMonitor
     /// </summary>
     internal static (byte[]? buf, int w, int h) Capture()
     {
+        var c = CaptureEx();
+        return (c.Buf, c.W, c.H);
+    }
+
+    /// <summary>
+    /// 一次抓屏的结果（v1.43 / 任务六 P2-4）。
+    ///
+    /// <para>
+    /// 原来只回 (buf, w, h)，于是「抓到了」和「抓到的是主屏而不是游戏窗口」在调用方看来一模一样。
+    /// 现场包里放一张主屏截图、却不说明只抓到主屏，等于给了个误导性的证据。
+    /// </para>
+    /// </summary>
+    /// <param name="Scope">人话的截图范围，直接写进现场包。</param>
+    /// <param name="GameWindow">true = 抓到的是游戏窗口区域；false = 主屏回退。</param>
+    internal sealed record ScreenCapture(byte[]? Buf, int W, int H, string Scope, bool GameWindow, string? Error);
+
+    /// <summary>
+    /// 抓屏并如实报告结果（v1.43）。检查每一次 GDI 调用的返回值——
+    /// BitBlt 失败时缓冲区是空的，直接编码就是一张全黑图，看着像「截到了」。
+    /// </summary>
+    internal static ScreenCapture CaptureEx()
+    {
         IntPtr hwnd = IntPtr.Zero;
         foreach (var p in ProfileRegistry.BetterGi.GameProcessNames
                      .SelectMany(ProcessTools.GetSessionProcesses))
@@ -150,24 +173,55 @@ public sealed class ScreenshotMonitor
         }
 
         int x, y, w, h;
+        bool gameWindow = false;
+        string scope;
         if (hwnd != IntPtr.Zero)
         {
-            GetWindowRect(hwnd, out var r);
+            if (!GetWindowRect(hwnd, out var r))
+            {
+                return new ScreenCapture(null, 0, 0, "没抓到", false, "GetWindowRect 失败（窗口可能已经关了）");
+            }
             x = r.Left; y = r.Top; w = r.Right - r.Left; h = r.Bottom - r.Top;
+            gameWindow = true;
+            scope = $"游戏窗口 {w}x{h}";
         }
         else
         {
             x = 0; y = 0;
             w = GetSystemMetrics(SM_CXSCREEN);
             h = GetSystemMetrics(SM_CYSCREEN);
+            int monitors = GetSystemMetrics(SM_CMONITORS);
+            // 多显示器时主屏只是一部分。这件事必须写出来——
+            // 不然看现场的人会以为「屏幕就这么大，游戏没开」。
+            scope = monitors > 1
+                ? $"主屏 {w}x{h}（有 {monitors} 台显示器，没找到游戏窗口，其余屏幕没抓到）"
+                : $"主屏 {w}x{h}（没找到游戏窗口）";
         }
-        if (w <= 0 || h <= 0) return (null, 0, 0);
+        if (w <= 0 || h <= 0)
+            return new ScreenCapture(null, 0, 0, scope, gameWindow, $"截取区域无效（{w}x{h}）");
 
         IntPtr screenDc = GetDC(IntPtr.Zero);
+        if (screenDc == IntPtr.Zero)
+            return new ScreenCapture(null, 0, 0, scope, gameWindow, "取不到屏幕 DC");
         IntPtr memDc = CreateCompatibleDC(screenDc);
         IntPtr hbm = CreateCompatibleBitmap(screenDc, w, h);
+        if (memDc == IntPtr.Zero || hbm == IntPtr.Zero)
+        {
+            try { if (hbm != IntPtr.Zero) DeleteObject(hbm); } catch { }
+            try { if (memDc != IntPtr.Zero) DeleteDC(memDc); } catch { }
+            ReleaseDC(IntPtr.Zero, screenDc);
+            return new ScreenCapture(null, 0, 0, scope, gameWindow, "建不出兼容位图");
+        }
         IntPtr old = SelectObject(memDc, hbm);
-        BitBlt(memDc, 0, 0, w, h, screenDc, x, y, SRCCOPY);
+        if (!BitBlt(memDc, 0, 0, w, h, screenDc, x, y, SRCCOPY))
+        {
+            int err = Marshal.GetLastWin32Error();
+            try { SelectObject(memDc, old); } catch { }
+            try { DeleteObject(hbm); } catch { }
+            try { DeleteDC(memDc); } catch { }
+            ReleaseDC(IntPtr.Zero, screenDc);
+            return new ScreenCapture(null, 0, 0, scope, gameWindow, $"BitBlt 失败（Win32 {err}）");
+        }
 
         var buf = new byte[w * h * 4];
         var bi = new BITMAPINFO
@@ -182,13 +236,17 @@ public sealed class ScreenshotMonitor
                 biCompression = 0, // BI_RGB
             },
         };
-        GetDIBits(memDc, hbm, 0, (uint)h, buf, ref bi, 0);
+        // GetDIBits 返回「实际写了几行」；0 表示失败，缓冲区里什么都没有。
+        int lines = GetDIBits(memDc, hbm, 0, (uint)h, buf, ref bi, 0);
 
         SelectObject(memDc, old);
         DeleteObject(hbm);
         DeleteDC(memDc);
         ReleaseDC(IntPtr.Zero, screenDc);
-        return (buf, w, h);
+
+        if (lines <= 0)
+            return new ScreenCapture(null, 0, 0, scope, gameWindow, "GetDIBits 没取到像素");
+        return new ScreenCapture(buf, w, h, scope, gameWindow, null);
     }
 
     /// <summary>缩放到 64×64 灰度（块平均）</summary>

@@ -120,12 +120,16 @@ Write-Output 'TOAST_OK'
 
             if (ch == PushChannel.Toast)
             {
-                if (!ShowToast(title, message)) App.Instance?.ShowBalloon(level, title, message);
+                // v1.43 / 任务五：toast 失败降级到气泡，气泡再失败也不能静默结束。
+                // 两条路都断了，用户就是一条消息都没收到——这件事必须留痕。
+                if (!ShowToast(title, message) && !ShowBalloonOrRecord(level, title, message))
+                    NoticeCenter.AddError("测试通知发不出去",
+                        "toast 和托盘气泡都没能弹出来。系统通知可能被关掉了，或者托盘图标还没建好。", "");
                 return;
             }
             if (ch == PushChannel.Balloon)
             {
-                App.Instance?.ShowBalloon(level, title, message);
+                ShowBalloonOrRecord(level, title, message);
                 return;
             }
 
@@ -136,18 +140,76 @@ Write-Output 'TOAST_OK'
         catch { }
     }
 
+    // ===== v1.43 / 任务五：远程推送的有限重试 =====
+    //
+    // 原来一次失败就结束：网络抖一下（地铁、Wi-Fi 换信道、路由器重启），
+    // 「今晚跑完了」这条就永远丢了，日志里只有一行「推送失败」，人不在电脑前根本看不到。
+    //
+    // 重试是业务层的、有限的、指数退避的：三次，1s / 3s / 7s。
+    // 不新增设置项——「要不要重试」不该是用户的负担，「重试几次」更不该。
+    private static readonly int[] RetryDelaysMs = { 1000, 3000, 7000 };
+
+    /// <summary>应用退出时喊停，别让重试等待把进程拖住。</summary>
+    private static readonly System.Threading.CancellationTokenSource RetryCts = new();
+
+    /// <summary>v1.43 / 任务五：退出时调一次，取消所有还在等待的重试。</summary>
+    public static void StopPendingSends()
+    {
+        try { RetryCts.Cancel(); } catch { }
+    }
+
     private static async Task SendAndLogAsync(PushChannel ch, NotifyLevel level, string title, string message)
     {
-        var (ok, err) = await SendAsync(ch, level, title, message).ConfigureAwait(false);
-        if (!ok)
+        string err = "";
+        bool ok = false;
+        for (int attempt = 0; attempt <= RetryDelaysMs.Length; attempt++)
         {
-            LogService.LogEvent($"推送失败（{NameOf(ch)}）：{err}");
-            try { AppState.PublishLog($"✗ {NameOf(ch)}推送失败：{err}"); } catch { }
+            (ok, err) = await SendAsync(ch, level, title, message).ConfigureAwait(false);
+            if (ok) break;
+            if (attempt >= RetryDelaysMs.Length) break;
+            if (!IsRetriable(err)) break;
+            LogService.LogEvent($"推送失败（{NameOf(ch)}），{RetryDelaysMs[attempt] / 1000} 秒后重试（第 {attempt + 1} 次）：{err}");
+            try { await Task.Delay(RetryDelaysMs[attempt], RetryCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
         }
-        else
+
+        if (ok)
         {
             LogService.LogEvent($"推送成功（{NameOf(ch)}）：{title}");
+            return;
         }
+
+        LogService.LogEvent($"推送最终失败（{NameOf(ch)}）：{err}");
+        try { AppState.PublishLog($"✗ {NameOf(ch)}推送失败：{err}"); } catch { }
+        // 最终失败必须进消息中心：日志是给排查用的，人不会主动翻；
+        // 消息中心是「昨晚出过什么事」的清单，跑完的结果丢了要能在这里看见。
+        NoticeCenter.AddError($"{NameOf(ch)} 推送没送到",
+            $"「{title}」这条没能发出去：{err}。网络恢复后可以手动重发，或者换个渠道。", err);
+    }
+
+    /// <summary>
+    /// v1.43 / 任务五：值不值得重试。
+    ///
+    /// <para>
+    /// 只对「过一会儿可能就好了」的错重试：超时、连接被拒、5xx。
+    /// 「没填地址」「401 令牌不对」这种重试一万次也一样，白等七秒还耽误下一条。
+    /// </para>
+    /// </summary>
+    private static bool IsRetriable(string err)
+    {
+        if (string.IsNullOrWhiteSpace(err)) return true;
+        if (err.Contains("尚未填写", StringComparison.Ordinal)) return false;
+        if (err.Contains("不支持远程发送", StringComparison.Ordinal)) return false;
+        if (err.Contains("HTTP 4", StringComparison.Ordinal)) return false;
+        return true;
+    }
+
+    /// <summary>v1.43 / 任务五：弹气泡并留痕；返回气泡是否真的弹出来了。</summary>
+    private static bool ShowBalloonOrRecord(NotifyLevel level, string title, string message)
+    {
+        bool shown = App.Instance?.ShowBalloon(level, title, message) == true;
+        if (!shown) LogService.LogEvent($"托盘气泡没弹出来（{title}）");
+        return shown;
     }
 
     /// <summary>发送 Windows 系统通知（toast）；成功返回 true，失败返回 false 供降级</summary>
@@ -203,8 +265,10 @@ Write-Output 'TOAST_OK'
         }
         if (ch == PushChannel.Balloon)
         {
-            App.Instance?.ShowBalloon(NotifyLevel.Info, title, body);
-            return (true, "");
+            // v1.43 / 任务五：这里原来固定 return (true, "")，于是托盘还没建好时
+            // 测试也显示「连接成功」——用户在屏幕前等一个永远不来的气泡。
+            bool shown = App.Instance?.ShowBalloon(NotifyLevel.Info, title, body) == true;
+            return shown ? (true, "") : (false, "气泡没弹出来：托盘图标可能还没建好，或系统把通知关掉了");
         }
         return await SendAsync(ch, NotifyLevel.Info, title, body);
     }

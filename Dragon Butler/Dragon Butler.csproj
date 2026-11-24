@@ -10,12 +10,12 @@
     <ApplicationIcon>Dragon Butler.ico</ApplicationIcon>
     <AssemblyName>Dragon Butler</AssemblyName>
     <RootNamespace>DragonButler</RootNamespace>
-    <Version>1.42.0</Version>
-    <FileVersion>1.42.0.0</FileVersion>
-    <AssemblyVersion>1.42.0.0</AssemblyVersion>
-    <Product>涓€鏉￠緳绠″</Product>
+    <Version>1.43.0</Version>
+    <FileVersion>1.43.0.0</FileVersion>
+    <AssemblyVersion>1.43.0.0</AssemblyVersion>
+    <Product>一条龙管家</Product>
     <Company>Dragon Butler</Company>
-    <Description>BetterGI 涓€鏉￠緳鐨勫惎鍋滅瀹朵笌瀹堟姢宸ュ叿</Description>
+    <Description>BetterGI 一条龙的启停管家与守护工具</Description>
     <Nullable>enable</Nullable>
     <!-- v1.3 浜や粯瑕佹眰 0 warning锛氫互涓嬩袱鏉′负瀛橀噺銆佷笌鏈閲嶆瀯鏃犲叧锛屾槑纭眮鍏?-->
     <!-- CS8981锛歶sing wf = System.Windows.Forms 鐨勫皬鍐欏埆鍚嶏紙App.xaml.cs 鏃㈡湁鍐欐硶锛?-->

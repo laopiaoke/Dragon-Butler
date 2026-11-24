@@ -273,18 +273,28 @@ public partial class App : Application
         catch { }
     }
 
-    /// <summary>弹托盘气泡（自动切回 UI 线程）</summary>
-    public void ShowBalloon(NotifyLevel level, string title, string text)
+    /// <summary>
+    /// 弹托盘气泡（自动切回 UI 线程）。
+    ///
+    /// <para>
+    /// v1.43 / 任务五：返回「到底弹出来了没有」。
+    /// 原来这个方法返回 void，「气泡通道」永远只能报成功——托盘图标还没建好、
+    /// 系统把通知关掉了，用户一条也没看见，测试却显示通过。
+    /// </para>
+    /// </summary>
+    /// <returns>true = 已交给托盘；false = 托盘没建好、跨线程调度失败或系统拒收。</returns>
+    public bool ShowBalloon(NotifyLevel level, string title, string text)
     {
         try
         {
             var d = Dispatcher;
             if (!d.CheckAccess())
             {
-                d.BeginInvoke(new Action(() => ShowBalloon(level, title, text)));
-                return;
+                // Invoke 而不是 BeginInvoke：调用方要拿到结果，排队发出去就没法回话了。
+                // 这里不会跟 UI 线程互相等待——UI 线程不会同步等一个后台推送任务。
+                return (bool)d.Invoke(new Func<bool>(() => ShowBalloon(level, title, text)));
             }
-            if (_tray == null) return;
+            if (_tray == null) return false;
             _tray.BalloonTipTitle = title;
             _tray.BalloonTipText = text;
             _tray.BalloonTipIcon = level switch
@@ -294,8 +304,13 @@ public partial class App : Application
                 _ => wf.ToolTipIcon.Info,
             };
             _tray.ShowBalloonTip(4000);
+            return true;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            try { LogService.LogEvent("托盘气泡没弹出来：" + ex.Message); } catch { }
+            return false;
+        }
     }
 
     private void ShowMainWindow()
@@ -394,6 +409,9 @@ public partial class App : Application
             _mutex?.Dispose();
         }
         catch { }
+        // v1.43 / 任务五：通知重试是后台任务，退出时要能喊停。
+        // 不喊停的话，用户在「重试等待」那几秒里关程序，进程会多挂一会儿等 Task.Delay 走完。
+        NotifyService.StopPendingSends();
         base.OnExit(e);
     }
 

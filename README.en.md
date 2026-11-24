@@ -37,6 +37,25 @@ It does exactly four things: start processes, read the public logs those tools w
   <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
 </p>
 
+## v1.43: hardening the end-of-run chains — no more "success" when it failed
+
+No new features here, only plugged holes. The six chains shared one bad habit: **when something went wrong, the program got more confident** — a crash counted as success and shut the PC down, a shutdown that never got queued still said "shutting down in 60 s", a malformed webhook still got `200 ok`, and the incident bundle recorded a tool's config as a bare type name. All of that now reports what actually happened.
+
+- **A crash no longer counts as a finished run.** When completion came from a log pattern, the process-exit signal used to be discarded as "not the primary signal", so the queue waited out the 120-minute cap and reported a timeout — while the process had died three minutes in. Process exit is now checked first: a non-zero exit fails the run immediately and latches the evidence, which no later signal may override.
+- **"Primary signal arrived, process still alive" is not success either.** When the grace window runs out it halts, and says which piece of evidence was missing (process alive / primary missing / both).
+- **Nothing ran → nothing destructive runs.** A night where everything was skipped reports "nothing to run" and performs neither sleep nor shutdown.
+- **A dependency abort mid-queue also blocks shutdown.** It used to just `break` after a decision-log line and looked like "no failure" at the end; now it participates in authorisation and the notification names the dependency that failed.
+- **Shutdown must be confirmed as queued.** Starting `shutdown /s /t 60` is not the same as the system accepting it; the exit code is checked, and if it did not take, the app says the PC is still on — no countdown, no cancel button.
+- **Cancel-shutdown must be confirmed too.** It used to clear the state first and then run `shutdown /a`; on failure the state was already gone and the button hidden. Now state clears only on real success.
+- **The cancel button disappears when the countdown ends**, instead of lingering after an external cancel or an expired timer.
+- **Sleep reports failure.** A refused suspend now records the Win32 code and says the PC is still awake.
+- **The push URL reflects the real listener.** A taken port or missing URL ACL shows "listener did not start (reason)" instead of an address that nobody else can reach. A LAN panel that only bound to loopback says so, and prints the admin `netsh` command instead of inviting a phone to a dead IP.
+- **Webhooks no longer answer `200 ok` to everything.** Invalid JSON, non-objects, a missing `event`, unknown events and non-POST requests each return the matching client error; unknown events are no longer mapped onto "dragon finished".
+- **Failed pushes retry, and a final failure leaves a record.** Transient network errors retry at 1/3/7 s; a definitive failure lands in the notification centre with channel, title and reason, and pending retries are cancelled on exit.
+- **Balloons report whether they actually showed.** A missing tray icon no longer makes the test channel claim success.
+- **The incident bundle keeps paths and accounts out, and stops degrading to type names.** Tool config is captured as a real structure, paths keep only the file name, and tokens/passwords/e-mails/chat IDs are masked — while the reverse mistake is fixed too: `BgiWebhookPort`, `NotifyEmailPort` and the hotkey fields stay readable because support needs them.
+- **The bundle says what is missing.** A log that never got created or a screenshot that failed is listed item by item instead of "saved"; screenshots record their scope (game window / primary screen + monitor count), and a failed GDI call is never stored as a blank image.
+
 ## v1.42: manage it all inside the task-list card
 
 This release only touches the right-hand card on the home page: **one tool per row**, tonight's plan as the card's headline, group checkboxes unfold in place, and the separate "managed config" window is gone.
@@ -316,6 +335,6 @@ Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — *
 
 ## Version
 
-Latest release **v1.42** (`1.42.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+Latest release **v1.43** (`1.43.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
 
 The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

@@ -16,6 +16,14 @@ public static class WebhookHub
     private static int _port;
     private static bool _wildcard;
 
+    // v1.43 / 任务三：最近一次绑定的真实结果。
+    //
+    // _wildcard 记的是「用户要不要局域网」，这个记的是「实际绑成了什么」。
+    // 两者必须分开：通配前缀需要 urlacl 授权，普通用户权限下会失败并退回回环，
+    // 那时候界面如果还按 _wildcard 报「手机浏览器打开 http://192.168.x.x」，
+    // 用户会拿着一个连不上的地址去试，然后把问题算到程序头上。
+    private static WebhookBindResult _lastBind = WebhookBindResult.NotStarted(0, "还没启动");
+
     /// <summary>收到 BGI 事件（线程池线程；订阅方自行保证线程安全）。</summary>
     public static event Action<SentinelEvent>? EventReceived;
 
@@ -31,7 +39,11 @@ public static class WebhookHub
     /// </summary>
     public static string PanelAddress()
     {
-        if (!_wildcard || _port <= 0) return "http://127.0.0.1:" + _port + "/";
+        // v1.43 / 任务三：按「实际绑成了什么」给地址，不按「用户想要什么」。
+        // 没在监听就返回空串——界面拿空串就知道该显示「没启动」而不是一个假地址。
+        if (!Listener.IsRunning) return "";
+        if (_port <= 0) return "";
+        if (!Listener.IsWildcardBound) return "http://127.0.0.1:" + _port + "/";
         try
         {
             foreach (var ip in System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName()).AddressList)
@@ -52,17 +64,33 @@ public static class WebhookHub
     /// <summary>最近事件时间。</summary>
     public static DateTime LastEventAt => Listener.LastEventAt;
 
-    /// <summary>启动（幂等）：端口变化时重启监听。<paramref name="wildcard"/> 打开时同时监听局域网。</summary>
-    public static void Start(int port, bool wildcard = false)
+    /// <summary>
+    /// 启动（幂等）：端口变化时重启监听。<paramref name="wildcard"/> 打开时同时监听局域网。
+    ///
+    /// <para>
+    /// v1.43 / 任务三：返回真实绑定结果。调用方（设置页、局域网面板开关）必须看这个返回值，
+    /// 不能拿自己传进来的 <paramref name="wildcard"/> 当结论——那只是请求，不是结果。
+    /// </para>
+    /// </summary>
+    public static WebhookBindResult Start(int port, bool wildcard = false)
     {
-        if (Listener.IsRunning && _port == port && _wildcard == wildcard) return;
+        if (Listener.IsRunning && _port == port && _wildcard == wildcard) return _lastBind;
         _port = port;
         _wildcard = wildcard;
         Listener.Route = HandleRoute;
-        Listener.Start(port, wildcard);
+        _lastBind = Listener.Start(port, wildcard);
         _drainTimer ??= new Timer(_ => Drain(), null, 300, 300);
-        LogService.LogEvent($"Webhook 总线：端口 {port}，运行={Listener.IsRunning}，局域网={wildcard}");
+        LogService.LogEvent(_lastBind.Started
+            ? $"Webhook 总线：端口 {port}，实际绑定 {_lastBind.Prefix}（{( _lastBind.Wildcard ? "局域网可用" : "仅本机")}）"
+            : $"Webhook 总线：端口 {port} 没有启动（{_lastBind.Error}）");
+        return _lastBind;
     }
+
+    /// <summary>v1.43 / 任务三：最近一次绑定的真实结果，界面按它说话。</summary>
+    public static WebhookBindResult LastBind => _lastBind;
+
+    /// <summary>v1.43 / 任务三：局域网真的能访问吗（通配前缀绑成了才算）。</summary>
+    public static bool IsLanAvailable => Listener.IsWildcardBound;
 
     /// <summary>
     /// 非 /webhook 路径的统一入口（v1.7）：只读面板与受令牌保护的控制 API。
