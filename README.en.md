@@ -37,6 +37,15 @@ It does exactly four things: start processes, read the public logs those tools w
   <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
 </p>
 
+## v1.45.2: housekeeping — 79 unreferenced screenshots removed
+
+No functional change. What changed is how much an agent has to read before it can safely touch this repo.
+
+- Deleted 79 historical screenshots in `docs/proto/` that no document referenced any more (5.1 MB); 23 still-referenced ones remain. Archived before deletion.
+- Moved the four one-off October reports into `docs/archive/`; the root now only carries per-version reports.
+- Added `AGENTS.md`: encoding and line-ending rules, how to jump around the large files, how to run the probes, the five release steps, and the pitfalls this machine keeps hitting.
+- Added `scripts/check-file-size.ps1`: any single file over 20 KB is rejected, enforced in CI. 17 existing oversized files are whitelisted, and that list only shrinks.
+
 ## v1.45.1: housekeeping — one rule, one place
 
 No new features, no visible change. What moved is code that said the same thing twice, plus three methods nothing ever called — so the next change only has to happen in one place.
@@ -381,6 +390,6 @@ Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — *
 
 ## Version
 
-Latest release **v1.45.1** (`1.45.1` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+Latest release **v1.45.2** (`1.45.2` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
 
 The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

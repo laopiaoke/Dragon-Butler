@@ -65,6 +65,15 @@ jobs:
           dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release -p:EnableNETAnalyzers=true -warnaserror
           if ($LASTEXITCODE -ne 0) { throw "构建失败，退出码 $LASTEXITCODE" }
 
+      # v1.46 / D32：一个文件超过 20 KB（约 5000 token）就拦住。
+      # 不装本地钩子——那会改掉所有人的提交行为，而且 --no-verify 一绕就没了；
+      # 放在 CI 里跑，才是真的过不去。
+      - name: 文件大小闸门（单文件 ≤ 20 KB）
+        shell: pwsh
+        run: |
+          ./scripts/check-file-size.ps1 -All
+          if ($LASTEXITCODE -ne 0) { throw "有文件超过 20 KB，请按功能拆开再提交" }
+
       # 用 StubTool 驱动 RunCoordinator，验证"日志命中完成判定"这条主链路真的通
       - name: 集成探针（StubTool · 日志完成判定）
         shell: pwsh
