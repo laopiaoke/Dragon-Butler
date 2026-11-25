@@ -21,6 +21,8 @@ Dragon-Butler（一条龙管家）：Windows 桌面小工具，替人按下「�
 
 其余：`docs/使用说明.txt`（给用户的说明书）、`docs/路线图.md`（历史决策与取舍）、`docs/archive/`（2026-10 的一次性旧报告，别再往里加）。
 
+动代码前还要过一遍失败模式签名：`docs/SIGNATURES.md`（S1–S14，逐条自查；交付报告里引用「命中 S#」以那份为准）。
+
 ## 编码与换行：改错就是整片乱码或整份 diff
 
 | 文件 | 编码 | 换行 |
@@ -73,6 +75,7 @@ $exe = "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.exe"
 - `gh release view --json ...isLatest` 这个字段不被当前 gh 版本接受，会报「无效的 JSON 基元: Unknown」。
 - 读 `.gitignore` 这类带中文的文件，`Get-Content` 在 pwsh 控制台显示乱码是**控制台按 GBK 显示**，文件本身通常是 UTF-8，别急着转码。
 - 控制台中文乱码不等于文件坏了：先用 `[System.IO.File]::ReadAllText` 确认一次。
+- **判断「没人引用」必须全库扫 `.md` / `.txt` / `.cs`，包括各版本交付报告里的「产出物表」**。v1.45.2 清图时只扫了现行文档，漏掉 8 张有登记的产出物（差点删掉）。删东西之前先打包备份到仓库外——这次能补回全靠它。
 
 ## 两条硬规矩
 
