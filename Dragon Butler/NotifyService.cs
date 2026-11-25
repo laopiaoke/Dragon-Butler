@@ -145,9 +145,17 @@ Write-Output 'TOAST_OK'
     // 原来一次失败就结束：网络抖一下（地铁、Wi-Fi 换信道、路由器重启），
     // 「今晚跑完了」这条就永远丢了，日志里只有一行「推送失败」，人不在电脑前根本看不到。
     //
-    // 重试是业务层的、有限的、指数退避的：三次，1s / 3s / 7s。
+    // 重试是业务层的、有限的、指数退避的：1s / 3s / 7s，第四次是终局。
     // 不新增设置项——「要不要重试」不该是用户的负担，「重试几次」更不该。
-    private static readonly int[] RetryDelaysMs = { 1000, 3000, 7000 };
+    //
+    // v1.44 / 修复 #6（D21）：这三个数字只在这一处写。原先叫 RetryDelaysMs，
+    // 名字太泛，谁都能再建一份；现在叫 PushRetryDelaysMs 并公开出来，
+    // 探针能直接断言「节奏就是这三个」，也让「哪里还有一套自己的重试间隔」一眼可查。
+    //
+    // 注意：<b>不做配置化</b>。用户词汇里没有「退避间隔」，把它做成设置项，
+    // 等于把一个不该由用户决定的技术细节摊到设置页上；节奏该由我们定，
+    // 用户只需要知道「没发出去的话，大概十几秒内会再试三次」。
+    public static readonly int[] PushRetryDelaysMs = { 1000, 3000, 7000 };
 
     /// <summary>应用退出时喊停，别让重试等待把进程拖住。</summary>
     private static readonly System.Threading.CancellationTokenSource RetryCts = new();
@@ -162,14 +170,14 @@ Write-Output 'TOAST_OK'
     {
         string err = "";
         bool ok = false;
-        for (int attempt = 0; attempt <= RetryDelaysMs.Length; attempt++)
+        for (int attempt = 0; attempt <= PushRetryDelaysMs.Length; attempt++)
         {
             (ok, err) = await SendAsync(ch, level, title, message).ConfigureAwait(false);
             if (ok) break;
-            if (attempt >= RetryDelaysMs.Length) break;
+            if (attempt >= PushRetryDelaysMs.Length) break;
             if (!IsRetriable(err)) break;
-            LogService.LogEvent($"推送失败（{NameOf(ch)}），{RetryDelaysMs[attempt] / 1000} 秒后重试（第 {attempt + 1} 次）：{err}");
-            try { await Task.Delay(RetryDelaysMs[attempt], RetryCts.Token).ConfigureAwait(false); }
+            LogService.LogEvent($"推送失败（{NameOf(ch)}），{PushRetryDelaysMs[attempt] / 1000} 秒后重试（第 {attempt + 1} 次）：{err}");
+            try { await Task.Delay(PushRetryDelaysMs[attempt], RetryCts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
         }
 
@@ -181,8 +189,19 @@ Write-Output 'TOAST_OK'
 
         LogService.LogEvent($"推送最终失败（{NameOf(ch)}）：{err}");
         try { AppState.PublishLog($"✗ {NameOf(ch)}推送失败：{err}"); } catch { }
-        // 最终失败必须进消息中心：日志是给排查用的，人不会主动翻；
-        // 消息中心是「昨晚出过什么事」的清单，跑完的结果丢了要能在这里看见。
+        // v1.44 / 修复 #6（D21）：三次用尽之后，两条留痕都要有，缺一不可。
+        //
+        // ① 「今日」那一栏（DecisionLog）——用户第二天早上翻「今日」时，
+        //    看到的是「推送没送到」这件事本身，而不是一条线索都没有。
+        // ② 消息中心（NoticeCenter）——日志是给排查用的，人不会主动翻；
+        //    消息中心是「昨晚出过什么事」的清单，跑完的结果丢了要能在这里看见。
+        //
+        // 只做其中一条等于没做：只有日志没人看，只有弹窗第二天就关了。
+        // 留痕里必须带渠道名和最终错误摘要——「推送失败」四个字对用户没有任何用，
+        // 「企业微信推送没送到：HTTP 401 令牌失效」才能让下一步动作自己浮出来。
+        string shortErr = Snippet(err);
+        DecisionLog.Add(DecisionSource.System, $"推送没送到（{NameOf(ch)}）",
+            $"重试三次都失败了，最后一次说：{shortErr}。这一条「{title}」今晚没发出去。");
         NoticeCenter.AddError($"{NameOf(ch)} 推送没送到",
             $"「{title}」这条没能发出去：{err}。网络恢复后可以手动重发，或者换个渠道。", err);
     }

@@ -1,4 +1,4 @@
-﻿<Window x:Class="DragonButler.AppDialog"
+<Window x:Class="DragonButler.AppDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="一条龙管家" Width="460" SizeToContent="Height"
@@ -103,6 +103,35 @@
             </Setter>
         </Style>
 
+        <!-- v1.44 / 修复 #5：可编辑输入框。
+             和只读的 DlgCopyBox 分开写，是因为「抄一段地址」和「改一个数字」
+             需要的东西不一样：前者要能全选，后者要能改、要有光标。 -->
+        <Style x:Key="DlgInput" TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource InsetBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="Padding" Value="9,6"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Microsoft YaHei UI"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border CornerRadius="8" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                          VerticalScrollBarVisibility="Hidden"
+                                          HorizontalScrollBarVisibility="Hidden"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 标题栏关闭：26×26 透明按钮，hover 出底色 -->
         <Style x:Key="DlgClose" TargetType="Button">
             <Setter Property="Width" Value="26"/>
@@ -186,6 +215,20 @@
                                Foreground="{DynamicResource TextTertiaryBrush}"/>
                     <TextBox x:Name="CopyBox" Style="{StaticResource DlgCopyBox}"
                              Margin="0,9,0,0" Visibility="Collapsed"/>
+                    <!-- v1.44 / 修复 #5：需要人当场填个值的时候用这一块。
+                         默认隐藏；错误提示也在这里，校验不过就留在框里，不关窗。 -->
+                    <StackPanel x:Name="PromptBox" Margin="0,9,0,0" Visibility="Collapsed">
+                        <TextBlock x:Name="PromptLabel" FontSize="11.5"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <TextBox x:Name="InputBox" Style="{StaticResource DlgInput}"
+                                 Margin="0,5,0,0" Height="30"/>
+                        <TextBlock x:Name="PromptHint" FontSize="10.5" Margin="0,4,0,0"
+                                   TextWrapping="Wrap" Visibility="Collapsed"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                        <TextBlock x:Name="PromptError" FontSize="11" Margin="0,4,0,0"
+                                   TextWrapping="Wrap" Visibility="Collapsed"
+                                   Foreground="{DynamicResource DangerBrush}"/>
+                    </StackPanel>
                 </StackPanel>
             </Grid>
 

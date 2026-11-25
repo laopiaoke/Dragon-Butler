@@ -237,6 +237,10 @@ public static class QueueService
             CurrentToolStartedAt = default;
             _cts = new CancellationTokenSource();
         }
+        // v1.44 / 修复 #4：队列真的开始跑了，上一轮的收尾倒计时就没有理由留着。
+        // 「倒计时窗口里队列又动起来」正常不该出现，但定时计划和手动「接着跑」
+        // 都不看这里——宁可少睡一次，也不能在队列跑到一半时关机。
+        WrapUpCountdown.ResetForNewRun();
         LastResults.Clear();
         RaiseState();
 
@@ -712,6 +716,76 @@ public static class QueueService
             {
                 LogService.LogEvent("队列：结束疑似挂起进程失败 " + ex.Message);
             }
+        }
+    }
+
+    /// <summary>
+    /// v1.44 / 修复 #4（D19）：把关机请求交给系统，并确认它真的被接受了。
+    ///
+    /// <para>
+    /// 必须在发出去之后等它退出、按退出码判断——<c>Process.Start</c> 返回非空只说明
+    /// 进程起来了，不代表系统接受了这次请求（被策略拦、被别的程序占着都会失败）。
+    /// 没接受就压根没有倒计时，这时候弹「60 秒后关机」就是骗人。
+    /// </para>
+    /// </summary>
+    /// <param name="detail">失败原因（成功时为空串）。</param>
+    internal static bool RequestSystemShutdown(out string detail)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("shutdown", $"/s /t {WrapUpCountdown.WindowSeconds}")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using Process? proc = Process.Start(psi);
+            if (proc == null)
+            {
+                detail = "系统没有返回进程";
+                return false;
+            }
+            if (!proc.WaitForExit(5000))
+            {
+                detail = "shutdown 5 秒没有返回";
+                return false;
+            }
+            if (proc.ExitCode != 0)
+            {
+                detail = $"shutdown 退出码 {proc.ExitCode}";
+                return false;
+            }
+            detail = "";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            detail = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// v1.44 / 修复 #4：用户点了「立即执行」——不等剩下那几十秒了，现在就关。
+    ///
+    /// <para>调用前必须先 <see cref="CancelShutdown"/> 把系统那边挂着的倒计时撤掉，
+    /// 否则 <c>shutdown /s /t 0</c> 会被已有的计划挡住。</para>
+    /// </summary>
+    internal static void ExecuteShutdownNow()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("shutdown", "/s /t 0")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            Process.Start(psi);
+            LogService.LogEvent("关机已立即执行");
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("立即关机失败：" + ex.Message);
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", "该关机了，但命令没能执行。电脑还开着。");
         }
     }
 
@@ -1705,6 +1779,36 @@ public static class AfterRunActionService
         => string.Equals(action, "Sleep", StringComparison.OrdinalIgnoreCase)
            || string.Equals(action, "Shutdown", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// v1.44 / 修复 #4：尝试进入睡眠，并把系统给的失败原因说出来。
+    ///
+    /// <para>
+    /// 单独抽出来是为了让倒计时执行体（<see cref="WrapUpCountdown"/>）能复用同一段判定，
+    /// 而不是在那边再抄一份 <c>SetSuspendState</c> 的调用与错误处理。
+    /// </para>
+    /// </summary>
+    /// <param name="detail">失败原因（成功时为空串）。</param>
+    /// <returns>系统是否真的进入了睡眠。</returns>
+    internal static bool TrySleep(out string detail)
+    {
+        try
+        {
+            if (SetSuspendState(false, false, false))
+            {
+                detail = "";
+                return true;
+            }
+            int err = Marshal.GetLastWin32Error();
+            detail = err != 0 ? $"系统拒绝（Win32 {err}）" : "系统没有进入睡眠";
+            return false;
+        }
+        catch (Exception ex)
+        {
+            detail = ex.Message;
+            return false;
+        }
+    }
+
     /// <summary>执行跑完动作。</summary>
     public static void Execute(AfterRunContext ctx)
     {
@@ -1759,29 +1863,8 @@ public static class AfterRunActionService
                 LogService.LogEvent("DRYRUN: 将执行睡眠");
                 return;
             }
-            try
-            {
-                LogService.LogEvent("跑完动作：执行睡眠");
-                // v1.43 / 任务二：SetSuspendState 是布尔返回值，失败必须说出来。
-                // 原来只写「执行睡眠」就完事，日志里看起来像睡成功了，
-                // 而人第二天早上发现电脑还亮着，却没有一行能查的记录。
-                if (!SetSuspendState(false, false, false))
-                {
-                    int err = Marshal.GetLastWin32Error();
-                    LogService.LogEvent(err != 0
-                        ? $"睡眠失败：系统拒绝（Win32 {err}）"
-                        : "睡眠失败：系统没有进入睡眠");
-                    NotifyService.Show(NotifyLevel.Warning, "龙管家", "要睡眠的时候系统没答应，电脑还醒着。");
-                }
-                else
-                {
-                    LogService.LogEvent("已进入睡眠");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogService.LogEvent("睡眠失败：" + ex.Message);
-            }
+            // v1.44 / 修复 #4（D19）：不再立刻睡。60 秒倒计时，人能反悔。
+            WrapUpCountdown.Start(WrapUpKind.Sleep);
             return;
         }
 
@@ -1792,54 +1875,9 @@ public static class AfterRunActionService
                 LogService.LogEvent("DRYRUN: 将执行关机");
                 return;
             }
-            try
-            {
-                var psi = new ProcessStartInfo("shutdown", "/s /t 60")
-                {
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                // v1.43 / 任务二：Process.Start 返回非空只说明「进程起来了」，
-                // 不代表 shutdown 接受了这次请求。必须等它退出再按退出码判断，
-                // 否则报了「60 秒后关机」，倒计时根本不存在，用户也没地方取消。
-                bool accepted;
-                string detail = "";
-                using (Process? proc = Process.Start(psi))
-                {
-                    if (proc == null)
-                    {
-                        accepted = false;
-                        detail = "系统没有返回进程";
-                    }
-                    else if (!proc.WaitForExit(5000))
-                    {
-                        accepted = false;
-                        detail = "shutdown 5 秒没有返回";
-                    }
-                    else
-                    {
-                        accepted = proc.ExitCode == 0;
-                        detail = accepted ? "" : $"shutdown 退出码 {proc.ExitCode}";
-                    }
-                }
-
-                if (!accepted)
-                {
-                    LogService.LogEvent($"关机失败：{detail}");
-                    NotifyService.Show(NotifyLevel.Warning, "龙管家", $"该关机了，但没能排上（{detail}）。电脑还开着。");
-                    return;
-                }
-
-                QueueService.MarkShutdownPending();
-                LogService.LogEvent("关机已排定：60 秒后关机");
-                NotifyService.Show(NotifyLevel.Warning, "龙管家", "队列完成，60 秒后将关机，可在队列卡点「取消关机」。");
-                QueueService.NotifyShutdownStateChanged();
-            }
-            catch (Exception ex)
-            {
-                LogService.LogEvent("关机失败：" + ex.Message);
-                NotifyService.Show(NotifyLevel.Warning, "龙管家", "该关机了，但命令没能执行。电脑还开着。");
-            }
+            // v1.44 / 修复 #4（D19）：60 秒窗口。关机走系统级倒计时（进程被杀也照样关），
+            // 睡眠走进程内倒计时（Windows 没有「延迟睡眠 + 可中止」的命令）。
+            WrapUpCountdown.Start(WrapUpKind.Shutdown);
         }
     }
 

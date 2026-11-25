@@ -110,6 +110,8 @@ public partial class MainWindow : Window
         QueueService.StatusChanged += OnQueueStatusText;
         SentinelService.OnEvent += OnSentinelEvent;
         Theme.Changed += OnAppThemeChanged;
+        // v1.44 / 修复 #4：收尾倒计时条跟着状态走，不在按钮回调里手动改可见性。
+        WrapUpCountdown.Changed += OnWrapUpChanged;
         Closed += (_, _) =>
         {
             Theme.Changed -= OnAppThemeChanged;
@@ -117,6 +119,7 @@ public partial class MainWindow : Window
             QueueService.StateChanged -= OnQueueStateChanged;
             QueueService.StatusChanged -= OnQueueStatusText;
             SentinelService.OnEvent -= OnSentinelEvent;
+            WrapUpCountdown.Changed -= OnWrapUpChanged;
             // v1.8：热键是系统级注册，窗口关掉必须还回去，否则组合键被永久占用
             try { _hotkeys?.Dispose(); } catch { }
         };
@@ -1104,11 +1107,11 @@ public partial class MainWindow : Window
         catch { }
 
         BtnQueueIdleSkip.Visibility = QueueService.IsWaitingIdle ? Visibility.Visible : Visibility.Collapsed;
-        // v1.43 / 任务二 / P2-3：先让过期状态自己复位，再决定按钮画不画。
-        // 顺带把 IsEnabled 打开——上一次取消失败可能把它留在不可点状态。
+        // v1.43 / 任务二 / P2-3：先让过期状态自己复位。
+        // v1.44 / 修复 #4：显隐统一由 RefreshWrapUpBar 决定——它同时管着倒计时条，
+        // 两处各写一遍必然有一天会打架（一条显示、一条隐藏）。
         QueueService.ExpireShutdownPendingIfStale();
-        BtnQueueCancelShutdown.Visibility = QueueService.IsShutdownPending ? Visibility.Visible : Visibility.Collapsed;
-        if (BtnQueueCancelShutdown.Visibility == Visibility.Visible) BtnQueueCancelShutdown.IsEnabled = true;
+        RefreshWrapUpBar();
         RefreshContinueButton();
         RefreshProgress();
 
@@ -1195,19 +1198,54 @@ public partial class MainWindow : Window
         BtnQueueIdleSkip.Visibility = Visibility.Collapsed;
     }
 
-    private void BtnQueueCancelShutdown_Click(object sender, RoutedEventArgs e)
+    // v1.44 / 修复 #4：取消入口合并到倒计时条上了。
+    // 原来这里还有个「取消关机」按钮：睡眠场景下它既不显示、词也对不上，
+    // 两个取消入口并存只会让人点错一个，然后以为取消失效了。
+
+    private void BtnWrapUpCancel_Click(object sender, RoutedEventArgs e) => WrapUpCountdown.Cancel();
+
+    private void BtnWrapUpNow_Click(object sender, RoutedEventArgs e) => WrapUpCountdown.RunNow();
+
+    /// <summary>
+    /// v1.44 / 修复 #4：倒计时条的唯一刷新点。
+    ///
+    /// <para>
+    /// 每 200ms 会被倒计时回调叫一次（秒数要跳动），所以这里不读盘、不查进程，
+    /// 只把已经在内存里的四个数字搬上屏。
+    /// </para>
+    /// </summary>
+    private void OnWrapUpChanged()
     {
-        // v1.43 / 任务二：按钮的可见性交给真实状态，不在这里无条件隐藏。
-        // 取消失败时它必须留着——那是人唯一能重试的地方；
-        // 成功时 QueueService 会主动通知，这条线跟着重算。
-        if (!QueueService.CancelShutdown())
+        try
         {
-            BtnQueueCancelShutdown.IsEnabled = true;
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(OnWrapUpChanged));
+                return;
+            }
+            RefreshWrapUpBar();
+        }
+        catch { }
+    }
+
+    /// <summary>把倒计时状态画到提示条上；没在倒计时就收起来。</summary>
+    private void RefreshWrapUpBar()
+    {
+        WrapUpKind? kind = WrapUpCountdown.ActiveKind;
+        bool active = kind != null;
+        if (!active)
+        {
+            WrapUpBar.Visibility = Visibility.Collapsed;
             return;
         }
-        BtnQueueCancelShutdown.Visibility = Visibility.Collapsed;
-        BtnQueueCancelShutdown.IsEnabled = true;
+
+        WrapUpBar.Visibility = Visibility.Visible;
+        TbWrapUpIcon.Text = kind == WrapUpKind.Sleep ? "🌙" : "⏻";
+        TbWrapUpLeft.Text = WrapUpCountdown.RemainingSeconds.ToString();
+        TbWrapUpText.Text = $"队列完成，{WrapUpCountdown.RemainingSeconds} 秒后{WrapUpCountdown.NameOf(kind!.Value)}";
+        TbWrapUpHint.Text = "想反悔就点取消；也可以点立即执行，不用等满。";
     }
+
 
     // ===== v1.42.1 / M9-4：四个视图窗口连类一起删了 =====
     //
@@ -7111,8 +7149,9 @@ public partial class MainWindow : Window
             // 连回环都没绑上，局域网当然更没有。开关状态留着，但把话说清楚。
             TbLanPanelHint.Text = $"监听没能启动（{bind.Error}）。面板现在打不开，地址也不能复制给别人。";
             AppState.PublishLog("局域网面板没能启动：" + bind.Error);
-            NotifyService.Show(NotifyLevel.Warning, "龙管家",
-                $"面板没能启动（{bind.Error}）。可能是端口 {bind.Port} 被别的程序占着，换个端口再试。");
+            // v1.44 / 修复 #5（D20）：以前这里说「换个端口再试」，界面上却没有地方能换。
+            // 现在就地给一个输入框：改个数字、保存、立刻重绑，不用去设置页翻。
+            OfferPortChange(bind);
         }
         else if (!bind.Wildcard)
         {
@@ -7131,6 +7170,82 @@ public partial class MainWindow : Window
             NotifyService.Show(NotifyLevel.Info, "龙管家", "局域网面板已开启，手机浏览器打开：\n" + addr);
             TbLanPanelHint.Text = "手机连同一个 Wi-Fi，浏览器打开：" + addr;
         }
+    }
+
+    /// <summary>
+    /// v1.44 / 修复 #5（D20）：端口占用时就地换端口。
+    ///
+    /// <para>
+    /// 为什么不做自动换端口：外部工具（BetterGI 的通知设置）里填的地址是死字符串，
+    /// 悄悄换一个端口，那边的推送会静默失效——人只会发现「事件突然不来了」。
+    /// 为什么不放到设置页：一辈子用不上一次的动作埋进二级页，等于没有。
+    /// 所以就地改，改完当场重绑。
+    /// </para>
+    /// </summary>
+    private void OfferPortChange(WebhookBindResult failed)
+    {
+        int current = AppState.Settings.BgiWebhookPort;
+        string? input = AppDialog.ShowInput(
+            $"端口 {failed.Port} 没绑上：{failed.Error}",
+            new AppDialog.Prompt
+            {
+                Label = "换一个没被占用的端口（1024–65535）",
+                Value = current.ToString(),
+                Hint = "改完会立刻重试。BetterGI 里的通知地址也要跟着改，不然完成事件收不到。",
+                // 校验规则放在 WebhookHub 上，探针才断言得到。
+                Validate = WebhookHub.ValidatePortText,
+            },
+            detail: failed.Error,
+            kind: AppDialog.Kind.Warning,
+            title: "面板没能启动",
+            primary: "保存并重试",
+            secondary: "先不管",
+            owner: this);
+
+        // 用户选了「先不管」：维持不监听，什么都不改。
+        if (input == null) return;
+        if (!int.TryParse(input, out int newPort)) return;
+
+        int oldPort = AppState.Settings.BgiWebhookPort;
+        // 序列：先停掉旧的（哪怕它没起来，也把状态清干净），再绑新的。
+        try { WebhookHub.Stop(); } catch { }
+        AppState.Settings.BgiWebhookPort = newPort;
+        AppState.SaveSettings();
+        WebhookBindResult retry = WebhookHub.Start(newPort, AppState.Settings.LanPanelEnabled);
+        RefreshEventUrl();
+
+        if (!retry.Started)
+        {
+            // 失败留在原地：把系统原话摆出来，不笼统说「失败」。
+            AppState.PublishLog($"局域网面板：端口 {newPort} 仍然没能启动（{retry.Error}）");
+            DecisionLog.Add(DecisionSource.System, "换端口后仍然没绑上",
+                $"从 {oldPort} 换到 {newPort}，系统还是没答应：{retry.Error}");
+            TbLanPanelHint.Text = $"端口 {newPort} 还是没能启动（{retry.Error}）。";
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", $"端口 {newPort} 也没绑上：{retry.Error}");
+            return;
+        }
+
+        if (oldPort != newPort)
+        {
+            DecisionLog.Add(DecisionSource.System, "监听端口换了",
+                $"原来的 {oldPort} 被占用，改成 {newPort}，监听已经起来了。");
+        }
+        AppState.PublishLog($"局域网面板已换到端口 {newPort}");
+
+        // 换端口之后按新的绑定结果重新说一遍：可能还是只有本机能用。
+        if (!retry.Wildcard)
+        {
+            TbLanPanelHint.Text = $"端口 {newPort} 已启动，但只在你这台电脑上能用：{retry.Prefix}。想让手机打开，得用管理员身份运行一次：" +
+                $"netsh http add urlacl url=http://+:{newPort}/ user=Everyone";
+            NotifyService.Show(NotifyLevel.Warning, "龙管家",
+                $"端口换成 {newPort} 了，但只在你这台电脑上能打开——手机连不上。想让局域网能访问，需要用管理员身份运行 netsh 授权。");
+            return;
+        }
+
+        string addr = WebhookHub.PanelAddress();
+        if (addr.Length == 0) addr = retry.Prefix;
+        TbLanPanelHint.Text = "手机连同一个 Wi-Fi，浏览器打开：" + addr;
+        NotifyService.Show(NotifyLevel.Info, "龙管家", $"端口换成 {newPort} 了，手机浏览器打开：\n" + addr);
     }
 
     /// <summary>

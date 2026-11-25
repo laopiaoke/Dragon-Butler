@@ -1577,9 +1577,10 @@
                                     <Button x:Name="BtnQueueIdleSkip" Style="{StaticResource LaunchGhost}" Height="32"
                                             Content="立即开始（跳过等待）" Margin="0,7,0,0" Visibility="Collapsed"
                                             Click="BtnQueueIdleSkip_Click"/>
-                                    <Button x:Name="BtnQueueCancelShutdown" Style="{StaticResource LaunchGhost}" Height="30"
-                                            Content="取消关机" Margin="0,7,0,0" Visibility="Collapsed"
-                                            Click="BtnQueueCancelShutdown_Click"/>
+                                    <!-- v1.44 / 修复 #4：这里原来有个「取消关机」按钮。
+                                     现在取消统一由顶部那条反悔窗口承担——它同时管睡眠和关机，
+                                     还带着倒计时和「立即执行」。留着这个按钮会出现两个取消入口，
+                                     而且睡眠时它写着「取消关机」，说的和做的不一样。 -->
 
                     <!-- v1.29：工具设置原来在设置页上单独一张卡，和这张卡说的是同一批工具——
                          「哪些要跑」在这边，「每个怎么跑」在那边，用户点一个工具得先想清楚它在哪一页。
@@ -2843,6 +2844,46 @@
                 </Grid>
             </Border>
 
+
+            <!-- v1.44 / 修复 #4（D19）：收尾前的 60 秒反悔窗口。
+                 为什么是一条横条而不是弹窗：弹窗抢焦点，而且被关掉之后人就再也找不到
+                 「取消」在哪了。横条常驻在内容区顶部，不动手就自己数到 0。 -->
+            <!-- VerticalAlignment="Top" 不能省：Row 1 是内容区，Border 默认会被拉伸到整行，
+                 于是这条提示变成一整片绿底把下面的页面全盖住。 -->
+            <Border x:Name="WrapUpBar" Grid.Row="1" Panel.ZIndex="20" VerticalAlignment="Top"
+                    Background="{DynamicResource BrandSoftBrush}"
+                    BorderBrush="{DynamicResource BrandBrush}" BorderThickness="0,0,0,1"
+                    Padding="18,10,18,10" Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="TbWrapUpIcon" Grid.Column="0" Text="🌙" FontSize="18"
+                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock x:Name="TbWrapUpText" Text="队列完成，60 秒后睡眠"
+                                   FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        <TextBlock x:Name="TbWrapUpHint" Text="想反悔就点取消；也可以点立即执行，不用等满。"
+                                   FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="TbWrapUpLeft" Text="60" FontSize="20" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" Margin="0,0,14,0"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        <Button x:Name="BtnWrapUpCancel" Content="取消" Click="BtnWrapUpCancel_Click"
+                                Style="{StaticResource MiniAction}" Height="30" MinWidth="64"/>
+                        <Button x:Name="BtnWrapUpNow" Content="立即执行" Click="BtnWrapUpNow_Click"
+                                Style="{StaticResource LaunchGhost}" Height="30" MinWidth="86" Margin="8,0,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
             <!-- ===== 日志视图（v1.41 / M1-2）=====
                  它不再是底栏的一页，而是一层「带着问题进来」的覆盖视图：

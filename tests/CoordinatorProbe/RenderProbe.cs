@@ -631,6 +631,8 @@ internal static class RenderProbe
         int exit = 1;
         // v1.42.1 / M9-3（D17）：收起态零滚动是契约，不是参考值——超了就让退出码非零。
         bool zeroScrollFail = false;
+        // v1.44 / 修复 #4：反悔窗口也得真出现过、真消失过，不然那三条 UI 只是摆设。
+        bool wrapUpFail = false;
         var worker = new Thread(() =>
         {
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -1111,6 +1113,47 @@ if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
                             win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
                             bool ok3 = Save(win, Path.Combine(spot, "toolrows_add.png"), 1120, 720);
                             Console.WriteLine($"RENDER toolrows_add={ok3}");
+
+                            // v1.44 / 修复 #4：收尾反悔窗口的那条提示。
+                            // 只走睡眠分支——关机分支会真发 shutdown /s /t 60，探针不该碰。
+                            // 睡眠是进程内倒计时，取消只是关窗，不产生任何系统动作。
+                            bool okWrap = false;
+                            bool okWrapGone = false;
+                            try
+                            {
+                                if (WrapUpCountdown.Start(WrapUpKind.Sleep))
+                                {
+                                    win.UpdateLayout();
+                                    win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+                                    var bar = win.FindName("WrapUpBar") as System.Windows.FrameworkElement;
+                                    var left = win.FindName("TbWrapUpLeft") as System.Windows.Controls.TextBlock;
+                                    var txt = win.FindName("TbWrapUpText") as System.Windows.Controls.TextBlock;
+                                    Console.WriteLine($"WRAPUP bar={bar?.Visibility} left={left?.Text} text={txt?.Text}");
+                                    bool shot = Save(win, Path.Combine(spot, "wrapupbar.png"), 1120, 720);
+                                    Console.WriteLine($"RENDER wrapupbar_shot={shot}");
+                                    okWrap = bar != null && bar.Visibility == System.Windows.Visibility.Visible
+                                        && left != null && left.Text.Length > 0
+                                        && txt != null && txt.Text.Contains("秒后睡眠");
+                                }
+                                else
+                                {
+                                    Console.WriteLine("WRAPUP 开窗失败：Start 返回 false");
+                                }
+
+                                if (WrapUpCountdown.Cancel())
+                                {
+                                    win.UpdateLayout();
+                                    win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+                                    var bar2 = win.FindName("WrapUpBar") as System.Windows.FrameworkElement;
+                                    okWrapGone = bar2 != null && bar2.Visibility != System.Windows.Visibility.Visible;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("WRAPUP failed: " + ex.Message);
+                            }
+                            Console.WriteLine($"WRAPUP shown={okWrap} cleared={okWrapGone}");
+                            if (!(okWrap && okWrapGone)) wrapUpFail = true;
                         }
                         catch (Exception ex)
                         {
@@ -1515,7 +1558,7 @@ if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
                     }
 
                     Console.WriteLine("RENDER-DIR " + spot);
-                    exit = zeroScrollFail ? 1 : 0;
+                    exit = (zeroScrollFail || wrapUpFail) ? 1 : 0;
                 }
                 catch (Exception ex)
                 {

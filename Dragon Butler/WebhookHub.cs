@@ -93,6 +93,21 @@ public static class WebhookHub
     public static bool IsLanAvailable => Listener.IsWildcardBound;
 
     /// <summary>
+    /// v1.44 / 修复 #5：端口输入框的校验。
+    ///
+    /// <para>
+    /// 抽出来是为了能被断言：校验规则写在 lambda 里的话，只有人手点一遍才知道对不对。
+    /// 返回 null 表示通过，否则是给人看的那句话。
+    /// </para>
+    /// </summary>
+    public static string? ValidatePortText(string? text)
+    {
+        if (!int.TryParse((text ?? "").Trim(), out int port)) return "端口得是纯数字。";
+        if (port < 1024 || port > 65535) return "端口范围是 1024–65535；低于 1024 的需要管理员权限。";
+        return null;
+    }
+
+    /// <summary>
     /// 非 /webhook 路径的统一入口（v1.7）：只读面板与受令牌保护的控制 API。
     /// 返回 null = 不认识这个路径，让监听器回 404。
     /// v1.11 起多一个 MCP 分支（<paramref name="body"/> 是 POST 上来的原文）。

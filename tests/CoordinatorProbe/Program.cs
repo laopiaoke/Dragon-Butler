@@ -39,6 +39,7 @@ internal static class Program
             "timeout" => Run("timeout", stub, CompletionSignalKind.ProcessExit0, "--hang", 1, 0),
             "halted" => RunHalted(stub),
             "signals" => RunSignalArbiter(),
+            "wrapup" => RunWrapUp(),
             "haltedlog" => Run("haltedlog", stub, CompletionSignalKind.LogPattern, "--hang", 5, 1),
             "logpattern" => RunLogPattern(stub),
             "args" => RunArgs(),
@@ -408,6 +409,79 @@ internal static class Program
                 == ToolRunState.Halted);
 
         Console.WriteLine("RESULT signals fails=" + fails.Count);
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.44 / 修复 #4 #5 #6：三份修复任务书的可测面。
+    ///
+    /// <para>
+    /// 这里都不真睡、不真关：反悔窗口的「关机」分支会真发 shutdown，所以只断言
+    /// 「没开窗时取消返回 false」这种不产生副作用的路径，以及纯函数与常量。
+    /// 倒计时本体在渲染探针里靠截图与源码断言覆盖。
+    /// </para>
+    /// </summary>
+    private static int RunWrapUp()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // #4：没开窗的时候三条入口都必须什么都不做。
+        Check("倒计时/默认没开窗", !WrapUpCountdown.IsActive);
+        Check("倒计时/没开窗时取消返回 false", !WrapUpCountdown.Cancel());
+        Check("倒计时/没开窗时立即执行返回 false", !WrapUpCountdown.RunNow());
+        Check("倒计时/没开窗时剩余秒数为 0", WrapUpCountdown.RemainingSeconds == 0);
+        Check("倒计时/没开窗时没有动作类型", WrapUpCountdown.ActiveKind == null);
+
+        // 60 秒是任务书钉死的，不做配置项；这里守住它别被人顺手改成 30。
+        Check("倒计时/窗口就是 60 秒", WrapUpCountdown.WindowSeconds == 60);
+
+        Check("倒计时/名字说人话", WrapUpCountdown.NameOf(WrapUpKind.Sleep) == "睡眠"
+            && WrapUpCountdown.NameOf(WrapUpKind.Shutdown) == "关机");
+
+        // #5：端口校验的每一条挡板。
+        Check("端口/正常值放行", WebhookHub.ValidatePortText("18235") == null);
+        Check("端口/上下边界放行", WebhookHub.ValidatePortText("1024") == null && WebhookHub.ValidatePortText("65535") == null);
+        Check("端口/非数字拦住", WebhookHub.ValidatePortText("abc") != null);
+        Check("端口/空值拦住", WebhookHub.ValidatePortText("") != null && WebhookHub.ValidatePortText(null) != null);
+        Check("端口/低于 1024 拦住", WebhookHub.ValidatePortText("80") != null);
+        Check("端口/高于 65535 拦住", WebhookHub.ValidatePortText("70000") != null);
+        Check("端口/前后空格能忍", WebhookHub.ValidatePortText("  18235  ") == null);
+
+        // #6：重试节奏收敛成单点常量之后，数值本身不许动（任务书 D21）。
+        Check("重试/节奏还是 1-3-7 秒",
+            NotifyService.PushRetryDelaysMs.Length == 3
+            && NotifyService.PushRetryDelaysMs[0] == 1000
+            && NotifyService.PushRetryDelaysMs[1] == 3000
+            && NotifyService.PushRetryDelaysMs[2] == 7000);
+
+        // 三次用尽必须留痕：常量之外还有 DecisionLog 那条，靠源码断言守住它不被删。
+        string notifyCs = ReadRepoSources("Dragon Butler/NotifyService.cs");
+        Check("重试/耗尽后进今日留痕", notifyCs.Contains("推送没送到（") && notifyCs.Contains("DecisionLog.Add"));
+        Check("重试/耗尽后仍进消息中心", notifyCs.Contains("NoticeCenter.AddError"));
+        Check("重试/循环读常量不写死数字", notifyCs.Contains("PushRetryDelaysMs[attempt]"));
+
+        // 界面侧：倒计时条得真在 XAML 里，而且两个按钮都接着事件。
+        string mainXamlForWrap = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        Check("倒计时/界面上有那条提示", mainXamlForWrap.Contains("x:Name=\"WrapUpBar\""));
+        Check("倒计时/有剩余秒数那一格", mainXamlForWrap.Contains("x:Name=\"TbWrapUpLeft\""));
+        Check("倒计时/有取消与立即执行",
+            mainXamlForWrap.Contains("BtnWrapUpCancel_Click") && mainXamlForWrap.Contains("BtnWrapUpNow_Click"));
+        string mainCsForWrap = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        // 节流在上游文件里：200ms 一跳，但只有秒数变了才通知界面。
+        string wrapCs = ReadRepoSources("Dragon Butler/WrapUpCountdown.cs");
+        Check("倒计时/改秒数才刷界面",
+            wrapCs.Contains("_lastNotifiedSecond") && wrapCs.Contains("if (left != _lastNotifiedSecond)"));
+        Check("倒计时/显隐只有一处说了算",
+            mainCsForWrap.Contains("RefreshWrapUpBar()") && !mainCsForWrap.Contains("BtnQueueCancelShutdown"));
+        // 「取消关机」老按钮已经撤掉：它只管关机、词还对不上睡眠，留着就是第二个入口。
+        Check("倒计时/没有第二个取消入口", !mainXamlForWrap.Contains("BtnQueueCancelShutdown"));
+        Check("端口/输入弹窗走统一校验", mainCsForWrap.Contains("Validate = WebhookHub.ValidatePortText"));
+        Console.WriteLine("RESULT wrapup fails=" + fails.Count);
         return fails.Count == 0 ? 0 : 1;
     }
 

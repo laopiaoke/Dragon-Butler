@@ -37,6 +37,19 @@ It does exactly four things: start processes, read the public logs those tools w
   <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
 </p>
 
+## v1.44: 60 seconds to change your mind, and a port conflict you can fix in place
+
+Three after-the-fact repairs. No new toggles, no new settings.
+
+- **The queue no longer sleeps or shuts down the moment it finishes.** A 60-second countdown starts, with a bar at the top of the home page showing "queue finished, sleeping in 60s" and the remaining seconds, plus Cancel / Do it now.
+- **Shutdown uses the system countdown** (`shutdown /s /t 60`, so it still fires if the app is closed). **Sleep uses an in-process countdown** — the machine only suspends when it reaches zero.
+- **Cancel only collapses the bar when the system actually agrees.** The shutdown path runs `shutdown /a`; if that fails the bar stays and tells you the plan could not be revoked, instead of claiming success while the countdown keeps running.
+- **If the queue starts again mid-countdown**, the wrap-up is cancelled automatically and "wrap-up auto-cancelled: queue started again" is written to Today. Better to skip one sleep than to sleep at the wrong moment.
+- **All three outcomes land in Today**: cancelled, confirmed immediately, or fired when the countdown ended — so you can tell who decided what.
+- **When the webhook port cannot be bound, you can change it right in the error dialog.** It prefills the current port, validates 1024–65535, and "Save and retry" stops the old listener and binds the new one. Success is recorded as "listener port 18235 → 18240"; failure keeps the raw system error in the dialog.
+- **When a push fails three times**, besides the notice centre, a "push not delivered (WeCom)" entry with the last error summary goes into Today. The 1/3/7-second retry rhythm is unchanged and lives in exactly one constant.
+- **Only one cancel entry remains** — the one on the wrap-up bar. The old standalone button is gone: two differently-named buttons doing the same thing means clicking the wrong one looks like a failure.
+
 ## v1.43: hardening the end-of-run chains — no more "success" when it failed
 
 No new features here, only plugged holes. The six chains shared one bad habit: **when something went wrong, the program got more confident** — a crash counted as success and shut the PC down, a shutdown that never got queued still said "shutting down in 60 s", a malformed webhook still got `200 ok`, and the incident bundle recorded a tool's config as a bare type name. All of that now reports what actually happened.
@@ -335,6 +348,6 @@ Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — *
 
 ## Version
 
-Latest release **v1.43** (`1.43.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+Latest release **v1.44** (`1.44.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
 
 The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

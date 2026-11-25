@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -28,10 +28,41 @@ public partial class AppDialog : Window
         Question,
     }
 
+    /// <summary>
+    /// v1.44 / 修复 #5：弹窗里需要人当场填一个值时的描述。
+    ///
+    /// <para>
+    /// 存在的理由：原来只有「显示一段话」的能力，于是「端口被占了，换个端口再试」
+    /// 这种提示只能是死胡同——说了要做什么，界面上却无处可做。
+    /// </para>
+    /// </summary>
+    public sealed class Prompt
+    {
+        /// <summary>输入框上面那行小字（说明填什么）。</summary>
+        public string Label { get; init; } = "";
+
+        /// <summary>初始值（一般填当前值，让人改一个数字就够）。</summary>
+        public string Value { get; init; } = "";
+
+        /// <summary>输入框下面的灰色说明（可省）。</summary>
+        public string Hint { get; init; } = "";
+
+        /// <summary>
+        /// 校验：返回 null 表示通过，返回非空字符串就是给人看的错误原因。
+        /// 弹窗负责把这句话显示在输入框下面，并把窗口留着——
+        /// 关掉窗口再弹一个「格式不对」是最烦人的做法。
+        /// </summary>
+        public Func<string, string?> Validate { get; init; } = _ => null;
+    }
+
     /// <summary>主按钮 = true（知道了/确定），次按钮或关闭 = false</summary>
     public bool Result { get; private set; }
 
     private Action? _secondaryAction;
+    private Prompt? _prompt;
+
+    /// <summary>v1.44 / 修复 #5：用户填进去并通过校验的值；取消时为 null。</summary>
+    public string? PromptValue { get; private set; }
 
     public AppDialog()
     {
@@ -67,6 +98,38 @@ public partial class AppDialog : Window
         }
     }
 
+    /// <summary>
+    /// v1.44 / 修复 #5：带输入框的弹窗（模态）。
+    ///
+    /// <para>
+    /// 和 <see cref="Show"/> 分开，而不是给它加一个可选参数：
+    /// 加参数的写法会让几十处调用点都多背一个「这里也能填东西」的暗示，
+    /// 而实际上只有一处需要。分开之后，读调用点的人一眼就知道这里要填值。
+    /// </para>
+    /// </summary>
+    /// <returns>点了主按钮并通过校验就返回填进去的值；取消或关闭返回 null。</returns>
+    public static string? ShowInput(string message,
+                                    Prompt prompt,
+                                    string? detail = null,
+                                    Kind kind = Kind.Info,
+                                    string? title = null,
+                                    string primary = "确定",
+                                    string secondary = "取消",
+                                    Window? owner = null)
+    {
+        try
+        {
+            var dlg = Create(kind, title ?? "一条龙管家", message, detail, primary, secondary, null, owner, null, prompt);
+            dlg.ShowDialog();
+            return dlg.Result ? dlg.PromptValue : null;
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("弹窗显示失败：" + ex.Message);
+            return null;
+        }
+    }
+
     /// <summary>创建但不显示（自动化验证用；Show 内部同样走这里）</summary>
     public static AppDialog Create(Kind kind,
                                    string title,
@@ -76,14 +139,15 @@ public partial class AppDialog : Window
                                    string? secondary = null,
                                    Action? secondaryAction = null,
                                    Window? owner = null,
-                                   string? copyText = null)
+                                   string? copyText = null,
+                                   Prompt? prompt = null)
     {
         EnsureThemeResources();
         var dlg = new AppDialog();
         // 启动早期的提示往往在后台进程里弹出：先置顶确保用户看得见，
         // 一旦拿到焦点就恢复普通层级（避免长期压在其它窗口之上）
         dlg.Topmost = true;
-        dlg.Setup(kind, title, message, detail, primary, secondary, secondaryAction, copyText);
+        dlg.Setup(kind, title, message, detail, primary, secondary, secondaryAction, copyText, prompt);
         if (owner != null && owner.IsVisible && !ReferenceEquals(owner, dlg))
         {
             dlg.Owner = owner;
@@ -100,7 +164,7 @@ public partial class AppDialog : Window
 
     private void Setup(Kind kind, string title, string message, string? detail,
                        string primary, string? secondary, Action? secondaryAction,
-                       string? copyText)
+                       string? copyText, Prompt? prompt = null)
     {
         Title = string.IsNullOrWhiteSpace(title) ? "一条龙管家" : title;
         TitleText.Text = Title;
@@ -125,6 +189,26 @@ public partial class AppDialog : Window
         else
         {
             CopyBox.Visibility = Visibility.Collapsed;
+        }
+
+        // v1.44 / 修复 #5：需要人填值的场景。
+        // 校验不过就留在框里、把原因写在下面——关掉窗口再弹一个「格式不对」，
+        // 等于让人重新填一遍，是最烦人的做法。
+        _prompt = prompt;
+        if (prompt == null)
+        {
+            PromptBox.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            PromptBox.Visibility = Visibility.Visible;
+            PromptLabel.Text = prompt.Label;
+            PromptLabel.Visibility = string.IsNullOrWhiteSpace(prompt.Label) ? Visibility.Collapsed : Visibility.Visible;
+            InputBox.Text = prompt.Value;
+            PromptHint.Text = prompt.Hint;
+            PromptHint.Visibility = string.IsNullOrWhiteSpace(prompt.Hint) ? Visibility.Collapsed : Visibility.Visible;
+            PromptError.Visibility = Visibility.Collapsed;
+            PromptValue = null;
         }
 
         BtnPrimary.Content = string.IsNullOrWhiteSpace(primary) ? "知道了" : primary;
@@ -164,7 +248,12 @@ public partial class AppDialog : Window
 
         Loaded += (_, _) =>
         {
-            if (hasCopyBox)
+            if (prompt != null)
+            {
+                InputBox.Focus();
+                InputBox.SelectAll();
+            }
+            else if (hasCopyBox)
             {
                 // 兜底场景：聚焦文本框并全选，用户按一次 Ctrl+C 即可复制
                 CopyBox.Focus();
@@ -238,7 +327,25 @@ public partial class AppDialog : Window
         catch { }
     }
 
-    private void BtnPrimary_Click(object sender, RoutedEventArgs e) => CloseWith(true);
+    private void BtnPrimary_Click(object sender, RoutedEventArgs e)
+    {
+        // v1.44 / 修复 #5：校验不过不关窗，把原因写在输入框下面。
+        if (_prompt != null)
+        {
+            string value = InputBox.Text.Trim();
+            string? error = _prompt.Validate(value);
+            if (error != null)
+            {
+                PromptError.Text = error;
+                PromptError.Visibility = Visibility.Visible;
+                InputBox.Focus();
+                InputBox.SelectAll();
+                return;
+            }
+            PromptValue = value;
+        }
+        CloseWith(true);
+    }
 
     private void BtnSecondary_Click(object sender, RoutedEventArgs e)
     {
