@@ -239,6 +239,54 @@ public partial class NoticeWindow : Window
             Build();
         };
         actions.Children.Add(copy);
+
+        // v1.45 / M12-2（D26）：只有「本进程里刚失败、原样还留着」的那条才给重发按钮。
+        //
+        // 重启之后原来的正文就不在了，这里硬给一个按钮，点下去只能发出一条空消息——
+        // 比没有按钮更糟。所以没有载荷的条目改成一句实话，而不是一个假按钮。
+        if (NotifyService.HasResendPayload(n))
+        {
+            var resend = MakeMiniButton("重发");
+            resend.Click += async (_, _) =>
+            {
+                // 连点防护第一层：自己先禁掉，等人点完这一下再说。
+                resend.IsEnabled = false;
+                resend.Content = "正在重发…";
+                try
+                {
+                    var (ok, err) = await NotifyService.ResendAsync(n);
+                    resend.Content = ok ? "重发成功" : "还是没发出去";
+                    if (!ok)
+                    {
+                        resend.IsEnabled = true;
+                        resend.ToolTip = err;
+                    }
+                    else
+                    {
+                        Build();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    resend.Content = "重发失败";
+                    resend.IsEnabled = true;
+                    resend.ToolTip = ex.Message;
+                }
+            };
+            actions.Children.Add(resend);
+        }
+        else if (n.Kind == NoticeKind.Error && n.Body.Contains("没能发出去", StringComparison.Ordinal))
+        {
+            actions.Children.Add(new TextBlock
+            {
+                Text = NotifyService.ResendHintFor(n),
+                FontSize = 10.5,
+                Margin = new Thickness(2, 4, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("TextTertiaryBrush", Brushes.Gray),
+            });
+        }
+
         actions.Children.Add(del);
         body.Children.Add(actions);
 

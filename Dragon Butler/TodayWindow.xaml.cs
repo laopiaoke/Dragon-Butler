@@ -413,9 +413,23 @@ public partial class TodayWindow : Window
     /// <summary>
     /// 复制文字版：很多人要的不是「看懂」，是「发出去」。
     /// 截图发群里比复制几行字麻烦得多，而这个动作本身不需要任何新数据。
+    ///
+    /// <para>
+    /// v1.45 / M12-5（D20 沿用）：失败时不再是死胡同。剪贴板被别的程序占着
+    /// （远程桌面、剪贴板管理器、某些输入法），过两秒一般就好了——所以按钮旁边
+    /// 直接给一个「重试」，而不是让人关掉窗口重开。
+    /// </para>
     /// </summary>
-    private void BtnReport_Click(object sender, RoutedEventArgs e)
+    private void BtnReport_Click(object sender, RoutedEventArgs e) => TryCopyReport();
+
+    private void BtnCopyRetry_Click(object sender, RoutedEventArgs e) => TryCopyReport();
+
+    private void TryCopyReport()
     {
+        // 连点防护：重试和主按钮都走这里，靠一个开关把重入挡住。
+        if (_copying) return;
+        _copying = true;
+        BtnCopyRetry.IsEnabled = false;
         try
         {
             var day = DateTime.Today;
@@ -428,13 +442,31 @@ public partial class TodayWindow : Window
             Clipboard.SetText(text);
             NotifyService.Show(NotifyLevel.Info, "龙管家", "今日运行已复制到剪贴板。");
             LogService.LogEvent("今日运行：已复制文字版");
+            ShowCopyFailure("");
         }
         catch (Exception ex)
         {
             LogService.LogEvent("今日运行：复制失败 " + ex.Message);
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", "复制没成功，剪贴板可能被别的程序占着，稍后再试。");
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", "复制没成功，剪贴板可能被别的程序占着。点旁边的「重试」再试一次。");
+            ShowCopyFailure("剪贴板被占着");
+        }
+        finally
+        {
+            _copying = false;
+            BtnCopyRetry.IsEnabled = true;
         }
     }
+
+    /// <summary>v1.45 / M12-5：失败那一格显隐只有这一处说了算。</summary>
+    private void ShowCopyFailure(string reason)
+    {
+        bool failed = reason.Length > 0;
+        TbCopyHint.Text = failed ? reason : "";
+        TbCopyHint.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
+        BtnCopyRetry.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private bool _copying;
 
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
 

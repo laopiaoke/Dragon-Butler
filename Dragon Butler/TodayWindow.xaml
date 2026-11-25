@@ -77,6 +77,16 @@
                 <TextBlock Text="今日运行" FontSize="13.5" FontWeight="SemiBold" Margin="18,0,0,0"
                            VerticalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <!-- v1.45 / M12-5（D20 沿用）：复制失败时就地给一个「重试」。
+                         以前失败只有一句「稍后再试」，而窗口上没有任何能再试一下的地方，
+                         用户唯一能做的是关掉窗口重开——比「稍后再试」听起来还糟。 -->
+                    <TextBlock x:Name="TbCopyHint" FontSize="10.5" VerticalAlignment="Center"
+                               Margin="0,0,8,0" Visibility="Collapsed"
+                               Foreground="{DynamicResource WarningBrush}"/>
+                    <Button x:Name="BtnCopyRetry" Content="重试" Style="{StaticResource Ghost}" Height="26"
+                            FontSize="11" Padding="8,0" Margin="0,0,6,0" Visibility="Collapsed"
+                            Click="BtnCopyRetry_Click"
+                            ToolTip="刚才没复制成，再试一次"/>
                     <Button x:Name="BtnReport" Content="复制文字版" Style="{StaticResource Ghost}" Height="28"
                             FontSize="11.5" Padding="10,0" Click="BtnReport_Click"
                             ToolTip="把今天这一盘整理成几行文字，直接粘贴到群里"/>

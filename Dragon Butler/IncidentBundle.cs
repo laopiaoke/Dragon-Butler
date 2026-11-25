@@ -129,10 +129,44 @@ public static class IncidentBundle
                 .ToList();
             foreach (var d in dirs)
             {
-                try { Directory.Delete(d, true); } catch { }
+                // v1.45 / M12-4（D27）：改成丢进回收站，不再当场抹掉。
+                //
+                // 原来这里是 Directory.Delete(d, true)。现场包是给人排查用的，
+                // 而排查往往发生在「发现问题之后」——那时候第 11 份以前的现场
+                // 恰恰可能是关键证据，删了就真没了。进回收站的成本几乎为零，
+                // 用户想找还能找回来。
+                bool recycled = TryRecycle(d);
+                if (!recycled)
+                {
+                    // 回收站不可用（网络盘、被策略关掉、目录被占用）时退回直接删，
+                    // 但必须留痕：静默失败会让「保留 N 份」这条规则悄悄失效。
+                    try { Directory.Delete(d, true); } catch { }
+                    try
+                    {
+                        LogService.LogEvent(
+                            $"现场包：{Path.GetFileName(d)} 没能放进回收站，已直接删除（保留 {keep} 份的规则照旧）");
+                    }
+                    catch { }
+                }
             }
         }
         catch { }
+    }
+
+    /// <summary>v1.45 / M12-4：把一份旧现场包丢进回收站；成功返回 true。</summary>
+    private static bool TryRecycle(string dir)
+    {
+        try
+        {
+            // net8.0-windows 自带 Microsoft.VisualBasic，不需要额外加包。
+            Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                dir,
+                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin,
+                Microsoft.VisualBasic.FileIO.UICancelOption.DoNothing);
+            return true;
+        }
+        catch { return false; }
     }
 
     /// <summary>默认值会对中文做 \uXXXX 转义，env.json 会变成天书——这里放开非 ASCII。</summary>

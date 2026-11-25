@@ -166,7 +166,146 @@ Write-Output 'TOAST_OK'
         try { RetryCts.Cancel(); } catch { }
     }
 
-    private static async Task SendAndLogAsync(PushChannel ch, NotifyLevel level, string title, string message)
+    // ===== v1.45 / M12-2（D26）：没送到的消息，可以就地重发一次 =====
+    //
+    // 原来失败之后只有一句话：「网络恢复后可以手动重发」——而界面上根本没有能重发的地方。
+    // 那句提示等于让人自己重新配一遍渠道。
+    //
+    // 载荷只放内存：{渠道, 级别, 标题, 正文}。每渠道只留最近一次，发成功就清掉。
+    // 不落盘是刻意的——消息正文里可能有验证码、地址、聊天内容，把它们写进
+    // notices.json 换个地方长期存着，比丢一条通知糟得多。
+    private sealed class ResendPayload
+    {
+        public Notice Notice = null!;
+        public PushChannel Channel;
+        public NotifyLevel Level;
+        public string Title = "";
+        public string Message = "";
+    }
+
+    private static readonly Dictionary<PushChannel, ResendPayload> PendingResend = new();
+    private static readonly HashSet<Notice> Resending = new();
+    private static readonly object ResendGate = new();
+
+    /// <summary>本进程起来的时刻：用来分辨「这条是不是重启前留下的」。</summary>
+    private static readonly DateTime ProcessStartedAt = DateTime.Now;
+
+    /// <summary>v1.45 / M12-2：还留着几条可以重发的。</summary>
+    public static int PendingResendCount
+    {
+        get { lock (ResendGate) return PendingResend.Count; }
+    }
+
+    /// <summary>
+    /// v1.45 / M12-2：这条消息还留着原样吗？
+    /// 只有本进程里刚失败的那几条有；重启之后一律没有。
+    /// </summary>
+    public static bool HasResendPayload(Notice? n)
+    {
+        if (n == null) return false;
+        lock (ResendGate)
+        {
+            foreach (var p in PendingResend.Values) if (ReferenceEquals(p.Notice, n)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// v1.45 / M12-2：没有载荷的那一条，该怎么跟人说。
+    ///
+    /// 两种原因说法不同：「重启过」和「原样没留下来」是两件事，
+    /// 混成一句会让真重启过的人觉得对，没重启的人觉得在骗他。
+    /// </summary>
+    public static string ResendHintFor(Notice? n)
+    {
+        if (n == null) return "";
+        return n.At < ProcessStartedAt
+            ? "重启过，这条只能留档了"
+            : "这条的原样没留下来，只有刚失败的那条能重发";
+    }
+
+    private static void RememberResend(Notice n, PushChannel ch, NotifyLevel level, string title, string message)
+    {
+        lock (ResendGate)
+        {
+            PendingResend[ch] = new ResendPayload
+            {
+                Notice = n,
+                Channel = ch,
+                Level = level,
+                Title = title,
+                Message = message,
+            };
+        }
+    }
+
+    private static void ForgetResend(Notice? n)
+    {
+        if (n == null) return;
+        lock (ResendGate)
+        {
+            var dead = new List<PushChannel>();
+            foreach (var kv in PendingResend) if (ReferenceEquals(kv.Value.Notice, n)) dead.Add(kv.Key);
+            foreach (var ch in dead) PendingResend.Remove(ch);
+        }
+    }
+
+    private static ResendPayload? FindResend(Notice? n)
+    {
+        if (n == null) return null;
+        lock (ResendGate)
+        {
+            foreach (var p in PendingResend.Values) if (ReferenceEquals(p.Notice, n)) return p;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// v1.45 / M12-2：把一条没送到的消息原样再发一次。
+    ///
+    /// 走的是同一条链路（<see cref="SendCoreAsync"/>：1s/3s/7s 三次重试 + 同样的留痕），
+    /// 不另写一套——两套重试迟早有一套忘了改，然后两条路给出不同结论。
+    /// 连点防护做两层：界面禁按钮 + 这里用 <see cref="Resending"/> 挡重入。
+    /// </summary>
+    public static async Task<(bool ok, string err)> ResendAsync(Notice? n)
+    {
+        ResendPayload? p = FindResend(n);
+        if (p == null) return (false, "这条没有可重发的内容");
+
+        lock (ResendGate)
+        {
+            if (!Resending.Add(n!)) return (false, "这条正在重发");
+        }
+        try
+        {
+            var (ok, err) = await SendCoreAsync(p.Channel, p.Level, p.Title, p.Message).ConfigureAwait(false);
+            if (ok)
+            {
+                ForgetResend(n);
+                LogService.LogEvent($"重发成功（{NameOf(p.Channel)}）：{p.Title}");
+                DecisionLog.Add(DecisionSource.System, $"重发成功（{NameOf(p.Channel)}）",
+                    $"「{p.Title}」这条之前没发出去，你在消息中心点了一次重发，这次送到了。");
+            }
+            else
+            {
+                LogService.LogEvent($"重发又失败（{NameOf(p.Channel)}）：{err}");
+                DecisionLog.Add(DecisionSource.System, $"重发还是没送到（{NameOf(p.Channel)}）",
+                    $"「{p.Title}」再发一次还是不行，最后一次说：{Snippet(err)}。");
+            }
+            return (ok, err);
+        }
+        finally
+        {
+            lock (ResendGate) Resending.Remove(n!);
+        }
+    }
+
+    /// <summary>
+    /// v1.45 / M12-2：真正发的那一段（含三次重试）。
+    /// 发完不写消息中心——首次发送和「重发」对留痕的处理不一样，所以拆开，
+    /// 但重试节奏与判定只此一份。
+    /// </summary>
+    private static async Task<(bool ok, string err)> SendCoreAsync(PushChannel ch, NotifyLevel level, string title, string message)
     {
         string err = "";
         bool ok = false;
@@ -178,12 +317,20 @@ Write-Output 'TOAST_OK'
             if (!IsRetriable(err)) break;
             LogService.LogEvent($"推送失败（{NameOf(ch)}），{PushRetryDelaysMs[attempt] / 1000} 秒后重试（第 {attempt + 1} 次）：{err}");
             try { await Task.Delay(PushRetryDelaysMs[attempt], RetryCts.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException) { return (false, err); }
         }
+        return (ok, err);
+    }
+
+    private static async Task SendAndLogAsync(PushChannel ch, NotifyLevel level, string title, string message)
+    {
+        var (ok, err) = await SendCoreAsync(ch, level, title, message).ConfigureAwait(false);
 
         if (ok)
         {
             LogService.LogEvent($"推送成功（{NameOf(ch)}）：{title}");
+            // 这个渠道现在通了，之前挂着的那条就没有再重发的价值
+            lock (ResendGate) PendingResend.Remove(ch);
             return;
         }
 
@@ -202,8 +349,11 @@ Write-Output 'TOAST_OK'
         string shortErr = Snippet(err);
         DecisionLog.Add(DecisionSource.System, $"推送没送到（{NameOf(ch)}）",
             $"重试三次都失败了，最后一次说：{shortErr}。这一条「{title}」今晚没发出去。");
-        NoticeCenter.AddError($"{NameOf(ch)} 推送没送到",
-            $"「{title}」这条没能发出去：{err}。网络恢复后可以手动重发，或者换个渠道。", err);
+        // v1.45 / M12-2（D26）：① 这条消息留着原样，消息中心里能就地重发；
+        // ② 文案不再说「网络恢复后可以手动重发」——那时候没地方点，现在是有的。
+        var failed = NoticeCenter.AddError($"{NameOf(ch)} 推送没送到",
+            $"「{title}」这条没能发出去：{err}。改好设置之后，在这条上点「重发」就行，不用重新跑一遍。", err);
+        RememberResend(failed, ch, level, title, message);
     }
 
     /// <summary>

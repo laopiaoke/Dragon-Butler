@@ -231,6 +231,32 @@ public partial class CustomThemeWindow : Window
 
     private void BtnReset_Click(object sender, RoutedEventArgs e)
     {
+        // v1.45 / M12-1（D25）：先问一句，再动手。
+        //
+        // 原来这个按钮点下去当场写盘，一次改掉六项：主题 / 背景类型 / 背景色 /
+        // 背景图 / 遮罩 / 配色。用户自己挑的那张背景图、调了半天才满意的遮罩比例，
+        // 一下就没了，而且撤不回来——只能照着记忆再调一遍。
+        //
+        // 另外三个破坏性按钮（删工具、清空消息、删工具卡）早就有确认框了，只有它没有。
+        // 确认框必须在这行之下、任何 AppState 赋值之前：上面那句 return 之外的
+        // 每一个 s.xxx = ... 都会写进用户配置。
+        bool resetOk = AppDialog.Show(
+            "恢复默认主题？",
+            detail: "会把下面这六项一起改回出厂状态：\n" +
+                    "· 主题（跟随系统）\n" +
+                    "· 背景类型（纯色）\n" +
+                    "· 背景色\n" +
+                    "· 背景图（自定义图片会被清掉）\n" +
+                    "· 遮罩比例\n" +
+                    "· 配色方案\n\n" +
+                    "这个操作不可撤销。",
+            kind: AppDialog.Kind.Question,
+            title: "恢复默认主题",
+            primary: "恢复默认",
+            secondary: "算了",
+            owner: this);
+        if (!resetOk) return;
+
         var s = AppState.Settings;
         s.Theme = "System";
         s.CustomBgKind = "Color";

@@ -19,12 +19,47 @@ namespace CoordinatorProbe;
 /// </summary>
 internal static class Program
 {
+    /// <summary>
+    /// v1.45 / M12-6：把替身路径定成绝对路径。
+    ///
+    /// <para>
+    /// 顺序是：已经是绝对路径就用它；否则先按当前目录拼，拼不出来再试探针自己的
+    /// 输出目录往上找 <c>tests/StubTool/...</c>——本地手跑时人常常就在仓库根目录，
+    /// 而 CI 里跑的时候工作目录是探针自己的 bin。两边都能对上，参数怎么传都不影响结果。
+    /// </para>
+    /// </summary>
+    private static string ResolveStub(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return path;
+        if (Path.IsPathRooted(path)) return Path.GetFullPath(path);
+
+        var tries = new List<string>
+        {
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, path)),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, path)),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", path)),
+        };
+        foreach (string t in tries) if (File.Exists(t)) return t;
+        // 都找不到就把第一个结果交出去：后面那句 STUB-NOT-FOUND 会打出完整路径，
+        // 比抛一个 InvalidOperationException 好查。
+        return tries[0];
+    }
+
     private static int Main(string[] args)
     {
         string mode = args.Length > 0 ? args[0] : "help";
-        string stub = args.Length > 1
+        // v1.45 / M12-6：替身路径一律换成绝对路径。
+        //
+        // 原来用的是调用者给什么就存什么。CI 里传的是绝对路径，本地手跑常常传
+        // `tests\StubTool\bin\...\StubTool.exe` 这种相对路径——它可以被 File.Exists
+        // 认出来（当前目录对得上），但写进 ToolProfile.ExecutablePath 之后，
+        // 启动用的是「程序目录」而不是 shell 的当前目录，于是同一个文件就找不到了：
+        // 日志里报「系统找不到指定的文件」，探针把这一项判成 Failed，
+        // 连带「端到端/父项成功」也红——看起来像代码回归，其实只是路径没定死。
+        string rawStub = args.Length > 1
             ? args[1]
             : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "StubTool", "bin", "Release", "net8.0", "StubTool.exe"));
+        string stub = ResolveStub(rawStub);
 
         if (!File.Exists(stub) && mode is not ("help" or "clipdialog" or "ui" or "live"))
         {
@@ -40,6 +75,7 @@ internal static class Program
             "halted" => RunHalted(stub),
             "signals" => RunSignalArbiter(),
             "wrapup" => RunWrapUp(),
+            "m12fix" => RunM12Fix(),
             "haltedlog" => Run("haltedlog", stub, CompletionSignalKind.LogPattern, "--hang", 5, 1),
             "logpattern" => RunLogPattern(stub),
             "args" => RunArgs(),
@@ -483,6 +519,124 @@ internal static class Program
         Check("端口/输入弹窗走统一校验", mainCsForWrap.Contains("Validate = WebhookHub.ValidatePortText"));
         Console.WriteLine("RESULT wrapup fails=" + fails.Count);
         return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// v1.45 / M12：六项行为修缮的验收。
+    ///
+    /// <para>
+    /// 这里量的大多是「接线」而不是「算法」——M12 六项栽的都是同一类跟头：
+    /// 代码写了，但没人调用；或者调用点写了两份，慢慢长歪。所以断言一半是
+    /// 纯函数行为，一半是源码里的接线顺序与唯一性。
+    /// </para>
+    /// </summary>
+    private static int RunM12Fix()
+    {
+        var fails = new List<string>();
+        void Check(string name, bool ok, string detail = "")
+        {
+            Console.WriteLine($"  {(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " :: " + detail : "")}");
+            if (!ok) fails.Add(name);
+        }
+
+        // ---- M12-1：确认框必须挡在写盘之前 ----
+        string themeCs = ReadRepoSources("Dragon Butler/CustomThemeWindow.xaml.cs");
+        int askAt = themeCs.IndexOf("AppDialog.Show(", StringComparison.Ordinal);
+        int writeAt = themeCs.IndexOf("s.Theme = \"System\";", StringComparison.Ordinal);
+        Check("确认/先问再改", askAt >= 0 && writeAt > askAt,
+            askAt < 0 ? "没找到确认框" : writeAt < 0 ? "没找到重置赋值" : $"问@{askAt} 写@{writeAt}");
+        Check("确认/取消就什么都不做", themeCs.Contains("if (!resetOk) return;"));
+        Check("确认/正文列全六项",
+            themeCs.Contains("· 主题") && themeCs.Contains("· 背景类型") && themeCs.Contains("· 背景色")
+            && themeCs.Contains("· 背景图") && themeCs.Contains("· 遮罩比例") && themeCs.Contains("· 配色方案"));
+        Check("确认/说了不可撤销", themeCs.Contains("这个操作不可撤销"));
+        // 「重置」这个方法体里只许写一次盘，而且必须在确认之后。
+        // 用方法名到下一个方法声明之间切段，别让旁边那个「应用」按钮的写盘混进来。
+        int resetAt = themeCs.IndexOf("private void BtnReset_Click", StringComparison.Ordinal);
+        int resetEnd = resetAt < 0 ? -1 : themeCs.IndexOf("private void ", resetAt + 10, StringComparison.Ordinal);
+        string resetBody = resetAt >= 0 && resetEnd > resetAt ? themeCs.Substring(resetAt, resetEnd - resetAt) : "";
+        Check("确认/重置里只写一次盘", CountOf(resetBody, "AppState.SaveSettings();") == 1,
+            "出现 " + CountOf(resetBody, "AppState.SaveSettings();") + " 次");
+        Check("确认/重置里也是先问后写",
+            resetBody.IndexOf("AppDialog.Show(", StringComparison.Ordinal) >= 0
+            && resetBody.IndexOf("AppDialog.Show(", StringComparison.Ordinal) < resetBody.IndexOf("AppState.SaveSettings();", StringComparison.Ordinal));
+
+        // ---- M12-2：重发走既有链路，不平行实现 ----
+        string notifyCs = ReadRepoSources("Dragon Butler/NotifyService.cs");
+        Check("重发/有共用的发送内核", notifyCs.Contains("SendCoreAsync("));
+        // 重试循环只许有一份。同一份循环里日志和 Delay 各引用一次常量是正常的，
+        // 要守的是「循环本身没被抄到两个方法里」——抄了就是两套节奏。
+        Check("重发/重试循环只有一份", CountOf(notifyCs, "for (int attempt = 0; attempt <= PushRetryDelaysMs.Length; attempt++)") == 1,
+            "出现 " + CountOf(notifyCs, "for (int attempt = 0; attempt <= PushRetryDelaysMs.Length; attempt++)") + " 次");
+        int resendAt = notifyCs.IndexOf("public static async Task<(bool ok, string err)> ResendAsync", StringComparison.Ordinal);
+        int resendCore = resendAt < 0 ? -1 : notifyCs.IndexOf("SendCoreAsync(", resendAt, StringComparison.Ordinal);
+        Check("重发/重发也走这个内核", resendAt >= 0 && resendCore > resendAt);
+        Check("重发/首次发送也走这个内核",
+            notifyCs.Contains("await SendCoreAsync(") && CountOf(notifyCs, "await SendCoreAsync(") == 2,
+            "出现 " + CountOf(notifyCs, "await SendCoreAsync(") + " 次（首次 + 重发）");
+        // 载荷只在内存、每渠道一份：用 PushChannel 作键的字典就是这条的落地形态。
+        Check("重发/载荷每渠道一份", notifyCs.Contains("Dictionary<PushChannel, ResendPayload>"));
+        Check("重发/载荷不落盘", !notifyCs.Contains("PendingResend.*Write") && !notifyCs.Contains("Serialize(PendingResend"));
+        Check("重发/重入有闸门", notifyCs.Contains("Resending") && notifyCs.Contains("这条正在重发"));
+
+        string noticeWin = ReadRepoSources("Dragon Butler/NoticeWindow.xaml.cs");
+        Check("重发/通知窗口有按钮", noticeWin.Contains("HasResendPayload") && noticeWin.Contains("\"重发\""));
+        Check("重发/重发中禁用", noticeWin.Contains("resend.IsEnabled = false"));
+        Check("重发/没载荷时说清原因", noticeWin.Contains("ResendHintFor"));
+        Check("重发/失败文案指向重发", notifyCs.Contains("在这条上点「重发」就行"));
+        // 重启后的老实说明：别让人对着一个没有按钮的条目等。
+        Check("重发/重启后如实说明", NotifyService.ResendHintFor(new Notice { At = DateTime.Now.AddDays(-1) }) == "重启过，这条只能留档了");
+        Check("重发/本轮失败可重发", NotifyService.ResendHintFor(new Notice { At = DateTime.Now.AddSeconds(5) }).Contains("只有刚失败的那条"));
+        Check("重发/没有载荷就别假装能发", !NotifyService.HasResendPayload(new Notice { At = DateTime.Now }));
+        Check("重发/初始没有待重发", NotifyService.PendingResendCount == 0);
+
+        // ---- M12-3：文案里不许再死写阈值 ----
+        string queueCs = ReadRepoSources("Dragon Butler/QueueService.cs");
+        Check("挂起/两处都改插值", CountOf(queueCs, "{SentinelService.StallThreshold.TotalMinutes:F0} 分钟无任何活动") == 2,
+            "出现 " + CountOf(queueCs, "{SentinelService.StallThreshold.TotalMinutes:F0} 分钟无任何活动") + " 次");
+        Check("挂起/不再有死写的 3 分钟", !queueCs.Contains("疑似挂起（3 分钟"));
+        string mainCsM12 = ReadRepoSources("Dragon Butler/MainWindow.xaml.cs");
+        Check("挂起/设置页也跟着变", mainCsM12.Contains("RefreshStallHint()") && mainCsM12.Contains("SentinelService.StallThreshold.TotalMinutes"));
+
+        // ---- M12-4：删之前先进回收站，进不去要说出来 ----
+        string bundleCs = ReadRepoSources("Dragon Butler/IncidentBundle.cs");
+        Check("现场包/先进回收站", bundleCs.Contains("RecycleOption.SendToRecycleBin"));
+        Check("现场包/回收站失败才直删", bundleCs.Contains("TryRecycle(") && bundleCs.Contains("Directory.Delete(d, true)"));
+        Check("现场包/回退留痕", bundleCs.Contains("没能放进回收站"));
+        string mainXamlM12 = ReadRepoSources("Dragon Butler/MainWindow.xaml");
+        Check("现场包/界面上写着规则", mainXamlM12.Contains("x:Name=\"TbBundleKeepHint\""));
+        Check("现场包/规则数字来自设置", mainCsM12.Contains("TbBundleKeepHint.Text") && mainCsM12.Contains("s.IncidentBundleKeep"));
+
+        // ---- M12-5：复制失败能就地重试，且只有一条复制路径 ----
+        string todayXaml = ReadRepoSources("Dragon Butler/TodayWindow.xaml");
+        string todayCs = ReadRepoSources("Dragon Butler/TodayWindow.xaml.cs");
+        Check("剪贴板/有重试按钮", todayXaml.Contains("x:Name=\"BtnCopyRetry\""));
+        Check("剪贴板/两个入口同一个函数",
+            todayCs.Contains("private void TryCopyReport()")
+            && CountOf(todayCs, "TryCopyReport();") >= 2,
+            "调用 " + CountOf(todayCs, "TryCopyReport();") + " 次");
+        Check("剪贴板/剪贴板只碰一次", CountOf(todayCs, "Clipboard.SetText(") == 1,
+            "出现 " + CountOf(todayCs, "Clipboard.SetText(") + " 次");
+        Check("剪贴板/重试中不重复进", todayCs.Contains("_copying") && todayCs.Contains("if (_copying) return;"));
+        Check("剪贴板/显隐只有一处说了算", todayCs.Contains("private void ShowCopyFailure("));
+
+        // ---- M12-6：替身路径定死成绝对路径 ----
+        string probeCs = ReadRepoSources("tests/CoordinatorProbe/Program.cs");
+        Check("替身路径/有归一函数", probeCs.Contains("private static string ResolveStub("));
+        Check("替身路径/已经是绝对的就不再动", probeCs.Contains("Path.IsPathRooted(path)"));
+        Check("替身路径/入口走归一", probeCs.Contains("ResolveStub(rawStub)") && probeCs.Contains("string rawStub"));
+
+        Console.WriteLine("RESULT m12fix fails=" + fails.Count);
+        return fails.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>数一个子串在文本里出现几次。源码级断言天天要用，别每处手写一遍。</summary>
+    private static int CountOf(string text, string token)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(token)) return 0;
+        int n = 0, i = 0;
+        while ((i = text.IndexOf(token, i, StringComparison.Ordinal)) >= 0) { n++; i += token.Length; }
+        return n;
     }
 
     /// <summary>可手动点火的信号源：由测试决定什么时候抛哪一种信号。</summary>

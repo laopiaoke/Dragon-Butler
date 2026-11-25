@@ -37,6 +37,30 @@ It does exactly four things: start processes, read the public logs those tools w
   <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
 </p>
 
+## v1.45: six small promises the UI made but never kept
+
+No new features. This release closes the gap between what the interface says and what the code actually does: an undoable-looking button with no confirmation, a "you can resend it later" with no resend button, a hard-coded "3 minutes", a screenshot bundle deleted outright, and a failed copy that left you nothing to click.
+
+### Destructive buttons ask first
+
+"Reset to default theme" used to write the settings the moment you clicked it — six values gone. It now opens a confirmation that lists all six items it will change (theme, background kind, background colour, background image, overlay, colour scheme) and says plainly that it cannot be undone. "Never mind" changes nothing.
+
+### Failed pushes can be resent in place
+
+After fixing a wrong URL you no longer have to re-run the queue: hit "Resend" on that failed notice. First sends and resends share one sending core — same 1s/3s/7s retries, same "Today" trail on success and failure. The button disables itself while resending, so double-clicking will not send twice. Payloads live only in memory, one per channel; after a restart the old entry has no button and says "this one is history now — we restarted".
+
+### Thresholds are no longer hard-coded in copy
+
+The stall message now reads the actual threshold (configurable in settings), and the explanation on the settings page follows it.
+
+### Screenshot bundles go to the recycle bin
+
+When the keep-limit is exceeded they used to be deleted outright — gone by the time you wanted to look. They now go to the recycle bin first; only when that is unavailable do we delete, and we say so in the log. A small line on the settings page states "keep the latest N; older ones go to the recycle bin".
+
+### Retry a failed copy right there
+
+When copying today's summary fails, a "Retry" button sits next to the hint and runs the same copy routine; it disables itself while retrying. Previously you got "try again later" and nothing to click.
+
 ## v1.44: 60 seconds to change your mind, and a port conflict you can fix in place
 
 Three after-the-fact repairs. No new toggles, no new settings.
@@ -348,6 +372,6 @@ Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — *
 
 ## Version
 
-Latest release **v1.44** (`1.44.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+Latest release **v1.45** (`1.45.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
 
 The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

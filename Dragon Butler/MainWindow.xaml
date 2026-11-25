@@ -1951,8 +1951,18 @@
                                         </Border>
 
                                     <Border Style="{StaticResource SetRowLast}">
-                                        <TextBlock Style="{StaticResource SetHint}" Margin="0"
-                                                   Text="「挂起」的判定：进程还活着，但 CPU 低于 5% 且日志不增长，已经持续 3 分钟。"/>
+                                        <!-- v1.45 / M12-4（D27）：保留规则以前只在代码里，
+                                             用户不知道第 11 份去哪了。数字由 RefreshRetentionHints() 填，
+                                             免得改了 IncidentBundleKeep 之后这句话变成假话。 -->
+                                        <TextBlock x:Name="TbBundleKeepHint" Style="{StaticResource SetHint}" Margin="0"/>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SetRowLast}">
+                                        <!-- v1.45 / M12-3（D28）：这里原来死写「3 分钟」。阈值是活的
+                                             （SentinelService.StallThreshold，探针会调小到几秒），
+                                             文案里钉一个数字，改了阈值就成了假话。改成由
+                                             RefreshStallHint() 填。 -->
+                                        <TextBlock x:Name="TbStallHint" Style="{StaticResource SetHint}" Margin="0"/>
                                     </Border>
                                     </StackPanel>
                                     </ScrollViewer>

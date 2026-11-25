@@ -561,6 +561,8 @@ public partial class MainWindow : Window
         TgHarvest.IsChecked = s.HarvestEnabled;
         TgControlApi.IsChecked = s.ControlApiEnabled;
         TgLanPanel.IsChecked = s.LanPanelEnabled;
+        RefreshStallHint();
+        RefreshRetentionHints(s);
         RefreshApiRows(s);
         TgHotkey.IsChecked = s.HotkeyEnabled;
         TgMiniBar.IsChecked = s.MiniBarEnabled;
@@ -7267,6 +7269,41 @@ public partial class MainWindow : Window
         // 通配时也用回环地址：BGI 和本程序在同一台机器上，回环最稳，
         // 也不会因为网卡换了 IP 而失效。
         TbEventUrl.Text = $"http://127.0.0.1:{bind.Port}/webhook";
+    }
+
+    /// <summary>
+    /// v1.45 / M12-3（D28）：把「挂起判定」那句说明按当前阈值填出来。
+    ///
+    /// <para>
+    /// 阈值是活的（<see cref="SentinelService.StallThreshold"/>，探针会调到几秒），
+    /// 文案里钉死「3 分钟」的话，改了阈值这句话就成了假话——而且没人会想到去改它。
+    /// 全库规矩：文案不写死阈值数字，一律插值。
+    /// </para>
+    /// </summary>
+    private void RefreshStallHint()
+    {
+        if (TbStallHint == null) return;
+        // -1 只是为了让 5 显示成「5」而不是「5.0」；不足一分钟的测试值保留一位小数。
+        double minutes = SentinelService.StallThreshold.TotalMinutes;
+        string span = minutes >= 1 ? $"{minutes:F0} 分钟" : $"{SentinelService.StallThreshold.TotalSeconds:F0} 秒";
+        TbStallHint.Text = $"「挂起」的判定：进程还活着，但 CPU 低于 5% 且日志不增长，已经持续 {span}。";
+    }
+
+    /// <summary>
+    /// v1.45 / M12-4（D27）：现场包保留规则写给人看。
+    ///
+    /// <para>
+    /// 份数不进设置页（这不是用户该纠结的数字，10 份够查一次事故了），
+    /// 但「第 11 份去哪了」必须能回答：以前它在代码里悄悄删掉，用户第二天
+    /// 想找更早的现场，只会看到「怎么就剩这几份」。
+    /// </para>
+    /// </summary>
+    private void RefreshRetentionHints(AppSettings s)
+    {
+        if (TbBundleKeepHint == null) return;
+        int keep = Math.Max(1, s.IncidentBundleKeep);
+        TbBundleKeepHint.Text =
+            $"失败现场包最多保留最近 {keep} 份；更早的会进回收站（不是直接删），想找还能找回来。";
     }
 
     private void BtnCopyToken_Click(object sender, RoutedEventArgs e)

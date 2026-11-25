@@ -1112,7 +1112,7 @@ public static class QueueService
                 ToolRunState.Failed => "异常退出",
                 ToolRunState.Timeout => $"超时 {profile.MaxDurationMinutes} 分钟未完成",
                 ToolRunState.Halted => "报告完成但进程未退出",
-                ToolRunState.Stalled => "疑似挂起（3 分钟无任何活动）",
+                ToolRunState.Stalled => $"疑似挂起（{SentinelService.StallThreshold.TotalMinutes:F0} 分钟无任何活动）",
                 _ => "未完成",
             };
 
@@ -1417,7 +1417,7 @@ public static class QueueService
         else if (anyStalled && !AppState.Settings.StallAutoKill)
         {
             var st = ran.First(r => r.State == ToolRunState.Stalled);
-            text = $"【龙管家】{st.DisplayName} 疑似挂起（3 分钟无任何活动），队列已暂停等你处理。原因：{st.Reason}";
+            text = $"【龙管家】{st.DisplayName} 疑似挂起（{SentinelService.StallThreshold.TotalMinutes:F0} 分钟无任何活动），队列已暂停等你处理。原因：{st.Reason}";
         }
         else if (anyStalled && AppState.Settings.StallAutoKill)
         {
