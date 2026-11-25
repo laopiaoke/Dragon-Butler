@@ -37,6 +37,15 @@
   <sub>主页：上面那张回答「今天什么时候跑」，右边那张「任务清单」一行一个工具，今晚要跑什么写在头条。</sub>
 </p>
 
+## v1.45.1：大扫除，一条规矩只留一处
+
+这一版没有新功能，也没有任何界面变化。改的是「同一件事在代码里写了两遍」和「留着但从没被调过」的地方，为的是以后改一处就够。
+
+- 「星期几位号」原本 `QueueService` 与 `SchedulePlanner` 各一份，现在只剩一处实现，另一处转发；两个入口都还在。
+- 耗时文案（`4小时0分` / `12分` / `不到 1 分钟`）原本队列与晨报各一份，现在只有 `MorningReportService.FormatDuration` 写这套规则。
+- 三个窗口里逐字相同的 `BrushOf(key, fallback)` 收成 `Theme.BrushOf`；主页那套同名但语义不同的方法保持原样。
+- 删掉三个从没被调用的旧方法：`CenterOnActiveMonitor`、`BuildQueueTip`、`NaturalToolOrder`。
+
 ## v1.45：六件「说了能做但做不到」的小事补齐
 
 这一版没有新功能。补的全是「界面上一句话，背后没落地」的地方：一个不可撤销的按钮没有确认框、一句「网络恢复后可以手动重发」却没有重发按钮、一句「3 分钟」写死在文案里、一份现场包被直接删掉、一次复制失败之后只能自己再点一遍。
@@ -386,6 +395,6 @@ dotnet "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.dll" 
 
 ## 版本
 
-最新发布 **v1.45**（程序内 `1.45.0`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。
+最新发布 **v1.45.1**（程序内 `1.45.1`）；逐版变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，设计与取舍见 [docs/路线图.md](docs/路线图.md)。
 
 界面文案的规则写在 [docs/VOICE.md](docs/VOICE.md)：六句话是钉死的，改版只能原样搬走，不能改写。

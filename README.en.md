@@ -37,6 +37,15 @@ It does exactly four things: start processes, read the public logs those tools w
   <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
 </p>
 
+## v1.45.1: housekeeping — one rule, one place
+
+No new features, no visible change. What moved is code that said the same thing twice, plus three methods nothing ever called — so the next change only has to happen in one place.
+
+- The weekday-bit rule lived in both `QueueService` and `SchedulePlanner`. One implementation now; the other forwards. Both entry points still exist.
+- Duration wording (`4小时0分` / `12分` / `不到 1 分钟`) was duplicated between the queue tail and the morning report. Only `MorningReportService.FormatDuration` defines it now.
+- Three windows had a byte-identical `BrushOf(key, fallback)`; they all call `Theme.BrushOf`. The main window keeps its own differently-shaped overload.
+- Deleted three never-called methods: `CenterOnActiveMonitor`, `BuildQueueTip`, `NaturalToolOrder`.
+
 ## v1.45: six small promises the UI made but never kept
 
 No new features. This release closes the gap between what the interface says and what the code actually does: an undoable-looking button with no confirmation, a "you can resend it later" with no resend button, a hard-coded "3 minutes", a screenshot bundle deleted outright, and a failed copy that left you nothing to click.
@@ -372,6 +381,6 @@ Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — *
 
 ## Version
 
-Latest release **v1.45** (`1.45.0` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+Latest release **v1.45.1** (`1.45.1` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
 
 The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

@@ -448,6 +448,21 @@ public static class Theme
     }
 
     /// <summary>
+    /// 取主题画刷；键不存在或取不到就返回 <paramref name="fallback"/>。
+    ///
+    /// <para>
+    /// tidy：这句话原来在三个窗口里各写了一份（日志规则、消息中心、今日运行），
+    /// 三份逐字相同。它是「怎么查主题资源」这条规则，只有一处才谈得上一致。
+    /// <c>MainWindow</c> 里那个同名方法返回 null 而不是 fallback，语义不同，没有并进来。
+    /// </para>
+    /// </summary>
+    public static Brush BrushOf(string key, Brush fallback)
+    {
+        try { return (Brush)(Application.Current.TryFindResource(key) ?? fallback); }
+        catch { return fallback; }
+    }
+
+    /// <summary>
     /// 把主题画刷转成 System.Drawing.Color，供 WinForms 托盘菜单使用；失败回退灰色
     /// </summary>
     public static System.Drawing.Color C(string key)

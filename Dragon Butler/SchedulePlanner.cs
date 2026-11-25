@@ -129,8 +129,16 @@ public static class SchedulePlanner
         return null;
     }
 
-    /// <summary>今天星期对应掩码位号：周一=0 … 周日=6。与 <see cref="QueueService.WeekdayBit"/> 同义。</summary>
-    public static int WeekdayBit(DateTime day) => ((int)day.DayOfWeek + 6) % 7;
+    /// <summary>
+    /// 今天星期对应掩码位号：周一=0 … 周日=6。
+    ///
+    /// <para>
+    /// tidy：位号规则只留 <see cref="QueueService.WeekdayBit"/> 一处。这里原来是一份一字不差的
+    /// 副本——两份都写对才不出错，改错其中一份还查不出来。转发过去就没有第二个地方可错。
+    /// 保留这个入口是因为探针和本类内部都按 <c>SchedulePlanner.WeekdayBit</c> 调。
+    /// </para>
+    /// </summary>
+    public static int WeekdayBit(DateTime day) => QueueService.WeekdayBit(day);
 
     private static int ClampHour(int h) => Math.Clamp(h, 0, 23);
 

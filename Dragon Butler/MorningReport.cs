@@ -187,14 +187,29 @@ public static class MorningReportService
         }
     }
 
-    /// <summary>耗时文案：3小时12分 / 12分 / 不到 1 分钟。周报还在用，保持原样。</summary>
-    public static string FormatDuration(double totalMinutes)
+    /// <summary>
+    /// 耗时文案：3小时12分 / 12分 / 不到 1 分钟。
+    ///
+    /// <para>
+    /// tidy：这条文案规则原来有两份——这里一份（吃 double 分钟、四舍五入），
+    /// <c>QueueService</c> 里一份（吃 TimeSpan、直接截断）。两份的文案分支一字不差，
+    /// 只有入参换算不同，属于同一条规则的复制。现在规则只在这里，
+    /// <c>QueueService</c> 的通知与日志都调这一个。
+    /// </para>
+    /// </summary>
+    public static string FormatDuration(TimeSpan t)
     {
-        int minutes = (int)Math.Round(totalMinutes);
-        int h = minutes / 60;
-        int m = minutes % 60;
+        int h = (int)t.TotalHours;
+        int m = t.Minutes;
         if (h > 0) return $"{h}小时{m}分";
         if (m > 0) return $"{m}分";
         return "不到 1 分钟";
     }
+
+    /// <summary>
+    /// 同上，入参是先四舍五入到整分钟的分钟数（周报的「平均每次」是小数，需要这一层）。
+    /// 换算留在这里、文案规则留在上面，避免再长出第二份分支。
+    /// </summary>
+    public static string FormatDuration(double totalMinutes)
+        => FormatDuration(TimeSpan.FromMinutes(Math.Round(totalMinutes)));
 }

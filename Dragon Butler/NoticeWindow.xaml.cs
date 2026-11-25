@@ -28,11 +28,8 @@ public partial class NoticeWindow : Window
         Build();
     }
 
-    private static Brush BrushOf(string key, Brush fallback)
-    {
-        try { return (Brush)(Application.Current.TryFindResource(key) ?? fallback); }
-        catch { return fallback; }
-    }
+    // tidy：查主题资源的规则只在 Theme.BrushOf 一处，这里只留转发（16 个调用点都不改）。
+    private static Brush BrushOf(string key, Brush fallback) => Theme.BrushOf(key, fallback);
 
     private void Build()
     {

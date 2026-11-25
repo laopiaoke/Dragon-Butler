@@ -178,10 +178,9 @@ public partial class MainWindow : Window
         try { MaxWidth = Math.Max(MinWidth, SystemParameters.WorkArea.Width - 200); } catch { }
     }
 
-    private static void CenterOnActiveMonitor()
-    {
-        // WindowStartupLocation 已在 XAML 里设 CenterScreen；这里不额外移动，避免多屏时跳到主屏
-    }
+    // tidy：这里原来有一个空方法 CenterOnActiveMonitor()，注释写着「不额外移动，避免多屏时跳到主屏」。
+    // 它从来没有调用点——真正管位置的是下面的 RestoreWindowBounds()，空方法留着只会让人以为
+    // 「窗口居中」这件事在别处还有一段逻辑。
 
     // ===== v1.41 / M6-1：主窗位置与大小 =====
 
@@ -1074,26 +1073,9 @@ public partial class MainWindow : Window
         RenderQueue();
     }
 
-    /// <summary>格子悬停提示：依赖在前，上次结果在后（都没有就返回 null，不留空气泡）。</summary>
-    private static string? BuildQueueTip(QueueEntry entry, QueueItemResult? result)
-    {
-        var parts = new List<string>();
-        var deps = QueueGraph.DependenciesOf(entry);
-        if (deps.Count > 0)
-        {
-            var names = deps.Select(id =>
-            {
-                var p = ProfileRegistry.Get(id);
-                return string.IsNullOrWhiteSpace(p.DisplayName) ? id : p.DisplayName;
-            });
-            parts.Add("等 " + string.Join("、", names) + " 跑成"
-                + (QueueGraph.ShouldAbortOnDependencyFail(entry) ? "（没成则整队停下）" : ""));
-        }
-        if (result != null && !string.IsNullOrWhiteSpace(result.Reason)) parts.Add(result.Reason);
-        // v1.9：切片设过才提一句，没设就别占地方（默认就是全局勾选）
-        if (!GroupSlicing.UsesGlobal(entry.Groups)) parts.Add(GroupSlicing.Describe(entry.Groups));
-        return parts.Count == 0 ? null : string.Join("\n", parts);
-    }
+    // tidy：这里原来有一个 BuildQueueTip(QueueEntry, QueueItemResult)——格子时代的悬停提示。
+    // v1.42 把格子换成横向工具行之后，提示改由行内徽章与右键菜单承担，这个方法再没人调。
+    // 它引用的 QueueGraph.DependenciesOf / GroupSlicing.UsesGlobal 都还有别的调用点，不受影响。
 
     private void UpdateQueueButtons()
     {
@@ -2515,30 +2497,9 @@ public partial class MainWindow : Window
     /// <summary>上一次画出来的格子签名（ToolId 按顺序拼），用来判断「需不需要重画」。</summary>
     private string _gridSignature = "";
 
-    /// <summary>
-    /// 工具表的自然顺序 = 队列里的先后。
-    ///
-    /// <para>
-    /// v1.26：原来是「<see cref="ProfileRegistry.All"/> 的顺序」。格子搬进启动页那张卡之后，
-    /// 格子回答的问题变了——它不再只是「这台机器上有哪些工具」，而是「今晚按什么顺序跑」。
-    /// 那个问题的答案只在队列里，所以这里改成读队列；不在队列里的工具不上桌面
-    /// （要加它就去点「＋ 添加一个工具」，或者走第一次使用的引导）。
-    /// </para>
-    /// </summary>
-    private static List<string> NaturalToolOrder()
-    {
-        var ids = new List<string>();
-        try
-        {
-            foreach (var entry in AppState.Settings.Queue ?? new List<QueueEntry>())
-            {
-                if (string.IsNullOrWhiteSpace(entry.ToolId)) continue;
-                if (!ids.Contains(entry.ToolId, StringComparer.OrdinalIgnoreCase)) ids.Add(entry.ToolId);
-            }
-        }
-        catch { }
-        return ids;
-    }
+    // tidy：这里原来有一个 NaturalToolOrder()，读 AppState.Settings.Queue 生成「工具表的自然顺序」。
+    // v1.42 起工具行的顺序由 QueueEntry 自己的先后与 ToolPages 决定（见 CurrentToolOrder），
+    // 它没有调用点。真正的顺序入口是下面的 CurrentToolOrder / SaveToolOrder。
 
     private static List<string> CurrentToolOrder()
         => ToolPages.Flatten(AppState.Settings.ToolPages);

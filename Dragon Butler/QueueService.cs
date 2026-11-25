@@ -1576,14 +1576,8 @@ public static class QueueService
         };
     }
 
-    private static string FormatDuration(TimeSpan t)
-    {
-        int h = (int)t.TotalHours;
-        int m = t.Minutes;
-        if (h > 0) return $"{h}小时{m}分";
-        if (m > 0) return $"{m}分";
-        return "不到 1 分钟";
-    }
+    // tidy：耗时文案与 MorningReportService.FormatDuration 是同一条规则，这里不再自留一份。
+    private static string FormatDuration(TimeSpan t) => MorningReportService.FormatDuration(t);
 
     private static string FormatMinutes(TimeSpan t)
         => t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} 分钟" : $"{t.TotalSeconds:F0} 秒";
