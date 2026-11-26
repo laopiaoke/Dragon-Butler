@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using Microsoft.Win32;
@@ -172,10 +173,15 @@ internal static partial class Program
         Check("关窗提示/那三个字段与调用一起清了",
             !notifyCs.Contains("TrayNoticeShown", StringComparison.Ordinal)
             && !mainCs.Contains("ResetTrayNote(", StringComparison.Ordinal));
-        // 收进托盘这个动作本身要留着（窗口隐藏、托盘图标还在），只是不再说话。
+        // 在关窗回调内分别查隐藏动作与提前放行的条件，不依赖同一行里条件的顺序。
+        string closing = SliceBetween(mainCs, "private void Window_Closing(", "\n    }");
+        var hide = Regex.Match(closing, @"\be\.Cancel\s*=\s*true\s*;\s*Hide\(\s*\)\s*;");
+        var bypasses = Regex.Matches(closing[..hide.Index], @"\bif\s*\(([^()]*)\)\s*(?:\{\s*)?return\s*;")
+            .SelectMany(m => Regex.Replace(m.Groups[1].Value, @"\s+", "").Split("||"))
+            .ToHashSet(StringComparer.Ordinal);
         Check("关窗提示/仍然收进托盘不退出",
-            mainCs.Contains("if (App.ForceExit || !AppState.Settings.StayInTray) return;", StringComparison.Ordinal)
-            && mainCs.Contains("        Hide();", StringComparison.Ordinal));
+            hide.Success && bypasses.Contains("App.ForceExit") && bypasses.Contains("!AppState.Settings.StayInTray"));
+        Check("托盘精简/允许关闭主窗", bypasses.Contains("App.Instance?.IsTrimming==true"));
 
         Console.WriteLine($"RESULT uirules fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
