@@ -7,9 +7,27 @@
 Dragon-Butler（一条龙管家）：Windows 桌面小工具，替人按下「开始挂机」、盯着跑完、跑完做事。WPF + .NET 8，单进程，无服务端。
 
 - 主工程：`Dragon Butler/`（`Dragon Butler.csproj`，隐式编译，新增 `.cs` 自动纳入）
-- 测试探针：`tests/CoordinatorProbe/`（26 组功能断言 + `ui` 渲染截图）；替身程序：`tests/StubTool/`
+- 测试探针：`tests/CoordinatorProbe/`（84 入口 + `ui` 渲染截图）；替身程序：`tests/StubTool/`
 - 打包：`scripts/package.ps1`；发布说明抽取：`scripts/release-notes.ps1`
 - 分支 `main`，远端 `https://github.com/laopiaoke/Dragon-Butler.git`
+
+## 仓库目录与文档放置规矩
+
+- **根目录白名单**：仓库根目录只允许放 `README.md`、`README.en.md`、`RELEASE_NOTES.md`、`LICENSE`、`AGENTS.md`（及 `.gitignore` / `.gitattributes` 等点文件）和 `Dragon Butler/`、`docs/`、`scripts/`、`tests/` 四个目录。**严禁往仓库根目录放交付报告、方案草稿、调研笔记、截图或临时文档。**
+- **不要散放在 `docs/` 根目录**：所有报告、方案、截图均按类别进对应子目录，并更新各自索引，不留孤立文件。
+
+| 类型 | 唯一存放位置 | 说明 |
+| --- | --- | --- |
+| 对外介绍 | `README.md`、`README.en.md` | 面向用户的当前功能与上手说明，**禁止堆砌版本开发日记** |
+| 版本变更日志 | `RELEASE_NOTES.md` | 逐版变更唯一来源，发版脚本从中抽取 |
+| 随包用户手册 | `docs/使用说明.txt` | 固定路径（打包脚本读取），UTF-16LE + BOM + CRLF |
+| 规范文件 | `docs/SOUL.md`、`VOICE.md`、`PATTERNS.md`、`SIGNATURES.md` | 灵魂句保护、文案语气、交互清单、失败模式签名 |
+| 长期路线图 | `docs/路线图.md` | 历史决策与演进取舍 |
+| 版本交付报告 | `docs/reports/` | 命名 `V<版本号>_REPORT.md`（如 `V146_REPORT.md`），附 `README.md` 索引 |
+| 专题方案 / 调研 | `docs/plans/` | 设计方案、需求候选与性能调研，附 `README.md` 索引 |
+| 现行文档截图 | `docs/proto/` | `README*` / 现行报告引用的界面截图（受限尺寸豁免目录） |
+| 插件样例 | `docs/plugin-samples/` | 外部扩展参考样例 |
+| 归档旧物 | `docs/archive/` 与 `docs/archive/screenshots/` | 早期一次性报告与已退役旧截图，**只归档不新增现行文档** |
 
 ## 先读这三份，别自己发明语气
 
@@ -19,9 +37,13 @@ Dragon-Butler（一条龙管家）：Windows 桌面小工具，替人按下「�
 | `docs/VOICE.md` | 文案语气与反例。新写一句面向用户的话，先在这里找同类的写法 |
 | `docs/PATTERNS.md` | 交互模式 checklist。新加按钮/入口前对一遍 |
 
-其余：`docs/使用说明.txt`（给用户的说明书）、`docs/路线图.md`（历史决策与取舍）、`docs/archive/`（2026-10 的一次性旧报告，别再往里加）。
-
 动代码前还要过一遍失败模式签名：`docs/SIGNATURES.md`（S1–S14，逐条自查；交付报告里引用「命中 S#」以那份为准）。
+
+## 对外文档写作要求
+
+- 写 `README.md`、`README.en.md`、`docs/使用说明.txt` 时直接说明当前功能、真实操作与配置路径，语言平实克制。
+- **不写版本回顾流水账**（「这一版没加功能……」「以前是……现在改成……」），**不堆破折号 `——`**、排比反差句（「不是 A，而是 B」）、鸡汤说教或营销词（「一站式」「极致体验」等）。
+- 构建命令、探针参数、目录路径与支持工具列表必须与源码（`Program.cs`、`ToolCatalog.cs`、`HarvestLedger.cs` 等）实测一致。
 
 ## 编码与换行：改错就是整片乱码或整份 diff
 
@@ -29,7 +51,7 @@ Dragon-Butler（一条龙管家）：Windows 桌面小工具，替人按下「�
 |---|---|---|
 | `Dragon Butler/Dragon Butler.csproj` | **UTF-8 无 BOM**（不是 GBK！按 GBK 读会毁掉中文注释并让编译报 `Invalid character in the given encoding`） | CRLF |
 | `docs/使用说明.txt` | **UTF-16LE + BOM** | CRLF |
-| `README.md` / `README.en.md` / `RELEASE_NOTES.md` / 各 `*_REPORT.md` / `.github/workflows/build.yml` | UTF-8 无 BOM | LF |
+| `README.md` / `README.en.md` / `RELEASE_NOTES.md` / `docs/reports/*_REPORT.md` / `docs/plans/*.md` / `docs/archive/*.md` / `.github/workflows/build.yml` | UTF-8 无 BOM | LF |
 | 其余 `.cs` / `.xaml` | UTF-8 无 BOM | 多为 CRLF；`NoticeCenter.cs` / `NoticeWindow.xaml(.cs)` / `TodayWindow.xaml(.cs)` / `IncidentBundle.cs` / `MorningReport.cs` / `SchedulePlanner.cs` 等是 **LF**，改前用 `git ls-files --eol` 确认 |
 
 写 `使用说明.txt` 用 `[System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UnicodeEncoding($false,$true)))` —— 第二个参数 `$true` 才是写 BOM，写成 `$false` 会丢 BOM。
@@ -75,7 +97,7 @@ $exe = "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.exe"
 - `gh release view --json ...isLatest` 这个字段不被当前 gh 版本接受，会报「无效的 JSON 基元: Unknown」。
 - 读 `.gitignore` 这类带中文的文件，`Get-Content` 在 pwsh 控制台显示乱码是**控制台按 GBK 显示**，文件本身通常是 UTF-8，别急着转码。
 - 控制台中文乱码不等于文件坏了：先用 `[System.IO.File]::ReadAllText` 确认一次。
-- **判断「没人引用」必须全库扫 `.md` / `.txt` / `.cs`，包括各版本交付报告里的「产出物表」**。v1.45.2 清图时只扫了现行文档，漏掉 8 张有登记的产出物（差点删掉）。删东西之前先打包备份到仓库外——这次能补回全靠它。
+- **判断「没人引用」必须全库扫 `.md` / `.txt` / `.cs`，包括 `docs/reports/` 下各版本交付报告里的「产出物表」**。v1.45.2 清图时只扫了现行文档，漏掉 8 张有登记的产出物（差点删掉）。删东西之前先打包备份到仓库外——这次能补回全靠它。
 
 ## 两条硬规矩
 

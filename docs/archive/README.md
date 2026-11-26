@@ -11,8 +11,9 @@
 
 ## 为什么搬走而不是删掉
 
-它们记录的当时怎么验收，事后追查「这条规则为什么是这样」还有用；但内容已过时，放在根目录会让每次进仓库都要先扫过它们。搬进来之后，根目录的 `*_REPORT.md` 只剩按版本命名的现行报告（`V141_REPORT.md` 起）。
+它们记录了当时如何验收，事后追查「某条规则为什么这样定」仍有参考价值；但内容已过时，继续留在根目录会增加每次排查的噪音。版本交付报告现统一放在 [`docs/reports/`](../reports/README.md)（`V141_REPORT.md` 起）。
 
-## 引用怎么读
+## 引用与截图归档
 
-`V1421_REPORT.md` 与 `V1451_REPORT.md` 里提到的 `BUILD_REPORT.md` / `PHASE2_REPORT.md` 等名字，现在都指这个目录下的同名文件。历史报告正文不改，路径以这份索引为准。
+- `V1421_REPORT.md` 与 `V1451_REPORT.md`（均在 `docs/reports/`）中提到的 `BUILD_REPORT.md` / `PHASE2_REPORT.md` 等名称，均指本目录下的同名文件。
+- `screenshots/` 子目录归档了 v1.12–v1.15 期间的 19 张早期文档截图（含 `HOTFIX0_REPORT.md` 中提到的 `clipboard_fallback.png`）。历史报告正文保留原样，路径以本索引为准。

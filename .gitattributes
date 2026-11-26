@@ -20,10 +20,10 @@
 "Dragon Butler/Assets/icons/**" -filter -diff -merge -text
 
 # 这四张旧文档截图已经作为普通 PNG 入库，检出时不要把它们当成 LFS 指针。
-docs/advanced_v112.png -filter -diff -merge -text
-docs/calendar_v112.png -filter -diff -merge -text
-docs/main_v112.png     -filter -diff -merge -text
-docs/palette_v112.png  -filter -diff -merge -text
+docs/archive/screenshots/advanced_v112.png -filter -diff -merge -text
+docs/archive/screenshots/calendar_v112.png -filter -diff -merge -text
+docs/archive/screenshots/main_v112.png     -filter -diff -merge -text
+docs/archive/screenshots/palette_v112.png  -filter -diff -merge -text
 
 # 明确按文本处理，避免被误判为二进制
 *.cs        text diff=csharp

@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <strong>Click once before bed. Read the result tomorrow.</strong><br>
-  <sub>Queues BetterGI / March7thAssistant / ok-ww into one run and tells you how it went</sub>
+  <strong>Multi-tool Queue Dispatcher for Windows Game Automation</strong><br>
+  <sub>Queues BetterGI, March7thAssistant, OK-WW, and custom executables in sequence, monitors execution, and handles post-run wrap-up.</sub>
 </p>
 
 <p align="center">
@@ -23,381 +23,185 @@
 
 ---
 
-## What it is
+## Overview
 
-A small Windows desktop app that **does no game dailies itself**. It's a dispatcher: it lines up the automation tools you already have, launches them in order, watches each one finish, then wraps up.
+Dragon Butler is a WPF desktop queue dispatcher built on .NET 8. It does not implement any in-game automation logic itself; instead, it coordinates the local automation tools you already use:
 
-It does exactly four things: start processes, read the public logs those tools write, listen on a localhost webhook, and manage process lifetimes. **It never touches the game, the tools' files, or your account.**
+- Launches configured tools one by one in order
+- Tracks completion via process exit codes, log patterns, sentinel files, or window titles
+- Listens on a local webhook, dispatches status notifications, and performs optional post-run wrap-up (notify, sleep, or shut down)
+
+It never modifies game or tool files, and it does not log into or read game account data.
 
 <p align="center">
-  <img src="docs/proto/tasklist_collapsed_v1421.png" width="820" alt="Home">
+  <img src="docs/proto/tasklist_collapsed_v1421.png" width="820" alt="Main window">
 </p>
 
 <p align="center">
-  <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
+  <sub>Main window: schedule and run summary on the left; ordered task list and estimated duration on the right.</sub>
 </p>
 
-## v1.45.3: the probe split into 46 files, plus a canary that actually fails
+## Download & Quick Start
 
-No functional or visual change. This one is about the test harness itself — the gate that stops regressions; when the gate breaks quietly, nobody notices.
+1. Download a release package from [Releases](https://github.com/laopiaoke/Dragon-Butler/releases/latest):
+   - **portable** (~158 MB): bundles the .NET 8 runtime; extract and run directly.
+   - **runtime-dependent** (~3.5 MB): requires .NET 8 Desktop Runtime installed on the machine.
+2. Extract the archive, run `Dragon Butler.exe`, and accept the UAC prompt (elevation is required to monitor and manage target tool processes in the active session).
+3. Complete the five-step first-run wizard: select tools, verify executable paths (common install locations are scanned automatically), set an optional daily schedule, and optionally configure notifications.
 
-- `tests/CoordinatorProbe/Program.cs` went from **458 KB / 7,290 lines** to 46 files, largest 19.8 KB.
-- Not a single assertion was rewritten: the `toolgrid` group still runs 364 checks, and `ui all` renders the same 51 screenshots.
-- A canary now guards the entry table: the 21 groups CI names must all be registered, and the total (84) is pinned to a constant. Every run prints `CANARY groups=84/84 ci=21 missing=0`.
-- The file-size gate shrank for the first time: whitelist 17 → 14, all three oversize probe files are now inside the limit.
-## v1.45.2: housekeeping — 79 unreferenced screenshots removed
+You can skip both scheduling and notifications and use it purely as a one-click manual queue runner.
 
-No functional change. What changed is how much an agent has to read before it can safely touch this repo.
+## Features
 
-- Deleted 79 historical screenshots in `docs/proto/` that no document referenced any more (5.1 MB); 23 still-referenced ones remain. Archived before deletion.
-- Moved the four one-off October reports into `docs/archive/`; the root now only carries per-version reports.
-- Added `AGENTS.md`: encoding and line-ending rules, how to jump around the large files, how to run the probes, the five release steps, and the pitfalls this machine keeps hitting.
-- Added `scripts/check-file-size.ps1`: any single file over 20 KB is rejected, enforced in CI. 17 existing oversized files are whitelisted, and that list only shrinks.
+### Queue & Task List Management
 
-## v1.45.1: housekeeping — one rule, one place
-
-No new features, no visible change. What moved is code that said the same thing twice, plus three methods nothing ever called — so the next change only has to happen in one place.
-
-- The weekday-bit rule lived in both `QueueService` and `SchedulePlanner`. One implementation now; the other forwards. Both entry points still exist.
-- Duration wording (`4小时0分` / `12分` / `不到 1 分钟`) was duplicated between the queue tail and the morning report. Only `MorningReportService.FormatDuration` defines it now.
-- Three windows had a byte-identical `BrushOf(key, fallback)`; they all call `Theme.BrushOf`. The main window keeps its own differently-shaped overload.
-- Deleted three never-called methods: `CenterOnActiveMonitor`, `BuildQueueTip`, `NaturalToolOrder`.
-
-## v1.45: six small promises the UI made but never kept
-
-No new features. This release closes the gap between what the interface says and what the code actually does: an undoable-looking button with no confirmation, a "you can resend it later" with no resend button, a hard-coded "3 minutes", a screenshot bundle deleted outright, and a failed copy that left you nothing to click.
-
-### Destructive buttons ask first
-
-"Reset to default theme" used to write the settings the moment you clicked it — six values gone. It now opens a confirmation that lists all six items it will change (theme, background kind, background colour, background image, overlay, colour scheme) and says plainly that it cannot be undone. "Never mind" changes nothing.
-
-### Failed pushes can be resent in place
-
-After fixing a wrong URL you no longer have to re-run the queue: hit "Resend" on that failed notice. First sends and resends share one sending core — same 1s/3s/7s retries, same "Today" trail on success and failure. The button disables itself while resending, so double-clicking will not send twice. Payloads live only in memory, one per channel; after a restart the old entry has no button and says "this one is history now — we restarted".
-
-### Thresholds are no longer hard-coded in copy
-
-The stall message now reads the actual threshold (configurable in settings), and the explanation on the settings page follows it.
-
-### Screenshot bundles go to the recycle bin
-
-When the keep-limit is exceeded they used to be deleted outright — gone by the time you wanted to look. They now go to the recycle bin first; only when that is unavailable do we delete, and we say so in the log. A small line on the settings page states "keep the latest N; older ones go to the recycle bin".
-
-### Retry a failed copy right there
-
-When copying today's summary fails, a "Retry" button sits next to the hint and runs the same copy routine; it disables itself while retrying. Previously you got "try again later" and nothing to click.
-
-## v1.44: 60 seconds to change your mind, and a port conflict you can fix in place
-
-Three after-the-fact repairs. No new toggles, no new settings.
-
-- **The queue no longer sleeps or shuts down the moment it finishes.** A 60-second countdown starts, with a bar at the top of the home page showing "queue finished, sleeping in 60s" and the remaining seconds, plus Cancel / Do it now.
-- **Shutdown uses the system countdown** (`shutdown /s /t 60`, so it still fires if the app is closed). **Sleep uses an in-process countdown** — the machine only suspends when it reaches zero.
-- **Cancel only collapses the bar when the system actually agrees.** The shutdown path runs `shutdown /a`; if that fails the bar stays and tells you the plan could not be revoked, instead of claiming success while the countdown keeps running.
-- **If the queue starts again mid-countdown**, the wrap-up is cancelled automatically and "wrap-up auto-cancelled: queue started again" is written to Today. Better to skip one sleep than to sleep at the wrong moment.
-- **All three outcomes land in Today**: cancelled, confirmed immediately, or fired when the countdown ended — so you can tell who decided what.
-- **When the webhook port cannot be bound, you can change it right in the error dialog.** It prefills the current port, validates 1024–65535, and "Save and retry" stops the old listener and binds the new one. Success is recorded as "listener port 18235 → 18240"; failure keeps the raw system error in the dialog.
-- **When a push fails three times**, besides the notice centre, a "push not delivered (WeCom)" entry with the last error summary goes into Today. The 1/3/7-second retry rhythm is unchanged and lives in exactly one constant.
-- **Only one cancel entry remains** — the one on the wrap-up bar. The old standalone button is gone: two differently-named buttons doing the same thing means clicking the wrong one looks like a failure.
-
-## v1.43: hardening the end-of-run chains — no more "success" when it failed
-
-No new features here, only plugged holes. The six chains shared one bad habit: **when something went wrong, the program got more confident** — a crash counted as success and shut the PC down, a shutdown that never got queued still said "shutting down in 60 s", a malformed webhook still got `200 ok`, and the incident bundle recorded a tool's config as a bare type name. All of that now reports what actually happened.
-
-- **A crash no longer counts as a finished run.** When completion came from a log pattern, the process-exit signal used to be discarded as "not the primary signal", so the queue waited out the 120-minute cap and reported a timeout — while the process had died three minutes in. Process exit is now checked first: a non-zero exit fails the run immediately and latches the evidence, which no later signal may override.
-- **"Primary signal arrived, process still alive" is not success either.** When the grace window runs out it halts, and says which piece of evidence was missing (process alive / primary missing / both).
-- **Nothing ran → nothing destructive runs.** A night where everything was skipped reports "nothing to run" and performs neither sleep nor shutdown.
-- **A dependency abort mid-queue also blocks shutdown.** It used to just `break` after a decision-log line and looked like "no failure" at the end; now it participates in authorisation and the notification names the dependency that failed.
-- **Shutdown must be confirmed as queued.** Starting `shutdown /s /t 60` is not the same as the system accepting it; the exit code is checked, and if it did not take, the app says the PC is still on — no countdown, no cancel button.
-- **Cancel-shutdown must be confirmed too.** It used to clear the state first and then run `shutdown /a`; on failure the state was already gone and the button hidden. Now state clears only on real success.
-- **The cancel button disappears when the countdown ends**, instead of lingering after an external cancel or an expired timer.
-- **Sleep reports failure.** A refused suspend now records the Win32 code and says the PC is still awake.
-- **The push URL reflects the real listener.** A taken port or missing URL ACL shows "listener did not start (reason)" instead of an address that nobody else can reach. A LAN panel that only bound to loopback says so, and prints the admin `netsh` command instead of inviting a phone to a dead IP.
-- **Webhooks no longer answer `200 ok` to everything.** Invalid JSON, non-objects, a missing `event`, unknown events and non-POST requests each return the matching client error; unknown events are no longer mapped onto "dragon finished".
-- **Failed pushes retry, and a final failure leaves a record.** Transient network errors retry at 1/3/7 s; a definitive failure lands in the notification centre with channel, title and reason, and pending retries are cancelled on exit.
-- **Balloons report whether they actually showed.** A missing tray icon no longer makes the test channel claim success.
-- **The incident bundle keeps paths and accounts out, and stops degrading to type names.** Tool config is captured as a real structure, paths keep only the file name, and tokens/passwords/e-mails/chat IDs are masked — while the reverse mistake is fixed too: `BgiWebhookPort`, `NotifyEmailPort` and the hotkey fields stay readable because support needs them.
-- **The bundle says what is missing.** A log that never got created or a screenshot that failed is listed item by item instead of "saved"; screenshots record their scope (game window / primary screen + monitor count), and a failed GDI call is never stored as a blank image.
-
-## v1.42: manage it all inside the task-list card
-
-This release only touches the right-hand card on the home page: **one tool per row**, tonight's plan as the card's headline, group checkboxes unfold in place, and the separate "managed config" window is gone.
+- **Built-in profiles and custom tools**: Includes profiles for BetterGI, March7thAssistant / `m7a.exe`, OK-WW, ZenlessZoneZero-OneDragon (`zzz-od`), MaaEnd, OK-NTE, MAA, Whimbox, BAAH, HSR, M9A, MSS, SRC, and MaaFramework projects, plus an "Other exe…" flow for arbitrary executables.
+- **Single-card controls**: Drag the `≡` handle to reorder tonight's queue, double-click a row to run that single tool immediately, or right-click to skip once, skip tonight, view logs, or edit launch settings.
+- **BetterGI script-group support**: Click the BetterGI row to expand script groups inline and run checked groups in selection order, or fall back to the configured OneDragon profile name when none are checked.
+- **Scheduling & resume**: Supports day-of-week scheduling with a configurable catch-up window (120 minutes by default). If a run stops partway after at least one tool succeeded, a Resume action appears to run only the remaining items.
 
 <p align="center">
-  <img src="docs/proto/tasklist_expanded_v1421.png" width="820" alt="Task list card with groups expanded">
+  <img src="docs/proto/tasklist_expanded_v1421.png" width="820" alt="Expanded task list card">
 </p>
+
+### Watchdog, Diagnostics & Post-Run Wrap-Up
+
+- **Process watchdog**: Monitors process survival, possible stalls (no CPU activity and no log output over the configured threshold), frozen frames, and game exits, with cooldown restarts after unexpected tool crashes.
+- **Keep-awake & display sleep**: Prevents Windows idle sleep and screensavers while a queue is active and restores original power behavior when finished; optionally turns off the display after N minutes of unattended execution.
+- **Incident bundles**: Automatically saves the last 200 log lines, a screen capture, and a redacted config snapshot under `全部日志\incidents\` on failures or stalls; old bundles beyond the retention cap are moved to the Recycle Bin when available.
+- **Safe post-run actions**: Supports notify-only, re-run once, launch app, sleep, or shut down after completion. Both sleep and shutdown present a 60-second cancellable bar on the home view and are blocked if all items were skipped, a dependency aborted, or a tool crashed.
 
 <p align="center">
-  <sub>Click the row (or the ⌄ on the right) to unfold: which groups are checked, in what order, and how many items are left. The leading number is the execution order.</sub>
+  <img src="docs/proto/wrapupbar_v144.png" width="820" alt="Post-run countdown bar">
 </p>
 
-- **Rows instead of a grid**: drag the `≡` handle to reorder, double-click to run just that one, right-click for a nine-item menu. Editing, launching, ordering, adding tools and checking state all happen right there.
-- **Headline summary**: `今晚要跑：日常 + 活动 · 2 项 · 约 47 分钟`. It used to sit at the bottom of the card, below the fold at 720px — as a headline it finally answers "what is this card for tonight".
-- **Zero scrolling when collapsed at 720px**: summary, start button and the add row are all above the fold. The "how each tool runs" section stays below it, one small scroll away.
-- **Adding a tool happens in the card**: the dashed `＋ 添加工具` opens an icon grid with already-added ones ticked; anything else goes through "其它 exe…".
-- **Nine-item right-click menu**: "skip this once" lasts one run, "don't run it tonight" persists — written separately because the cost of regretting them differs.
-- **Removal in plain words**: `把 BetterGI 从今晚清单移除？配置会保留，随时可以再加回来。`
-- **Group selection now has a single store**: the old global checkbox list and each tool's own list disagreed; now the tool's own list wins, and legacy data is migrated once on upgrade (never overwriting what you already picked).
-- **The five-view dropdown and its four windows are gone** (daily plan / idle calendar / dependency matrix / group slices). Dependency data and execution logic are untouched — historical configs keep working, there is just no editor any more.
+### Daily Report, Harvest Ledger & Notifications
 
-## v1.41: the interface was rebuilt
-
-No new features in this release. The whole UI was gone through once: four tabs, a five-step wizard, settings split into five groups, and logs that arrive pre-filtered from wherever you clicked.
-
-### Four tabs, each answering one question
-
-The leftmost tab used to be called "Logs" and the second "Report" — neither name told you why you'd want to open it. Now:
-
-| Tab | Answers |
-| --- | --- |
-| **日报** (Daily report) | How long today took, which group got faster or slower, whether anything went wrong |
-| **主页** (Home) | When it runs today, what's queued tonight, run now |
-| **设置** (Settings) | Five entry points; switches live one level down |
-| **插件** (Plugins) | It runs a full set with zero plugins installed |
-
-"Logs" is no longer a tab. It **opens with a filter already applied**, at the place you needed it:
-
-- Something went wrong → **【看现场】** on the home card takes you straight to that run's log lines (filtered by `runId`).
-- Tool card right-click → **"查看日志"** shows only what that tool wrote.
-- Click a config group's name in the daily report → only that group, that day.
-- Want everything → the third action chip **"更多 ▾"** → **【全部日志】**.
-
-<p align="center">
-  <img src="docs/proto/logview_v141.png" width="820" alt="Log view">
-</p>
-
-<p align="center">
-  <sub>The bar on top reads "正在看：全部日志" (viewing: all logs). A filtered view says what it filtered on; 【关闭】 returns to the page you came from.</sub>
-</p>
-
-### First run: five steps
-
-<p align="center">
-  <img src="docs/proto/wizard3_v141.png" width="640" alt="Wizard step 3">
-  <img src="docs/proto/wizard5_v141.png" width="640" alt="Wizard step 5">
-</p>
-
-Tools → find the executables → **pick a time** → notify or not → read the summary.
-
-Step 2 **auto-detects on entry**, so most people do nothing there. The time you set in step 3 *is* the time on the home schedule card — one value, never two.
-
-The last page has exactly two buttons: **【完成并试跑一次】** actually runs the first tool once so you can watch it move; **【先不跑，完成】** skips that.
-
-The summary is honest about what's missing — e.g. "BetterGI：还没设置路径（可稍后在工具卡里设置）", with an inline "现在去设置" to go back and fix it. **It never says "all done" when something isn't.**
-
-### Settings fold into five groups
-
-One level shows five entry cards; switches live inside, with a back arrow top-left.
-
-<p align="center">
-  <img src="docs/proto/settings_v141.png" width="760" alt="Settings">
-</p>
-
-| Entry | Contains |
-| --- | --- |
-| **守护** (Watchdog) | Watchdog / restart on crash / frozen-screen check / auto-kill stalls / clean leftovers before a run + log rules |
-| **定时** (Timing) | Do-not-disturb, failure policy, tool interval, keep-awake, night screen-off |
-| **通知** (Notify) | Twelve push channels + Reports (morning, weekly, harvest ledger, event webhook) |
-| **接口** (Interface) | Local control API, LAN panel, global hotkeys, backup, preflight, handover |
-| **界面与启动** (UI & Startup) | Appearance, autostart, tray, sounds, mini bar, speech |
-
-<p align="center">
-  <img src="docs/proto/settings_timing_v141.png" width="760" alt="Timing pane">
-</p>
-
-<p align="center">
-  <sub>Explanations longer than one line fold to a single line with a ⓘ — hover or click to expand.</sub>
-</p>
-
-### Daily report: how much faster than last time
+- **Unified daily report**: Summarizes anomalies, per-group durations compared against recent runs, per-tool timings, and total duration using the same underlying dataset for both UI rendering and mobile pushes.
+- **Multi-channel notifications**: Supports Windows toast notifications, WeCom, Feishu, DingTalk, Telegram, Bark, email, custom webhooks, WebSockets, and more. Transient failures retry at 1s / 3s / 7s, and failed entries can be resent in place from the notice centre.
+- **Non-blocking notice centre**: Crashes, failed launches, and queue interruptions are recorded in the title-bar notice centre instead of blocking unattended runs with modal dialogs.
+- **Optional morning/weekly reports & harvest ledger**: Can summarize yesterday's runs (including missed schedules) on first launch, track 7-day completion rates, and accumulate BetterGI resource logs into `所有配置\harvest.json`.
 
 <p align="center">
   <img src="docs/proto/report_v141.png" width="820" alt="Daily report">
 </p>
 
-Four blocks, and **"Anomalies" comes first**:
+### Settings, Control API & Customization
 
-- When everything went fine it says so outright: "N 个配置组全部顺利，没有需要你操心的事" — that sentence is itself the information.
-- When something broke, each line reads "which group, which stage, what the butler did" — **only actions that actually exist in code** (e.g. "停下等你", stopped and waited). Anything it can't prove, it leaves out. "看现场" at the end of the line jumps to that run.
-- "Config groups" rows carry a coloured pill: **快了 33 秒** / **慢了 5 分 59 秒**, and "持平" when the difference is under a second.
-- The total line adds "较昨日 慢了 46 分 50 秒"; with no yesterday data that half is simply omitted.
-
-**The in-app report and the pushed one are rendered from one dataset** — group counts, durations and deltas can't disagree.
-
-## What it fixes
-
-- **You only find out afterwards** — one summary when the queue ends: how many succeeded, what failed, why, and where the evidence is.
-- **You can't tell how far along it is** — live strip at the top: `● Daily · 18m   ~2m left · ends ~23:06   5/7`. Collapses when idle.
-- **You don't dare walk away** — stalls, frozen screens, memory pressure and tool crashes are all detected; notify, capture evidence, or stop the queue, as you configure.
-- **You still have to shut down by hand** — sleep or shut down after a successful run, cancellable for 60 seconds.
-- **Nothing to investigate with** — on failure it packs log tail + screenshot + redacted config into `全部日志\incidents\`.
-- **All you get afterwards is a wall of logs** — the home card gives you a plain-language recap: what succeeded, what ran long, which group never finished.
-- **You can't tell what it decided for you** — every skip, defer, restart and abort leaves one sentence of *why*, listed by time under "Today".
-- **No sense of "how does today compare"** — it compares against your own 14-day median, not a hard-coded threshold, and stays quiet when samples are thin.
-- **No idea how much time it saved you** — one number: hours it ran for you this month.
-- **A crash prompt ate the whole night** — no more dialogs. Crashes, tools that failed to launch and interrupted queues go into the message centre in the title bar, each translated into plain language (what happened / why / what you can do). The dot stays lit until you look, and never blocks startup.
-- **Three nested fold-outs before you could edit a tool** — a tool card's right-click menu is the whole menu now: run this one now / skip this time / change interval / view log / edit launch settings / move it.
-
-## One self-imposed rule
-
-**This program's success metric is: you open it less often.** No daily-active chasing, no "come back and check", no streak counters. A good night means you glance once the next day and read "done". If you haven't opened it in a month, it did its job.
-
-The one exception is **when something goes wrong**: a crash, a tool that wouldn't start, a queue that broke off. Those land in the message centre (envelope icon in the title bar, red dot when unread) and wait there. It would rather stay quiet than block an unattended night behind a dialog box.
-
-## Quick start
-
-1. Grab the **portable** build from [Releases](https://github.com/laopiaoke/Dragon-Butler/releases/latest) (bundles .NET, unzip and run; 3.5 MB runtime-dependent build if you already have .NET 8).
-2. Unzip, run `Dragon Butler.exe`, accept the UAC prompt.
-3. Follow the five-step wizard: tick tools → (it auto-detects) → pick a time → notify or not → done.
-4. To see it move right away, hit 【完成并试跑一次】 on the last page.
-
-**Nothing has to be configured.** No notification channel, no schedule — it still runs a full set on one click.
-
-## Interface tour
+- **Categorized settings**: Organized into five cards (Watchdog, Timing, Notify, Interface, UI & Startup), with long explanations collapsed behind `ⓘ` tips.
+- **Appearance & shortcuts**: Remembers window size and position (default `1080×720`, minimum `880×600`), supports Light/Dark/System themes, custom backgrounds and accent palettes, a `Ctrl+K` command palette, global hotkeys, and a draggable mini progress bar.
+- **Local Control API & MCP** (disabled by default): Exposes token-authenticated (`X-Butler-Token`) control endpoints and an HTTP JSON-RPC 2.0 MCP endpoint on `127.0.0.1:18235` for external scripts or AI assistants.
+- **Read-only LAN status page** (disabled by default): Serves a dual-theme mobile-friendly status page for viewing live queue progress across devices on the local network.
 
 <p align="center">
-  <img src="docs/proto/settings_guard_v141.png" width="380" alt="Watchdog">
-  <img src="docs/proto/settings_notify_v141.png" width="380" alt="Notify">
+  <img src="docs/proto/settings_v141.png" width="760" alt="Settings overview">
 </p>
 
-<p align="center">
-  <img src="docs/proto/settings_api_v141.png" width="380" alt="Interface">
-  <img src="docs/proto/settings_ui_v141.png" width="380" alt="UI and startup">
-</p>
+## Data Layout
 
-The window defaults to 1080×720, shrinks to 880×600; position and size are remembered.
+All runtime data stays beside `Dragon Butler.exe`. Nothing is written to `%APPDATA%`; deleting the folder removes the app cleanly (turn off autostart in settings first if enabled):
 
-## Where data lives
-
-Everything sits next to the exe; deleting the folder uninstalls it (turn off autostart first, under Settings → UI & Startup).
-
+```text
+所有配置\settings.json        Main application settings
+所有配置\group_archive.json   Daily executed script groups
+所有配置\durations.json       Per-tool and per-group duration history
+所有配置\harvest.json         Harvest ledger data (retained for 400 days when enabled)
+所有配置\notices.json         Notice centre history (up to 100 entries)
+所有配置\tools\*.json         Individual tool profiles
+所有配置\备份\                Settings backup archives
+所有配置\sounds\              UI sound effects
+插件\                         Optional plugin directory
+全部日志\                     Runtime logs
+全部日志\snapshots\           On-demand tray screenshots
+全部日志\incidents\           Failure incident bundles
 ```
-所有配置\settings.json      all settings, hand-editable
-所有配置\group_archive.json which config groups ran each day
-所有配置\durations.json     per-tool / per-group durations (the daily report reads this)
-所有配置\notices.json       message centre (capped at 100)
-所有配置\tools\*.json       tool profiles
-所有配置\备份\              settings backups
-所有配置\sounds\            custom sounds
-插件\                       plugins (the Plugins tab opens this folder)
-全部日志\                    runtime log — check here first
-全部日志\snapshots\          scheduled snapshots
-全部日志\incidents\          failure bundles
-```
-
-Older builds scattered `config` / `tools` / `plugins` / `cache` / `sounds` / `备份` next to the exe. The first launch of 1.30 moves them into these two folders and leaves a `.moved-to-所有配置` marker behind so it never runs twice.
-
-Nothing is written to `%APPDATA%`; the whole folder is portable.
 
 ## FAQ
 
 <details>
-<summary><b>Where did the log page go</b></summary>
-There is no "Logs" tab any more. Logs open pre-filtered from wherever you clicked: 【看现场】 on the home card (that failing run), "查看日志" on a tool card (that tool only), a config group's name in the daily report (that group, that day). For everything, use "更多 ▾" → 【全部日志】. The top bar always says "正在看：…" so you know whether it's filtered.
-</details>
-
-<details>
-<summary><b>I can't find a setting any more</b></summary>
-v1.41 split settings into five groups: Watchdog / Timing / Notify / Interface / UI & Startup. The first level is just five cards; switches are one click in, back arrow top-left. See the table above — every existing setting is still there.
-</details>
-
-<details>
-<summary><b>Does "完成并试跑一次" really run something</b></summary>
-Yes. It runs the first tool with a configured path once, through the same single-tool path as **Run queue**, so you see it launch, run and finish. Prefer not to? 【先不跑，完成】. Either button marks the wizard complete.
-</details>
-
-<details>
-<summary><b>Why is there no "didn't run last night" text on a fresh install</b></summary>
-Because nothing has run yet. On a fresh install those history and alert lines are suppressed and replaced with a "还没跑过——三步就能开始" checklist, which goes away once you've actually done it.
-</details>
-
-<details>
 <summary><b>"BetterGI not found"</b></summary>
-Point at <code>BetterGI.exe</code> itself, not the folder containing it.
+Select <code>BetterGI.exe</code> itself rather than the folder containing it.
 </details>
 
 <details>
-<summary><b>Nothing happens on launch / missing framework</b></summary>
-You're on the runtime-dependent build without .NET 8 Desktop Runtime. Install it once, or use the portable build.
+<summary><b>Nothing happens on launch or missing runtime error</b></summary>
+If you downloaded the <code>runtime-dependent</code> package, install the .NET 8 Desktop Runtime first, or switch to the self-contained <code>portable</code> package.
 </details>
 
 <details>
-<summary><b>Antivirus flags it / SmartScreen blocks it</b></summary>
-Releases aren't code-signed — click "More info → Run anyway". If quarantined, whitelist the folder or build from source; there are zero third-party dependencies.
+<summary><b>SmartScreen or antivirus warnings</b></summary>
+Release binaries are not code-signed. After verifying the download source is this repository's Releases page, choose "More info → Run anyway", or build directly from source (zero third-party NuGet packages).
 </details>
 
 <details>
 <summary><b>Will the watchdog kill my game?</b></summary>
-No. Process lookup and termination are filtered to the current Windows session; frozen screens and game-exit only produce a notice, never a restart.
+No. Process lookups and terminations are filtered to the current Windows user session, and frozen-screen or game-exit checks produce notices rather than forcefully restarting the game.
 </details>
 
 <details>
-<summary><b>Daily plan is set, but manual runs still do everything</b></summary>
-The daily plan only constrains schedule-triggered runs. Manual **Run queue** always follows the current ticks, so you can catch up. See it under "配置组 ▾" → "计划" on the task list card.
+<summary><b>Where are the logs?</b></summary>
+Logs open pre-filtered by context: click "看现场" on a failure card for that run's logs, right-click a tool row and choose "查看日志" for that tool, click a script group in the daily report for that group, or open "更多 ▾ → 全部日志" on the home action bar for full logs.
 </details>
 
 <details>
-<summary><b>"Possibly stalled" — what now?</b></summary>
-Check whether the screen is actually stuck. The queue waits for you by default; continue with **Run queue**. To auto-kill instead, enable it under Settings → Watchdog.
+<summary><b>How is BetterGI script-group execution order determined?</b></summary>
+Groups execute in the order they were checked inside the expanded row. The card headline and expanded summary counter update live to show what is queued tonight.
 </details>
 
 <details>
-<summary><b>Adding a tool that isn't built in</b></summary>
-Bottom of the tools card → "Custom tool" → "＋ Add": pick the exe, name the process, choose how completion is detected (process exit / duration / custom signal).
+<summary><b>What should I do on a "Possibly stalled" notice?</b></summary>
+Check whether the tool is actually frozen. By default the queue pauses so you can intervene and click Run queue to resume; enable auto-terminate under Watchdog settings if you prefer automatic skip-ahead.
 </details>
 
-## Privacy
+<details>
+<summary><b>How do I add a tool outside the built-in list?</b></summary>
+Click "＋ 添加工具" at the bottom of the task list and choose "其它 exe…" at the bottom of the picker to specify the executable path, process name, and completion rule (exit code, duration, or log/file/window signal).
+</details>
 
-**No telemetry, no analytics, no crash reporting.** The program sends usage data to nobody.
+## Building & Testing from Source
 
-Notifications go to the destination you configure. Webhooks, the control API, and MCP accept loopback connections only. Enabling the LAN dashboard lets other devices on the network view progress, not control runs.
+Requires the .NET 8 SDK. There are zero NuGet dependencies or external frontend build tools:
 
-## Build
+```powershell
+# Build main application (Release, analyzers enabled, warnings as errors)
+dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release -p:EnableNETAnalyzers=true -warnaserror
 
-Needs .NET 8 SDK. Zero NuGet dependencies:
-
-```
-dotnet build "Dragon Butler\Dragon Butler.csproj" -c Release
-```
-
-Tests run through a hand-written probe — 84 modes, well over a thousand assertions:
-
-```
+# Build StubTool and CoordinatorProbe
+dotnet build tests\StubTool\StubTool.csproj -c Release
 dotnet build tests\CoordinatorProbe\CoordinatorProbe.csproj -c Release
-dotnet "tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.dll" all
+
+# Run a functional probe group or UI render verification (pass an absolute path for StubTool)
+$stub = (Resolve-Path tests\StubTool\bin\Release\net8.0\StubTool.exe).Path
+.\tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.exe schedule $stub
+.\tests\CoordinatorProbe\bin\Release\net8.0-windows\CoordinatorProbe.exe ui all
 ```
 
-Package both variants:
+Package both release variants into `发布\`:
 
-```
+```powershell
 .\scripts\package.ps1 -Variant all
 ```
 
-## Notes
+## Privacy, Disclaimers & Third-Party Assets
 
-- **AI-assisted development**: code and docs were produced with AI assistance. The author does not write code and cannot make professional guarantees about quality or stability. Assess the risk yourself and back up your data.
-- **Not affiliated with any game publisher or the tools below.** No authorisation was granted. Game names, tool names and icons belong to their respective owners.
-- **Automation carries risk**: third-party tools may violate a game's terms of service and put your account at risk. That risk is yours.
-- **No account access**: it doesn't log into the game, doesn't read game data; it only reads logs those tools already write to disk.
+- **No telemetry**: The application sends no analytics or crash reports. Network listeners are strictly bound to user-configured settings (localhost by default, read-only LAN status only when explicitly enabled).
+- **AI-assisted development**: Code and documentation were developed with AI assistance. Evaluate risk independently and back up your settings before use.
+- **No affiliation / user responsibility**: This project has no affiliation with any game publisher or automation tool author. Automated tooling may violate a game's terms of service; use at your own risk.
+- **Third-party assets**: Game titles, tool names, bundled icons, and UI screenshots under `docs/` remain the property of their respective owners.
 
-## Related projects
-
-This project implements no game dailies itself; it all goes to them. Thanks to their authors:
+## Related Projects
 
 - [BetterGI](https://github.com/babalae/better-genshin-impact)
 - [March7thAssistant](https://github.com/moesnow/March7thAssistant)
-- [ok-ww](https://github.com/ok-oldking/ok-wuthering-waves)
+- [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)
 
-## License
+## License & Documentation
 
-Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — **but any distribution (including modified redistributions and network-service use) must be AGPL too, with full source provided**.
+Licensed under [GNU AGPL-3.0](LICENSE). Any redistribution or modified network deployment must remain licensed under AGPL-3.0 with full source code provided, and must retain the disclaimers above.
 
-- **Why AGPL**: this README has always said "don't sell it, don't charge for boosting or repackaging", which MIT explicitly permits. AGPL turns that sentence into a binding term — you may make money with it, but the code has to stay open.
-- **Third-party assets**: game names, tool names, and the screenshots and UI assets under `docs/` are outside this licence and belong to their respective owners.
-- **When redistributing**: keep the "Notes" section above so downstream users don't mistake this for an official product.
-
-## Version
-
-Latest release **v1.45.3** (`1.45.3` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
-
-The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.
+- Latest release: **v1.45.3** (`1.45.3` in-app)
+- Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md)
+- User manual (Chinese): [docs/使用说明.txt](docs/使用说明.txt)
+- Design history & trade-offs: [docs/路线图.md](docs/路线图.md)
+- Release verification reports: [docs/reports/](docs/reports/README.md)
+- Copy & UI guidelines: [docs/VOICE.md](docs/VOICE.md), [docs/PATTERNS.md](docs/PATTERNS.md)
