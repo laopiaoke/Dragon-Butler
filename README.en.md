@@ -37,6 +37,14 @@ It does exactly four things: start processes, read the public logs those tools w
   <sub>Home: the top card answers "when does it run today"; the right card, "Task list", holds one tool per row with tonight's plan in its headline.</sub>
 </p>
 
+## v1.45.3: the probe split into 46 files, plus a canary that actually fails
+
+No functional or visual change. This one is about the test harness itself — the gate that stops regressions; when the gate breaks quietly, nobody notices.
+
+- `tests/CoordinatorProbe/Program.cs` went from **458 KB / 7,290 lines** to 46 files, largest 19.8 KB.
+- Not a single assertion was rewritten: the `toolgrid` group still runs 364 checks, and `ui all` renders the same 51 screenshots.
+- A canary now guards the entry table: the 21 groups CI names must all be registered, and the total (84) is pinned to a constant. Every run prints `CANARY groups=84/84 ci=21 missing=0`.
+- The file-size gate shrank for the first time: whitelist 17 → 14, all three oversize probe files are now inside the limit.
 ## v1.45.2: housekeeping — 79 unreferenced screenshots removed
 
 No functional change. What changed is how much an agent has to read before it can safely touch this repo.
@@ -390,6 +398,6 @@ Released under [GNU AGPL-3.0](LICENSE). Use it, modify it, redistribute it — *
 
 ## Version
 
-Latest release **v1.45.2** (`1.45.2` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
+Latest release **v1.45.3** (`1.45.3` in-app); per-release changes in [RELEASE_NOTES.md](RELEASE_NOTES.md), design trade-offs in [docs/路线图.md](docs/路线图.md).
 
 The writing rules for interface text live in [docs/VOICE.md](docs/VOICE.md): six sentences are pinned — a revision may move them verbatim, never reword them.

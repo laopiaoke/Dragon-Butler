@@ -35,9 +35,6 @@ $Whitelist = @(
     'Dragon Butler/ToolCatalog.cs'
     'Dragon Butler/CustomToolWindow.xaml'
     'Dragon Butler/CustomThemeWindow.xaml'
-    'tests/CoordinatorProbe/Program.cs'
-    'tests/CoordinatorProbe/RenderProbe.cs'
-    'tests/CoordinatorProbe/MemoryProbe.cs'
     # 给用户看的说明书，是散文不是代码，没有「按功能拆」这回事
     'docs/使用说明.txt'
 )
