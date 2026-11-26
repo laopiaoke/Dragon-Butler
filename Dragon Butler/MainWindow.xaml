@@ -9,6 +9,9 @@
         Background="{DynamicResource WindowBgBrush}"
         FontFamily="HarmonyOS Sans SC, Microsoft YaHei UI, Segoe UI"
         UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        RenderOptions.BitmapScalingMode="HighQuality"
         AllowDrop="True" DragOver="OnWindowDragOver" Drop="OnWindowDrop"
         DragLeave="OnWindowDragLeave"
         Closing="Window_Closing">
@@ -103,6 +106,7 @@
         <!-- 启动台次按钮：全宽 32、幽灵样式（透明底 + 1px BorderStrong） -->
         <Style x:Key="LaunchGhost" TargetType="Button">
             <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="14,0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
@@ -119,7 +123,8 @@
                             <Border.RenderTransform>
                                 <TranslateTransform Y="0"/>
                             </Border.RenderTransform>
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -419,10 +424,12 @@
         <Style x:Key="ThemedCombo" TargetType="ComboBox">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             <Setter Property="Background" Value="{DynamicResource InsetBrush}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/>
             <Setter Property="Padding" Value="8,4"/>
             <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBox">
@@ -431,9 +438,17 @@
                                           IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
-                                        <Border Background="{DynamicResource InsetBrush}"
-                                                BorderBrush="{DynamicResource BorderBrush}"
-                                                BorderThickness="1" CornerRadius="4"/>
+                                        <Border x:Name="ToggleBd" Background="{DynamicResource InsetBrush}"
+                                                BorderBrush="{DynamicResource BorderStrongBrush}"
+                                                BorderThickness="1" CornerRadius="8"/>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="ToggleBd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="ToggleBd" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
@@ -444,9 +459,9 @@
                                   IsHitTestVisible="False" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0"/>
                             <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}"
                                    AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
-                                <Border Background="{DynamicResource InsetBrush}"
-                                        BorderBrush="{DynamicResource BorderBrush}"
-                                        BorderThickness="1" CornerRadius="4" Margin="0,2,0,0" MaxHeight="220">
+                                <Border Background="{DynamicResource CardBg2Brush}"
+                                        BorderBrush="{DynamicResource BorderStrongBrush}"
+                                        BorderThickness="1" CornerRadius="8" Padding="4" Margin="0,3,0,0" MaxHeight="220">
                                     <ScrollViewer>
                                         <ItemsPresenter/>
                                     </ScrollViewer>
@@ -461,12 +476,12 @@
         <!-- 下拉项 -->
         <Style TargetType="ComboBoxItem">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
-            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Padding" Value="8,6"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBoxItem">
-                        <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="2">
+                        <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="5">
                             <ContentPresenter VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -474,7 +489,8 @@
                                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BrandSoftBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource BrandTextBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -677,26 +693,33 @@
         <!-- 配置组勾选项：选中=品牌柔光底+品牌描边；左侧徽章位固定宽度，勾选后显示执行序号 -->
         <Style x:Key="GroupCheck" TargetType="CheckBox">
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
                         <Border x:Name="Bd" CornerRadius="7" Padding="8,4"
-                                Background="{DynamicResource ControlBgBrush}"
-                                BorderBrush="Transparent" BorderThickness="1">
+                                Background="{DynamicResource InsetBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                TextElement.Foreground="{DynamicResource TextSecondaryBrush}">
                             <ContentPresenter VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BrandSoftBrush}"/>
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BrandBrush}"/>
+                                <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{DynamicResource BrandTextBrush}"/>
+                                <Setter TargetName="Bd" Property="TextElement.FontWeight" Value="SemiBold"/>
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsMouseOver" Value="True"/>
                                     <Condition Property="IsChecked" Value="False"/>
                                 </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/>
+                                <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                             </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -861,6 +884,33 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- 设置二级页返回按钮：替换系统默认按钮模板，防止悬停出现经典蓝底 -->
+        <Style x:Key="BackLinkButton" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border x:Name="WindowFrame" CornerRadius="16" Background="{DynamicResource WindowBgBrush}"
@@ -993,7 +1043,7 @@
                                 </Border.Effect>
                                 <Grid>
                                     <!-- ① 玻璃主体 -->
-                                    <Border CornerRadius="16">
+                                    <Border x:Name="ThemeThumbGlass" CornerRadius="16">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                                                 <GradientStop Color="#3AFFFFFF" Offset="0"/>
@@ -1293,6 +1343,7 @@
                                                         <TextBlock x:Name="TbTimeDisplay" Text="08:00"
                                                                    FontFamily="JetBrains Mono, Cascadia Mono, Consolas, Microsoft YaHei UI"
                                                                    FontSize="58" FontWeight="Medium"
+                                                                   Typography.NumeralAlignment="Tabular"
                                                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                                                         <TextBlock Text="准时自动启动" FontSize="12"
                                                                    Foreground="{DynamicResource TextSecondaryBrush}"
@@ -1322,6 +1373,7 @@
                                                              VerticalAlignment="Center"/>
                                                     <TextBlock x:Name="TbCountdown" Text="距下次执行 —" FontSize="11.5"
                                                                FontFamily="JetBrains Mono, Cascadia Mono, Consolas, Microsoft YaHei UI"
+                                                               Typography.NumeralAlignment="Tabular"
                                                                Foreground="{DynamicResource TextSecondaryBrush}" Margin="8,0,0,0"/>
                                                 </StackPanel>
                                                 <!-- v1.6 补跑窗口：睡眠/关机错过整分钟也能补跑一次，点一下轮换档位 -->
@@ -1418,18 +1470,6 @@
 <Border x:Name="LiveStrip" Grid.Row="3" Visibility="Collapsed" Margin="0,10,0,0"
                                         CornerRadius="8" Background="{DynamicResource BrandSoftBrush}" Padding="10,7,10,7"
                                         ToolTipService.InitialShowDelay="400">
-                                    <Border.Triggers>
-                                        <EventTrigger RoutedEvent="Loaded">
-                                            <BeginStoryboard>
-                                                <Storyboard RepeatBehavior="Forever">
-                                                    <DoubleAnimation Storyboard.TargetName="LiveDot"
-                                                                     Storyboard.TargetProperty="Opacity"
-                                                                     From="1" To="0.3" Duration="0:0:1.4"
-                                                                     AutoReverse="True"/>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </EventTrigger>
-                                    </Border.Triggers>
                                     <Grid>
                                         <!-- 四列：点 / 组名 / 还要多久（吃剩余宽度、超了省略）/ 队列进度。
                                              原来把「组名」和「还要多久」放在一个横向 StackPanel 里，两个都是
@@ -1820,7 +1860,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftSettings" X="980"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageSettings" Margin="14,10,14,22">
+                        <Grid x:Name="PageSettings" Margin="14,10,14,82">
                             <!-- v1.41 / M4-1：设置页分成两层。
                                  一级只有五张入口卡（守护 / 定时 / 通知 / 接口 / 界面与启动），
                                  点哪张进哪张，二级里才是真正的开关。
@@ -1849,9 +1889,8 @@
 
                             <!-- ===== 二级：某一类的全部开关 ===== -->
                             <StackPanel x:Name="SettingsSection" Grid.Row="1" Visibility="Collapsed">
-                                <Button x:Name="BtnSettingsBack" Click="BtnSettingsBack_Click" Margin="0,0,0,10"
-                                        HorizontalAlignment="Left" Cursor="Hand"
-                                        Background="Transparent" BorderThickness="0" Padding="2,4,8,4">
+                                <Button x:Name="BtnSettingsBack" Style="{StaticResource BackLinkButton}"
+                                        Click="BtnSettingsBack_Click" Margin="0,0,0,10" HorizontalAlignment="Left">
                                     <StackPanel Orientation="Horizontal">
                                         <Path Data="M9 4 L4 9 L9 14" Stroke="{DynamicResource TextSecondaryBrush}"
                                               StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
@@ -2646,7 +2685,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftPlugins" X="1960"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PagePlugins" Margin="14,10,14,22">
+                        <Grid x:Name="PagePlugins" Margin="14,10,14,82">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -2702,7 +2741,7 @@
                         <ScrollViewer.RenderTransform>
                             <TranslateTransform x:Name="ShiftReport" X="2450"/>
                         </ScrollViewer.RenderTransform>
-                        <Grid x:Name="PageReport" Margin="14,10,14,22">
+                        <Grid x:Name="PageReport" Margin="14,10,14,82">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -2736,6 +2775,7 @@
                                     </Grid>
 
                                     <TextBlock x:Name="TbReportTotal" Text="还没跑过" FontSize="30" FontWeight="SemiBold"
+                                               Typography.NumeralAlignment="Tabular"
                                                Margin="0,12,0,0" HorizontalAlignment="Left"
                                                Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBlock x:Name="TbReportTrend" Text="" FontSize="11.5" TextWrapping="Wrap"
@@ -2871,8 +2911,17 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock x:Name="TbWrapUpIcon" Grid.Column="0" Text="🌙" FontSize="18"
-                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <Border Grid.Column="0" Width="30" Height="30" CornerRadius="9"
+                            Background="{DynamicResource CardBgBrush}"
+                            BorderBrush="{DynamicResource BrandBrush}" BorderThickness="1"
+                            VerticalAlignment="Center" Margin="0,0,12,0">
+                        <Path x:Name="WrapUpIconPath"
+                              Data="M12.4,2.6 A6.6,6.6 0 1 0 15.4,11.6 A5.2,5.2 0 0 1 12.4,2.6 Z"
+                              Stroke="{DynamicResource BrandTextBrush}" StrokeThickness="1.6"
+                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Width="15" Height="15" Stretch="Uniform"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
 
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock x:Name="TbWrapUpText" Text="队列完成，60 秒后睡眠"
@@ -2885,6 +2934,7 @@
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock x:Name="TbWrapUpLeft" Text="60" FontSize="20" FontWeight="SemiBold"
+                                   Typography.NumeralAlignment="Tabular"
                                    VerticalAlignment="Center" Margin="0,0,14,0"
                                    Foreground="{DynamicResource TextPrimaryBrush}"/>
                         <Button x:Name="BtnWrapUpCancel" Content="取消" Click="BtnWrapUpCancel_Click"
@@ -2905,7 +2955,7 @@
                   Background="{DynamicResource InsetBrush}">
                 <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto"
                               ScrollChanged="PageScrollChanged" HorizontalScrollBarVisibility="Disabled">
-                    <Grid x:Name="PageRun" Margin="14,10,14,22">
+                    <Grid x:Name="PageRun" Margin="14,10,14,82">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
@@ -3036,6 +3086,7 @@
                 <Border x:Name="NavShell" HorizontalAlignment="Center" VerticalAlignment="Center"
                         RenderTransformOrigin="0.5,0.5"
                         CornerRadius="27" Padding="5" Height="58"
+                        BorderThickness="1" BorderBrush="#24FFFFFF"
                         PreviewMouseLeftButtonDown="NavShell_PreviewMouseLeftButtonDown"
                         PreviewMouseMove="NavShell_PreviewMouseMove"
                         PreviewMouseLeftButtonUp="NavShell_PreviewMouseLeftButtonUp">
@@ -3050,7 +3101,7 @@
                         </LinearGradientBrush>
                     </Border.Background>
                     <Border.Effect>
-                        <DropShadowEffect BlurRadius="22" ShadowDepth="6" Direction="270"
+                        <DropShadowEffect x:Name="NavShellShadow" BlurRadius="22" ShadowDepth="6" Direction="270"
                                           Opacity="0.5" Color="#FF05070A"/>
                     </Border.Effect>
                     <Grid>

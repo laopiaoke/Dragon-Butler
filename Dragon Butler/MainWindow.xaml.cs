@@ -118,6 +118,11 @@ public partial class MainWindow : Window
             QueueService.StatusChanged -= OnQueueStatusText;
             SentinelService.OnEvent -= OnSentinelEvent;
             WrapUpCountdown.Changed -= OnWrapUpChanged;
+            try { _countdownTimer.Stop(); } catch { }
+            try { _groupScanTimer.Stop(); } catch { }
+            try { _uiRefreshTimer.Stop(); } catch { }
+            try { _statusBarTimer.Stop(); } catch { }
+            try { SetLiveDotPulse(false); } catch { }
             // v1.8：热键是系统级注册，窗口关掉必须还回去，否则组合键被永久占用
             try { _hotkeys?.Dispose(); } catch { }
         };
@@ -128,11 +133,14 @@ public partial class MainWindow : Window
 
         // v1.22：三页并排，每页宽度跟着可视区走。挂一次就够，窗口改大小也由它处理。
         PageClip.SizeChanged += OnPageClipSized;
+        IsVisibleChanged += (_, _) => SyncUiTimers();
+        StateChanged += (_, _) => SyncUiTimers();
 
         // 全局按键音：所有可交互元素在"按下"这一瞬出声
         AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(AnyInteractivePress), true);
 
         LoadSettingsToUi();
+        UpdateThemeChrome();
         BuildSettingsHome();   // v1.41 / M4-1：一级五张入口卡，构造时铺一次就够
         RebuildCustomToolCards();
         RefreshPlugins();
@@ -151,6 +159,7 @@ public partial class MainWindow : Window
         Loaded += (_, _) =>
         {
             AppState.RefreshStatus();
+            SyncUiTimers();
             if (SuppressAutoCenter) return;
             // v1.41 / M6-1：先摆回上次的位置，再谈居中——「上次在哪」比「默认在哪」优先。
             RestoreWindowBounds();
@@ -172,6 +181,32 @@ public partial class MainWindow : Window
         // v1.41 / M6-1：最宽 = 可用宽 − 200。给两侧各留 100，是为了让「这不是全屏」一眼看得出来；
         // 贴着屏幕边缘的方窗口看起来像卡住了，而它其实只是被拖到最大。
         try { MaxWidth = Math.Max(MinWidth, SystemParameters.WorkArea.Width - 200); } catch { }
+    }
+
+    private void SyncUiTimers()
+    {
+        try
+        {
+            bool active = IsVisible && WindowState != WindowState.Minimized;
+            if (!active)
+            {
+                _countdownTimer.Stop();
+                _groupScanTimer.Stop();
+                _uiRefreshTimer.Stop();
+                SetLiveDotPulse(false);
+                return;
+            }
+            if (!_countdownTimer.IsEnabled) _countdownTimer.Start();
+            if (!_groupScanTimer.IsEnabled) _groupScanTimer.Start();
+            if (!_uiRefreshTimer.IsEnabled) _uiRefreshTimer.Start();
+            UpdateScheduleStatus();
+            RefreshToolCards();
+            UpdateQueueButtons();
+            RefreshLiveStrip();
+            RefreshHomeHero();
+            RefreshShield();
+        }
+        catch { }
     }
 
     // tidy：这里原来有一个空方法 CenterOnActiveMonitor()，注释写着「不额外移动，避免多屏时跳到主屏」。
@@ -258,15 +293,80 @@ public partial class MainWindow : Window
         }
     }
 
+    private static readonly Brush NavDarkBg = FrozenLinear("#D9181C22", "#CC12151A");
+    private static readonly Brush NavLightBg = FrozenLinear("#EBFFFFFF", "#E0F4F7FB");
+    private static readonly Brush NavDarkBorder = Frozen(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));
+    private static readonly Brush ThumbDarkGlass = FrozenLinear("#3AFFFFFF", "#1CFFFFFF", "#10FFFFFF");
+    private static readonly Brush ThumbLightGlass = FrozenLinear("#F2FFFFFF", "#E0EEF3F8");
+    private bool _themeAnimatingSwitch;
+
+    private static Brush FrozenLinear(string top, string bottom)
+    {
+        var b = new LinearGradientBrush(
+            (Color)ColorConverter.ConvertFromString(top),
+            (Color)ColorConverter.ConvertFromString(bottom),
+            new Point(0, 0), new Point(0, 1));
+        b.Freeze();
+        return b;
+    }
+
+    private static Brush FrozenLinear(string top, string mid, string bottom)
+    {
+        var b = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+        b.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(top), 0));
+        b.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(mid), 0.48));
+        b.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(bottom), 1));
+        b.Freeze();
+        return b;
+    }
+
+    private void UpdateThemeChrome()
+    {
+        try
+        {
+            bool light = Theme.LastSchemeLight;
+            if (NavShell != null)
+            {
+                NavShell.Background = light ? NavLightBg : NavDarkBg;
+                NavShell.BorderBrush = light
+                    ? (BrushOf("BorderStrongBrush") ?? NavDarkBorder)
+                    : NavDarkBorder;
+            }
+            if (NavShellShadow != null)
+            {
+                NavShellShadow.Opacity = light ? 0.16 : 0.5;
+                NavShellShadow.Color = light ? Color.FromRgb(0x1B, 0x2A, 0x3D) : Color.FromRgb(0x05, 0x07, 0x0A);
+            }
+            if (ThemeThumbGlass != null)
+                ThemeThumbGlass.Background = light ? ThumbLightGlass : ThumbDarkGlass;
+            if (ThemeThumbShadow != null)
+                ThemeThumbShadow.Opacity = light ? 0.22 : 0.4;
+        }
+        catch { }
+    }
+
     private void OnAppThemeChanged()
     {
         try
         {
+            UpdateThemeChrome();
+            if (_themeAnimatingSwitch) PaintThemeIcons(ThemeModeIndex(), animate: false);
+            else SyncThemeSeg();
             ApplyNotifyMode();
             RebuildCustomToolCards();
+            RebuildSettingsEntryCards();
+            InvalidateHomeHeroCaches();
             RenderQueue();
             RefreshShield();
             RefreshToolCards();
+            RefreshHomeHero();
+            RefreshPlugins();
+            if (_page == Pager.Report) RefreshReportPage();
+            if (LogLayer?.Visibility == Visibility.Visible)
+            {
+                RefreshRunPage();
+                RenderLogList();
+            }
         }
         catch { }
     }
@@ -520,7 +620,9 @@ public partial class MainWindow : Window
 
         AppState.Settings.Theme = mode;
         AppState.SaveSettings();
-        Theme.Set(mode);
+        _themeAnimatingSwitch = true;
+        try { Theme.Set(mode); }
+        finally { _themeAnimatingSwitch = false; }
 
         PlaceThemeThumb(to, animate: true);
     }
@@ -878,6 +980,7 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(new Action(() =>
         {
+            InvalidateHomeHeroCaches();
             RenderQueue();
             RefreshToolCards();
             RefreshShield();
@@ -1000,18 +1103,25 @@ public partial class MainWindow : Window
     // v1.42 把格子换成横向工具行之后，提示改由行内徽章与右键菜单承担，这个方法再没人调。
     // 它引用的 QueueGraph.DependenciesOf / GroupSlicing.UsesGlobal 都还有别的调用点，不受影响。
 
+    private string _lastQueueBtnState = "";
+
     private void UpdateQueueButtons()
     {
         bool running = QueueService.IsRunning;
-        BtnQueueStart.Content = running ? "停止" : "一键开跑";
-        try
+        string btnState = (running ? "1" : "0") + "|" + Theme.Mode + "|" + (Theme.LastSchemeLight ? "L" : "D");
+        if (btnState != _lastQueueBtnState)
         {
-            BtnQueueStart.Background = running
-                ? (BrushOf("DangerBrush") ?? Brushes.IndianRed)
-                : (BrushOf("BrandBrush") ?? Brushes.SeaGreen);
-            BtnQueueStart.Foreground = running ? Brushes.White : (BrushOf("BrandOnBrush") ?? Brushes.Black);
+            _lastQueueBtnState = btnState;
+            BtnQueueStart.Content = running ? "停止" : "一键开跑";
+            try
+            {
+                BtnQueueStart.Background = running
+                    ? (BrushOf("DangerBrush") ?? Brushes.IndianRed)
+                    : (BrushOf("BrandBrush") ?? Brushes.SeaGreen);
+                BtnQueueStart.Foreground = running ? Brushes.White : (BrushOf("BrandOnBrush") ?? Brushes.Black);
+            }
+            catch { }
         }
-        catch { }
 
         BtnQueueIdleSkip.Visibility = QueueService.IsWaitingIdle ? Visibility.Visible : Visibility.Collapsed;
         // v1.43 / 任务二 / P2-3：先让过期状态自己复位。
@@ -1135,6 +1245,16 @@ public partial class MainWindow : Window
         catch { }
     }
 
+    private static readonly Geometry WrapUpSleepGeom = FrozenGeom("M12.4,2.6 A6.6,6.6 0 1 0 15.4,11.6 A5.2,5.2 0 0 1 12.4,2.6 Z");
+    private static readonly Geometry WrapUpPowerGeom = FrozenGeom("M10,2.5 L10,9.5 M6.2,4.6 A6.5,6.5 0 1 0 13.8,4.6");
+
+    private static Geometry FrozenGeom(string data)
+    {
+        var g = Geometry.Parse(data);
+        g.Freeze();
+        return g;
+    }
+
     /// <summary>把倒计时状态画到提示条上；没在倒计时就收起来。</summary>
     private void RefreshWrapUpBar()
     {
@@ -1147,7 +1267,8 @@ public partial class MainWindow : Window
         }
 
         WrapUpBar.Visibility = Visibility.Visible;
-        TbWrapUpIcon.Text = kind == WrapUpKind.Sleep ? "🌙" : "⏻";
+        if (WrapUpIconPath != null)
+            WrapUpIconPath.Data = kind == WrapUpKind.Sleep ? WrapUpSleepGeom : WrapUpPowerGeom;
         TbWrapUpLeft.Text = WrapUpCountdown.RemainingSeconds.ToString();
         TbWrapUpText.Text = $"队列完成，{WrapUpCountdown.RemainingSeconds} 秒后{WrapUpCountdown.NameOf(kind!.Value)}";
         TbWrapUpHint.Text = "想反悔就点取消；也可以点立即执行，不用等满。";
@@ -1222,6 +1343,11 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(RefreshNoticeBadge));
+                return;
+            }
             if (NoticeBadge == null || TbNoticeBadge == null) return;
             int unread = NoticeCenter.UnreadCount;
             if (unread <= 0)
@@ -1654,8 +1780,9 @@ public partial class MainWindow : Window
 
         // 每秒一次的界面轮询也会走到这里。签名没变就一个控件都不碰——
         // 重造一排按钮不只是浪费，还会把正按在上面的手指/鼠标弄丢（v1.23 桌面格子踩过同一条）。
-        string signature = string.Join("|", ids.Select(id =>
-            id + ":" + (ToolRunner.HasExecutable(ProfileRegistry.Get(id)) ? "1" : "0")));
+        string signature = Theme.Mode + ":" + (Theme.LastSchemeLight ? "L" : "D") + "|" +
+                           string.Join("|", ids.Select(id =>
+                               id + ":" + (ToolRunner.HasExecutable(ProfileRegistry.Get(id)) ? "1" : "0")));
         if (signature == _toolButtonSignature) return;
         _toolButtonSignature = signature;
 
@@ -1991,12 +2118,44 @@ public partial class MainWindow : Window
         // 展开区：缩进对齐到图标，背景比卡片深一档
         if (expanded) host.Children.Add(BuildGroupPanel(profile));
 
-        // 单击任意处（手柄除外）展开/收起；双击＝立即跑这一个
-        row.MouseLeftButtonUp += (s2, e2) =>
+        // 折叠态悬停反馈 + 手柄亮色提示
+        row.MouseEnter += (_, _) =>
+        {
+            if (!expanded)
+            {
+                row.Background = BrushOf("HoverBrush") ?? Brushes.Transparent;
+                row.BorderBrush = BrushOf("BorderBrush") ?? DotGray;
+            }
+        };
+        row.MouseLeave += (_, _) =>
+        {
+            if (!expanded)
+            {
+                row.Background = Brushes.Transparent;
+                row.BorderBrush = Brushes.Transparent;
+            }
+        };
+        handle.MouseEnter += (_, _) => handle.Foreground = BrushOf("TextSecondaryBrush") ?? DotGray;
+        handle.MouseLeave += (_, _) => handle.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+
+        // 单击任意处（手柄除外）展开/收起；双击＝立即跑这一个（WPF 只在 MouseDown 报 ClickCount >= 2）
+        bool doubleClicked = false;
+        row.MouseLeftButtonDown += (s2, e2) =>
         {
             if (e2.ChangedButton != MouseButton.Left) return;
             if (handle.IsMouseOver) return;
-            if (e2.ClickCount >= 2) { RunToolNow(profile.ToolId); return; }
+            if (e2.ClickCount >= 2)
+            {
+                doubleClicked = true;
+                e2.Handled = true;
+                RunToolNow(profile.ToolId);
+            }
+        };
+        row.MouseLeftButtonUp += (s2, e2) =>
+        {
+            if (e2.ChangedButton != MouseButton.Left) return;
+            if (doubleClicked) { doubleClicked = false; return; }
+            if (handle.IsMouseOver) return;
             if (_expandedRows.Contains(profile.ToolId)) _expandedRows.Remove(profile.ToolId);
             else _expandedRows.Add(profile.ToolId);
             RenderToolRows();
@@ -2255,8 +2414,18 @@ public partial class MainWindow : Window
         layer.Children.Add(label);
         row.Child = layer;
         row.MouseLeftButtonUp += (_, _) => { _addingTool = !_addingTool; RenderToolRows(); };
-        row.MouseEnter += (_, _) => label.Foreground = BrushOf("BrandTextBrush") ?? DotGreen;
-        row.MouseLeave += (_, _) => label.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+        row.MouseEnter += (_, _) =>
+        {
+            dash.Stroke = BrushOf("BrandBrush") ?? DotGreen;
+            dash.Fill = BrushOf("BrandSoftBrush") ?? Brushes.Transparent;
+            label.Foreground = BrushOf("BrandTextBrush") ?? DotGreen;
+        };
+        row.MouseLeave += (_, _) =>
+        {
+            dash.Stroke = BrushOf("BorderStrongBrush") ?? DotGray;
+            dash.Fill = Brushes.Transparent;
+            label.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+        };
         return row;
     }
 
@@ -2308,16 +2477,36 @@ public partial class MainWindow : Window
         foreach (var profile in candidates)
         {
             bool added = existing.Contains(profile.ToolId);
+            var baseBg = added ? (BrushOf("BrandSoftBrush") ?? Brushes.Transparent) : Brushes.Transparent;
+            var baseBorder = added ? (BrushOf("BrandBrush") ?? DotGreen) : (BrushOf("BorderBrush") ?? DotGray);
             var tile = new Border
             {
                 Width = 84,
                 Margin = new Thickness(0, 0, 6, 6),
                 Padding = new Thickness(4, 7, 4, 6),
                 CornerRadius = new CornerRadius(8),
-                Background = added ? (BrushOf("BrandSoftBrush") ?? Brushes.Transparent) : Brushes.Transparent,
-                BorderBrush = added ? (BrushOf("BrandBrush") ?? DotGreen) : (BrushOf("BorderBrush") ?? DotGray),
+                Background = baseBg,
+                BorderBrush = baseBorder,
                 BorderThickness = new Thickness(1.2),
                 Cursor = Cursors.Hand,
+            };
+            tile.MouseEnter += (_, _) =>
+            {
+                if (!added)
+                {
+                    tile.Background = BrushOf("HoverBrush") ?? Brushes.Transparent;
+                    tile.BorderBrush = BrushOf("BorderStrongBrush") ?? DotGray;
+                }
+                else
+                {
+                    tile.Opacity = 0.88;
+                }
+            };
+            tile.MouseLeave += (_, _) =>
+            {
+                tile.Background = baseBg;
+                tile.BorderBrush = baseBorder;
+                tile.Opacity = 1.0;
             };
             var known = ToolCatalog.Find(profile.ToolId);
             tile.ToolTip = added
@@ -2535,7 +2724,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void SyncToolGrid()
     {
-        if (ToolGridHost == null) return;
+        if (ToolGridHost == null || !ToolGridHost.IsVisible) return;
         string signature = string.Join("|", PageList().Select(pg => string.Join(",", pg)));
         if (signature != _gridSignature)
         {
@@ -4784,15 +4973,15 @@ public partial class MainWindow : Window
     /// <summary>一级入口卡的标题、副标题、图标路径，以及点进去对应哪个分区。</summary>
     private static readonly (SettingsPane Pane, string Title, string Subtitle, string Icon)[] SettingsEntries =
     {
-        (SettingsPane.Guard,  "守护",       "跑的时候出事怎么办", "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,7 L12,12 L15.5,14"),
+        (SettingsPane.Guard,  "守护",       "跑的时候出事怎么办", "M12,3 L20,6.2 L20,12 C20,16 16.4,19.4 12,21 C7.6,19.4 4,16 4,12 L4,6.2 Z"),
         (SettingsPane.Timing, "定时",       "几点跑、中间歇多久", "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,7.5 L12,12 L15,13.5"),
         (SettingsPane.Notify, "通知",       "跑完怎么告诉你",     "M6,9 A6,6 0 0 1 18,9 L18,14 L20,16 L4,16 L6,14 Z M10,19 A2,2 0 0 0 14,19"),
         (SettingsPane.Api,    "接口",       "给外面的东西开个口", "M7,8 L4,12 L7,16 M17,8 L20,12 L17,16 M14,6 L10,18"),
         (SettingsPane.Ui,     "界面与启动", "平时怎么用它",       "M4,6 L20,6 L20,17 L4,17 Z M9,21 L15,21 M12,17 L12,21"),
     };
 
-    /// <summary>把一级入口卡铺出来。卡片只有五张，不值得缓存。</summary>
-    private void BuildSettingsHome()
+    /// <summary>只重建入口卡（供主题切换时保留当前二级页位置）。</summary>
+    private void RebuildSettingsEntryCards()
     {
         if (SettingsEntryHost == null) return;
         SettingsEntryHost.Children.Clear();
@@ -4801,6 +4990,13 @@ public partial class MainWindow : Window
             SettingsEntryHost.Children.Add(
                 SettingsEntryCard(entry.Pane, entry.Title, entry.Subtitle, entry.Icon));
         }
+    }
+
+    /// <summary>把一级入口卡铺出来。卡片只有五张，不值得缓存。</summary>
+    private void BuildSettingsHome()
+    {
+        if (SettingsEntryHost == null) return;
+        RebuildSettingsEntryCards();
 
         // 没走完那五步的人，一级里给一句话指个路——但不再重复「三步就能开始」。
         if (TbSettingsWizardHint != null)
@@ -4817,14 +5013,16 @@ public partial class MainWindow : Window
     /// <summary>一张入口卡：图标 + 标题 + 一句「这一类管什么」。整块可点。</summary>
     private UIElement SettingsEntryCard(SettingsPane pane, string title, string subtitle, string icon)
     {
+        var normalBg = BrushOf("CardBg2Brush") ?? BrushOf("ControlBgBrush") ?? DotGray;
+        var normalBorder = BrushOf("BorderBrush") ?? DotGray;
         var border = new Border
         {
-            Width = 208,
+            Width = 268,
             Margin = new Thickness(0, 0, 12, 12),
-            Padding = new Thickness(14, 12, 14, 12),
+            Padding = new Thickness(16, 14, 14, 14),
             CornerRadius = new CornerRadius(12),   // M6-2：卡片圆角 12
-            Background = BrushOf("CardBg2Brush") ?? BrushOf("ControlBgBrush") ?? DotGray,
-            BorderBrush = BrushOf("BorderBrush") ?? DotGray,
+            Background = normalBg,
+            BorderBrush = normalBorder,
             BorderThickness = new Thickness(1),
             Cursor = System.Windows.Input.Cursors.Hand,
         };
@@ -4832,14 +5030,15 @@ public partial class MainWindow : Window
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var iconBox = new Border
         {
-            Width = 30,
-            Height = 30,
+            Width = 32,
+            Height = 32,
             CornerRadius = new CornerRadius(9),
             Background = BrushOf("BrandSoftBrush") ?? DotGray,
-            VerticalAlignment = VerticalAlignment.Top,
+            VerticalAlignment = VerticalAlignment.Center,
         };
         iconBox.Child = new System.Windows.Shapes.Path
         {
@@ -4860,13 +5059,13 @@ public partial class MainWindow : Window
 
         var text = new StackPanel
         {
-            Margin = new Thickness(10, 0, 0, 0),
+            Margin = new Thickness(11, 0, 6, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
         text.Children.Add(new TextBlock
         {
             Text = title,
-            FontSize = 13,
+            FontSize = 13.5,
             FontWeight = FontWeights.SemiBold,
             Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
         });
@@ -4881,7 +5080,30 @@ public partial class MainWindow : Window
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
 
+        var chevron = new TextBlock
+        {
+            Text = "›",
+            FontSize = 16,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 0),
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        };
+        Grid.SetColumn(chevron, 2);
+        grid.Children.Add(chevron);
+
         border.Child = grid;
+        border.MouseEnter += (_, _) =>
+        {
+            border.Background = BrushOf("HoverBrush") ?? normalBg;
+            border.BorderBrush = BrushOf("BrandBrush") ?? normalBorder;
+            chevron.Foreground = BrushOf("BrandTextBrush") ?? DotGreen;
+        };
+        border.MouseLeave += (_, _) =>
+        {
+            border.Background = normalBg;
+            border.BorderBrush = normalBorder;
+            chevron.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
+        };
         border.MouseLeftButtonUp += (_, _) => ShowSettingsPane(pane);
         return border;
     }
@@ -5611,7 +5833,17 @@ public partial class MainWindow : Window
 
         foreach (var g in data.Groups)
         {
-            var row = new Grid { Margin = new Thickness(0, 0, 0, 7) };
+            var rowWrap = new Border
+            {
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(6, 4, 6, 4),
+                Margin = new Thickness(-6, 0, -6, 3),
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Hand,
+                // v1.41 / M1-2：点组名进日志视图，按「这一组 + 今天」筛好。
+                ToolTip = "看这一组的日志",
+            };
+            var row = new Grid();
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -5623,11 +5855,7 @@ public partial class MainWindow : Window
                 Foreground = BrushOf("TextSecondaryBrush"),
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 VerticalAlignment = VerticalAlignment.Center,
-                Cursor = Cursors.Hand,
-                // v1.41 / M1-2：点组名进日志视图，按「这一组 + 今天」筛好。
-                ToolTip = "看这一组的日志",
             };
-            name.MouseLeftButtonUp += (_, _) => OpenLogView(LogFilter.ForGroup(g.Name, DateTime.Now));
             Grid.SetColumn(name, 0);
             row.Children.Add(name);
 
@@ -5674,7 +5902,11 @@ public partial class MainWindow : Window
                 row.Children.Add(pill);
             }
 
-            ReportGroupHost.Children.Add(row);
+            rowWrap.Child = row;
+            rowWrap.MouseEnter += (_, _) => rowWrap.Background = BrushOf("HoverBrush") ?? Brushes.Transparent;
+            rowWrap.MouseLeave += (_, _) => rowWrap.Background = Brushes.Transparent;
+            rowWrap.MouseLeftButtonUp += (_, _) => OpenLogView(LogFilter.ForGroup(g.Name, DateTime.Now));
+            ReportGroupHost.Children.Add(rowWrap);
         }
     }
 
@@ -5814,6 +6046,9 @@ public partial class MainWindow : Window
             {
                 Margin = new Thickness(0, 0, 8, 0),
                 VerticalAlignment = VerticalAlignment.Bottom,
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Hand,
+                ToolTip = $"{day:MM-dd}　{(seconds > 0 ? Minutes((int)Math.Round(seconds)) : "没跑")}",
             };
 
             var bar = new Border
@@ -5825,8 +6060,9 @@ public partial class MainWindow : Window
                     ? (isToday ? BrushOf("BrandBrush") : BrushOf("BorderStrongBrush"))
                     : BrushOf("BorderBrush"),
                 VerticalAlignment = VerticalAlignment.Bottom,
-                ToolTip = $"{day:MM-dd}　{(seconds > 0 ? Minutes((int)Math.Round(seconds)) : "没跑")}",
             };
+            col.MouseEnter += (_, _) => bar.Opacity = 0.78;
+            col.MouseLeave += (_, _) => bar.Opacity = 1.0;
             col.Children.Add(bar);
 
             col.Children.Add(new TextBlock
@@ -7449,6 +7685,16 @@ public partial class MainWindow : Window
             ShieldText.Text = escort ? "护航中" : !enabled ? "守护已关闭"
                 : showAlert ? "守护中 · 近期有告警" : "守护中";
 
+            if (ShieldTip.Visibility == Visibility.Visible) UpdateShieldTipText();
+        }
+        catch { }
+    }
+
+    private void UpdateShieldTipText()
+    {
+        try
+        {
+            bool enabled = AppState.Settings.SentinelEnabled;
             var h = SentinelService.HealthSnapshot();
             var escortItems = KeepAwakeService.ActiveSummary();
             ShieldTipText.Text =
@@ -7465,7 +7711,11 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private void Shield_MouseEnter(object sender, MouseEventArgs e) => ShieldTip.Visibility = Visibility.Visible;
+    private void Shield_MouseEnter(object sender, MouseEventArgs e)
+    {
+        UpdateShieldTipText();
+        ShieldTip.Visibility = Visibility.Visible;
+    }
     private void Shield_MouseLeave(object sender, MouseEventArgs e) => ShieldTip.Visibility = Visibility.Collapsed;
 
     private void OnSentinelEvent(SentinelEventKind kind, string payload)
@@ -7485,6 +7735,7 @@ public partial class MainWindow : Window
                 RefreshLiveStrip();
             // v1.15：主卡要跟着「开跑 / 停下 / 出岔子」换脸，次秒级延迟就够，
             // 但事件来了先刷一次，免得 1 秒定时器正好错过这一刻。
+            InvalidateHomeHeroCaches();
             RefreshHomeHero();
         }));
     }
@@ -7505,6 +7756,27 @@ public partial class MainWindow : Window
     /// 空闲时没有话可说，就不该占一行。
     /// </para>
     /// </summary>
+    private bool _livePulseRunning;
+
+    private void SetLiveDotPulse(bool active)
+    {
+        if (LiveDot == null) return;
+        bool want = active && IsVisible && WindowState != WindowState.Minimized;
+        if (want == _livePulseRunning) return;
+        _livePulseRunning = want;
+        if (!want)
+        {
+            LiveDot.BeginAnimation(OpacityProperty, null);
+            LiveDot.Opacity = 1;
+            return;
+        }
+        LiveDot.BeginAnimation(OpacityProperty, new DoubleAnimation(1.0, 0.3, TimeSpan.FromSeconds(1.4))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+        });
+    }
+
     private void RefreshLiveStrip()
     {
         try
@@ -7522,10 +7794,12 @@ public partial class MainWindow : Window
             if (!snap.Running)
             {
                 LiveStrip.Visibility = Visibility.Collapsed;
+                SetLiveDotPulse(false);
                 return;
             }
 
             LiveStrip.Visibility = Visibility.Visible;
+            SetLiveDotPulse(true);
 
             // 项与项之间的那段等待：这时上一项已经跑完、下一项还没开始，
             // 再报「某某组 · 已跑 12 分」就是在说过去的事。改成「间隔中 + 还有多久」。
@@ -7697,6 +7971,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private bool? _lastStepsShown;
+    private string _lastFirstVisitSig = "";
+    private string _lastRecapSig = "";
+    private string _lastRecapInputKey = "";
+    private DateTime _lastRecapAt = DateTime.MinValue;
+
+    private void InvalidateHomeHeroCaches()
+    {
+        _lastStepsShown = null;
+        _lastFirstVisitSig = "";
+        _lastRecapSig = "";
+        _lastRecapInputKey = "";
+        _lastRecapAt = DateTime.MinValue;
+    }
+
     /// <summary>
     /// v1.20 复盘：主卡下方那三两句。
     /// 只在「昨天/今天已经跑完」时出现——正在跑的时候主卡已经说了跑到哪，
@@ -7706,22 +7995,58 @@ public partial class MainWindow : Window
     {
         try
         {
-            HomeRecap.Children.Clear();
-
-            var input = BuildRecapInput();
+            var s = AppState.Settings;
+            var now = DateTime.Now;
             // v1.41 / M2-12：没走完五步的人不该看到「昨晚没跑」——
             // 他今天才装，昨天当然没跑。那句话在首屏读起来像指责。
-            bool show = input != null && !QueueService.IsRunning && AppState.Settings.OnboardingCompleted;
-            HomeRecap.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            if (!show || input == null) return;
+            if (QueueService.IsRunning || !s.OnboardingCompleted)
+            {
+                if (HomeRecap.Visibility != Visibility.Collapsed)
+                {
+                    HomeRecap.Children.Clear();
+                    HomeRecap.Visibility = Visibility.Collapsed;
+                }
+                _lastRecapSig = "";
+                _lastRecapInputKey = "";
+                return;
+            }
+
+            string inputKey = $"{s.LastRunAt}|{s.LastRunSeconds}|{now:yyyyMMdd}|{Theme.Mode}|{Theme.LastSchemeLight}";
+            if (inputKey == _lastRecapInputKey && (now - _lastRecapAt).TotalSeconds < 15) return;
+            _lastRecapInputKey = inputKey;
+            _lastRecapAt = now;
+
+            var input = BuildRecapInput();
+            if (input == null)
+            {
+                if (HomeRecap.Visibility != Visibility.Collapsed)
+                {
+                    HomeRecap.Children.Clear();
+                    HomeRecap.Visibility = Visibility.Collapsed;
+                }
+                _lastRecapSig = "";
+                return;
+            }
 
             var lines = Recap.Build(input);
             if (lines.Count == 0)
             {
-                HomeRecap.Visibility = Visibility.Collapsed;
+                if (HomeRecap.Visibility != Visibility.Collapsed)
+                {
+                    HomeRecap.Children.Clear();
+                    HomeRecap.Visibility = Visibility.Collapsed;
+                }
+                _lastRecapSig = "";
                 return;
             }
 
+            string sig = Theme.Mode + "|" + (Theme.LastSchemeLight ? "L" : "D") + "|" +
+                         string.Join("\n", lines.Select(l => ((int)l.Kind) + ":" + l.Text));
+            if (sig == _lastRecapSig && HomeRecap.Visibility == Visibility.Visible) return;
+            _lastRecapSig = sig;
+
+            HomeRecap.Children.Clear();
+            HomeRecap.Visibility = Visibility.Visible;
             foreach (var line in lines)
             {
                 HomeRecap.Children.Add(RecapLine(line));
@@ -7813,6 +8138,8 @@ public partial class MainWindow : Window
     /// <summary>引导三步。只在「什么都没配」时出现——配好之后这块是空的，不留坑。</summary>
     private void RenderHomeSteps(bool show)
     {
+        if (_lastStepsShown == show) return;
+        _lastStepsShown = show;
         HomeHeroSteps.Children.Clear();
         HomeHeroSteps.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         if (!show) return;
@@ -7838,11 +8165,17 @@ public partial class MainWindow : Window
     {
         try
         {
-            HomeFirstVisit.Children.Clear();
-
             bool onboarded = AppState.Settings.OnboardingCompleted;
-            HomeFirstVisit.Visibility = onboarded ? Visibility.Collapsed : Visibility.Visible;
-            if (onboarded) return;
+            if (onboarded)
+            {
+                if (HomeFirstVisit.Visibility != Visibility.Collapsed)
+                {
+                    HomeFirstVisit.Children.Clear();
+                    HomeFirstVisit.Visibility = Visibility.Collapsed;
+                }
+                _lastFirstVisitSig = "onboarded";
+                return;
+            }
 
             var s = AppState.Settings;
 
@@ -7850,6 +8183,13 @@ public partial class MainWindow : Window
             try { pathDone = ToolRunner.HasExecutable(ProfileRegistry.Get("bettergi")); } catch { }
             bool timeDone = s.ScheduleEnabled;
             bool ranDone = !string.IsNullOrEmpty(s.LastRunAt);
+
+            string sig = $"{onboarded}|{pathDone}|{timeDone}|{ranDone}|{Theme.Mode}|{Theme.LastSchemeLight}";
+            if (sig == _lastFirstVisitSig && HomeFirstVisit.Visibility == Visibility.Visible) return;
+            _lastFirstVisitSig = sig;
+
+            HomeFirstVisit.Children.Clear();
+            HomeFirstVisit.Visibility = Visibility.Visible;
 
             HomeFirstVisit.Children.Add(new TextBlock
             {
@@ -7878,13 +8218,16 @@ public partial class MainWindow : Window
     /// <summary>首访清单的一行：序号 + 文案 + 勾。整行可点，点了就跳到能完成它的地方。</summary>
     private UIElement FirstVisitRow(string no, string text, bool done, Action jump)
     {
-        var row = new Grid
+        var wrap = new Border
         {
-            Margin = new Thickness(0, 6, 0, 0),
-            Background = Brushes.Transparent,   // 透明底也要有，否则空白处点不中
+            Margin = new Thickness(-6, 4, -6, 0),
+            Padding = new Thickness(6, 5, 6, 5),
+            CornerRadius = new CornerRadius(7),
+            Background = Brushes.Transparent,
             Cursor = Cursors.Hand,
         };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -7939,12 +8282,15 @@ public partial class MainWindow : Window
             row.Children.Add(go);
         }
 
-        row.MouseLeftButtonUp += (_, _) =>
+        wrap.Child = row;
+        wrap.MouseEnter += (_, _) => wrap.Background = BrushOf("HoverBrush") ?? Brushes.Transparent;
+        wrap.MouseLeave += (_, _) => wrap.Background = Brushes.Transparent;
+        wrap.MouseLeftButtonUp += (_, _) =>
         {
             try { jump(); }
             catch (Exception ex) { LogService.LogEvent("首访清单跳转失败：" + ex.Message); }
         };
-        return row;
+        return wrap;
     }
 
     private UIElement HomeStep(string no, string title, string hint, bool active)
@@ -8050,6 +8396,7 @@ public partial class MainWindow : Window
             FindHintOf(toolId).Text = "";
             if (string.Equals(toolId, "bettergi", StringComparison.OrdinalIgnoreCase))
                 RefreshDetectedGroups(force: true);
+            InvalidateHomeHeroCaches();
             RefreshHomeHero();
             RefreshToolsSummary();
         }
@@ -8692,6 +9039,7 @@ public partial class MainWindow : Window
         RefreshToolCards();
         RefreshDetectedGroups(force: true);
         // v1.41 / M3-1：清单的勾选状态要跟着变——用户刚设完时间，第二行该打勾了。
+        InvalidateHomeHeroCaches();
         RefreshHomeHero();
     }
 
@@ -8782,6 +9130,7 @@ public partial class MainWindow : Window
         try { _groupScanTimer.Stop(); } catch { }
         try { _uiRefreshTimer.Stop(); } catch { }
         try { _statusBarTimer.Stop(); } catch { }
+        try { SetLiveDotPulse(false); } catch { }
         try { _hotkeys?.Dispose(); } catch { }
         try { _miniBar?.Close(); } catch { }
         _miniBar = null;
@@ -8797,7 +9146,7 @@ public partial class MainWindow : Window
     // ===== v1.8 / F15：命令面板（Ctrl+K）=====
 
     /// <summary>
-    /// Ctrl+K 打开命令面板。
+    /// Ctrl+K 打开命令面板；Esc 逐层返回；Ctrl+1..4 切页。
     /// 只在主窗拥有焦点时响应——游戏里按 Ctrl+K 不该把管家叫出来，
     /// 那件事交给全局热键（F9），两套机制职责分开。
     /// </summary>
@@ -8808,6 +9157,52 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             OpenCommandPalette();
+            return;
+        }
+        if (e.Key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            if (LogLayer?.Visibility == Visibility.Visible)
+            {
+                CloseLogView(keepHistory: true);
+                e.Handled = true;
+            }
+            else if (_page == Pager.Settings && _settingsPane != SettingsPane.None)
+            {
+                BackToSettingsHome();
+                e.Handled = true;
+            }
+            else if (_addingTool)
+            {
+                _addingTool = false;
+                RenderToolRows();
+                e.Handled = true;
+            }
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Alt && e.Key == Key.System && e.SystemKey == Key.Left)
+        {
+            if (_page == Pager.Settings && _settingsPane != SettingsPane.None)
+            {
+                BackToSettingsHome();
+                e.Handled = true;
+            }
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.OriginalSource is not TextBoxBase)
+        {
+            int? targetPage = e.Key switch
+            {
+                Key.D1 or Key.NumPad1 => Pager.Report,
+                Key.D2 or Key.NumPad2 => Pager.Home,
+                Key.D3 or Key.NumPad3 => Pager.Settings,
+                Key.D4 or Key.NumPad4 => Pager.Plugins,
+                _ => null,
+            };
+            if (targetPage.HasValue)
+            {
+                ShowPage(targetPage.Value);
+                e.Handled = true;
+            }
         }
     }
 
@@ -8972,6 +9367,7 @@ public partial class MainWindow : Window
         AppState.Settings.Theme = next;
         AppState.SaveSettings();
         Theme.Set(next);
+        SyncThemeSeg();
         AppState.PublishLog("主题：" + (next == "Light" ? "浅色" : "深色"));
     }
 

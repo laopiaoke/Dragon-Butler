@@ -166,6 +166,7 @@ public static class Theme
                 res[kv.Key + "Brush"] = brush;
             }
             _appliedLight = light;
+            LastSchemeLight = light;
             if (Mode != "Custom")
             {
                 res["BgArtBrush"] = Brushes.Transparent;

@@ -181,46 +181,71 @@ public static class ControlApi
     {
         int refresh = Math.Clamp(refreshSeconds, 2, 60);
         string state = running ? "正在跑" : "空闲";
-        string stateColor = running ? "#3DDC84" : "#7A8699";
         string current = string.IsNullOrWhiteSpace(currentTool) ? "—" : Escape(currentTool);
         string ev = string.IsNullOrWhiteSpace(lastEvent) ? "—" : Escape(lastEvent);
+        int pct = totalTools <= 0 ? 0 : Math.Clamp((int)Math.Round(doneTools * 100.0 / totalTools), 0, 100);
+        string updated = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
 
-        var sb = new StringBuilder(1600);
+        var sb = new StringBuilder(2800);
         sb.Append("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">");
-        sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">");
         sb.Append($"<meta http-equiv=\"refresh\" content=\"{refresh}\">");
         sb.Append($"<title>{Escape(title)}</title><style>");
-        sb.Append("*{box-sizing:border-box}body{margin:0;padding:16px;background:#12161C;color:#E6EAF2;");
-        sb.Append("font:14px/1.55 -apple-system,'Segoe UI','Microsoft YaHei',sans-serif}");
-        sb.Append("h1{margin:0 0 12px;font-size:16px;font-weight:600;letter-spacing:.02em}");
-        sb.Append(".card{background:#1A2029;border:1px solid #2A3341;border-radius:14px;padding:14px 16px;margin-bottom:10px}");
-        sb.Append(".row{display:flex;justify-content:space-between;align-items:center;padding:5px 0}");
-        sb.Append(".k{color:#8A94A6;font-size:12.5px}.v{font-variant-numeric:tabular-nums}");
-        sb.Append($".dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:{stateColor};margin-right:7px}}");
-        sb.Append($".state{{color:{stateColor};font-weight:600}}");
-        sb.Append(".bar{height:6px;border-radius:3px;background:#2A3341;overflow:hidden;margin-top:10px}");
-        sb.Append(".bar>i{display:block;height:100%;background:#4C8DFF;border-radius:3px}");
-        sb.Append(".foot{color:#5E6878;font-size:11.5px;margin-top:14px;line-height:1.6}");
-        sb.Append("</style></head><body>");
-        sb.Append($"<h1>{Escape(title)}</h1>");
+        sb.Append(":root{--bg:#0D0F13;--card:#16191F;--card2:#1C2027;--border:#252A32;");
+        sb.Append("--text:#EEF1F4;--muted:#A3ABB4;--dim:#8A929C;--brand:#3DDC84;");
+        sb.Append("--brand-soft:rgba(61,220,132,.14);--brand-text:#3DDC84;");
+        sb.Append("--idle:#7A8699;--idle-soft:rgba(122,134,153,.14);--track:#232830}");
+        sb.Append("@media (prefers-color-scheme:light){:root{--bg:#EEF1F5;--card:#FFFFFF;--card2:#F6F8FA;");
+        sb.Append("--border:#E1E6EB;--text:#12161B;--muted:#58616B;--dim:#667080;--brand:#0F9D58;");
+        sb.Append("--brand-soft:#E2F3EB;--brand-text:#0C6B3D;--idle:#667080;--idle-soft:#ECEFF4;--track:#E4E9EF}}");
+        sb.Append("*{box-sizing:border-box}body{margin:0;");
+        sb.Append("padding:max(16px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom));");
+        sb.Append("background:var(--bg);color:var(--text);");
+        sb.Append("font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif}");
+        sb.Append(".wrap{max-width:460px;margin:0 auto}");
+        sb.Append(".hd{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:2px 2px 14px}");
+        sb.Append(".brand{display:flex;align-items:center;gap:8px;min-width:0}");
+        sb.Append("h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}");
+        sb.Append(".pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;flex-shrink:0}");
+        sb.Append(".pill.run{background:var(--brand-soft);color:var(--brand-text)}");
+        sb.Append(".pill.idle{background:var(--idle-soft);color:var(--muted)}");
+        sb.Append(".dot{width:7px;height:7px;border-radius:50%;background:currentColor}");
+        sb.Append("@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}");
+        sb.Append(".pill.run .dot{animation:pulse 1.6s ease-in-out infinite}");
+        sb.Append(".card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:10px}");
+        sb.Append(".row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:5px 0}");
+        sb.Append(".k{color:var(--muted);font-size:12.5px;flex-shrink:0}");
+        sb.Append(".v{font-variant-numeric:tabular-nums;text-align:right;overflow:hidden;text-overflow:ellipsis}");
+        sb.Append(".prog{margin-top:10px}.prog-h{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-bottom:6px}");
+        sb.Append(".bar{height:6px;border-radius:999px;background:var(--track);overflow:hidden}");
+        sb.Append(".bar>i{display:block;height:100%;background:var(--brand);border-radius:999px}");
+        sb.Append($".ev-box{{margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--card2);border-left:3px solid {(running ? "var(--brand)" : "var(--border)")};word-break:break-word;line-height:1.55}}");
+        sb.Append(".foot{color:var(--dim);font-size:11.5px;margin-top:14px;line-height:1.65;padding:0 2px}");
+        sb.Append("</style></head><body><div class=\"wrap\">");
+
+        sb.Append("<div class=\"hd\"><div class=\"brand\">");
+        sb.Append("<svg width=\"18\" height=\"18\" viewBox=\"0 0 512 512\" fill=\"none\" aria-hidden=\"true\">");
+        sb.Append("<path d=\"M408.6,215.1 A158,158 0 1 1 296.9,103.4\" stroke=\"var(--brand)\" stroke-width=\"46\" stroke-linecap=\"round\"/>");
+        sb.Append("<circle cx=\"367.7\" cy=\"144.3\" r=\"46\" fill=\"var(--brand)\"/>");
+        sb.Append("<path d=\"M256,268 L256,200 M256,268 L211,294\" stroke=\"var(--brand)\" stroke-width=\"16\" stroke-linecap=\"round\"/>");
+        sb.Append("<circle cx=\"256\" cy=\"268\" r=\"9\" fill=\"var(--brand)\"/></svg>");
+        sb.Append($"<h1>{Escape(title)}</h1></div>");
+        sb.Append($"<span class=\"pill {(running ? "run" : "idle")}\"><i class=\"dot\"></i>{state}</span></div>");
 
         sb.Append("<div class=\"card\">");
-        sb.Append($"<div class=\"row\"><span class=\"k\">状态</span><span class=\"state\"><span class=\"dot\"></span>{state}</span></div>");
         sb.Append($"<div class=\"row\"><span class=\"k\">当前</span><span class=\"v\">{current}</span></div>");
         sb.Append($"<div class=\"row\"><span class=\"k\">进度</span><span class=\"v\">{doneTools} / {totalTools}</span></div>");
         if (unfinishedTools > 0)
             sb.Append($"<div class=\"row\"><span class=\"k\">待跑</span><span class=\"v\">{unfinishedTools} 项</span></div>");
-
-        int pct = totalTools <= 0 ? 0 : (int)Math.Round(doneTools * 100.0 / totalTools);
-        sb.Append($"<div class=\"bar\"><i style=\"width:{Math.Clamp(pct, 0, 100)}%\"></i></div>");
-        sb.Append("</div>");
+        sb.Append($"<div class=\"prog\"><div class=\"prog-h\"><span>完成度</span><span class=\"v\">{pct}%</span></div>");
+        sb.Append($"<div class=\"bar\"><i style=\"width:{pct}%\"></i></div></div></div>");
 
         sb.Append("<div class=\"card\"><div class=\"k\">最后一条事件</div>");
-        sb.Append($"<div style=\"margin-top:6px;word-break:break-word\">{ev}</div></div>");
+        sb.Append($"<div class=\"ev-box\">{ev}</div></div>");
 
-        sb.Append($"<div class=\"foot\">只读页面 · 每 {refresh} 秒自动刷新 · 没有控制按钮<br>");
-        sb.Append("开跑或停止，请在运行管家的电脑上操作。</div>");
-        sb.Append("</body></html>");
+        sb.Append($"<div class=\"foot\">只读页面 · 更新于 {updated} · 每 {refresh} 秒自动刷新<br>");
+        sb.Append("没有控制按钮，开跑或停止请在运行管家的电脑上操作。</div>");
+        sb.Append("</div></body></html>");
         return sb.ToString();
     }
 
