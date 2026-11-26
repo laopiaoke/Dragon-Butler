@@ -253,8 +253,7 @@ public static class WebhookHub
         {
             case ApiAction.Start:
                 if (QueueService.IsRunning) return (false, "队列正在运行");
-                _ = QueueService.StartAsync(QueueTrigger.Manual);
-                return (true, "已请求开跑");
+                return LaunchResult(QueueService.StartAsync(QueueTrigger.Manual), "已请求开跑");
 
             case ApiAction.Stop:
                 if (!QueueService.IsRunning) return (false, "队列没在运行");
@@ -266,12 +265,18 @@ public static class WebhookHub
                 if (QueueService.IsRunning) return (false, "队列正在运行，等它结束");
                 var profile = ProfileRegistry.Get(toolId);
                 if (profile == null) return (false, "未知工具：" + toolId);
-                _ = QueueService.StartSingleAsync(profile, QueueTrigger.Manual);
-                return (true, "已请求单跑 " + profile.DisplayName);
+                return LaunchResult(QueueService.StartSingleAsync(profile, QueueTrigger.Manual), "已请求单跑 " + profile.DisplayName);
 
             default:
                 return (false, "不支持的动作");
         }
+    }
+
+    private static (bool Ok, string Message) LaunchResult(Task<bool> run, string message)
+    {
+        if (run.IsCompleted && !run.GetAwaiter().GetResult())
+            return (false, "没能开跑，请查看管家的队列和收尾状态。");
+        return (true, message);
     }
 
     /// <summary>停止监听。</summary>

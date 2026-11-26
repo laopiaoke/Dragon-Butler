@@ -81,10 +81,9 @@ internal static partial class Program
 
             // 一条龙配置：只收合法名
             File.WriteAllText(Path.Combine(oneDragon, "日常.json"), "{}");
-            File.WriteAllText(Path.Combine(oneDragon, "坏:名字.json"), "{}");
             File.WriteAllText(Path.Combine(oneDragon, "readme.txt"), "x");
             var bgi = SettingsBackup.CollectBgiFiles(oneDragon, File.Exists,
-                dir => Directory.GetFiles(dir));
+                dir => Directory.GetFiles(dir).Append(Path.Combine(dir, "坏:名字.json")));
             Check("收一条龙/只收合法 json", bgi.Count == 1, string.Join(",", bgi));
             Check("收一条龙/拒绝非法名", !bgi.Any(n => n.Contains(":")));
 
@@ -94,6 +93,7 @@ internal static partial class Program
             {
                 new("settings.json", Path.Combine(cfg, "settings.json")),
                 new("run_journal.json", Path.Combine(cfg, "run_journal.json")),
+                new(SettingsBackup.BgiEntry + "日常.json", Path.Combine(oneDragon, "日常.json")),
                 new("settings.json.bak", Path.Combine(cfg, "nope.log")),   // 不存在的会被跳过
             };
             var write = SettingsBackup.WritePackage(zip, pairs, new DateTime(2026, 11, 16, 8, 30, 0));
@@ -118,10 +118,22 @@ internal static partial class Program
             // ---- 7) 解包：正常恢复 ----
             string dest = Path.Combine(work, "restore", "config");
             var ex = SettingsBackup.Extract(zip, dest, null, false);
-            Check("解包/恢复了 2 个", ex.Restored == 2, ex.Message);
+            Check("解包/恢复了 2 个", ex.Ok && ex.Restored == 2, ex.Message);
             Check("解包/settings 到位", File.Exists(Path.Combine(dest, "settings.json")));
             Check("解包/内容一致", File.ReadAllText(Path.Combine(dest, "settings.json")).Contains("\"a\":1"));
             Check("解包/没多出东西", Directory.GetFiles(dest).Length == 2);
+
+            string bgiDest = Path.Combine(work, "restore", "OneDragon");
+            var withBgi = SettingsBackup.Extract(zip, dest, bgiDest, true);
+            Check("解包/自己打的包可以恢复一条龙配置", withBgi.Ok && withBgi.Restored == 3
+                && File.ReadAllText(Path.Combine(bgiDest, "日常.json")) == "{}", withBgi.Message);
+
+            // 第二个文件目标是目录，制造写入失败；第一个已完成也不能报全成功。
+            string partial = Path.Combine(work, "partial");
+            Directory.CreateDirectory(Path.Combine(partial, "run_journal.json"));
+            var failed = SettingsBackup.Extract(zip, partial, null, false);
+            Check("解包/部分恢复报失败且保留计数", !failed.Ok && failed.Restored == 1, failed.Message);
+            Check("解包/部分恢复没有留下半写入文件", Directory.GetFiles(partial).Length == 1);
 
             // ---- 8) 解包：坏包（自己造一个带 .. 的 zip） ----
             string evilZip = Path.Combine(work, "evil.zip");

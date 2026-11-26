@@ -71,9 +71,7 @@ public partial class MainWindow : Window
     private bool _suppressToggle;
     private bool _suppressChips;
     private bool _suppressNotifyChips;
-    private DateTime _lastScheduleRun = DateTime.MinValue;
 
-    private readonly DispatcherTimer _scheduleTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _statusBarTimer = new();
     private readonly DispatcherTimer _groupScanTimer = new() { Interval = TimeSpan.FromSeconds(8) };
@@ -166,8 +164,6 @@ public partial class MainWindow : Window
             StartBackgroundUpdateCheck();
         };
 
-        _scheduleTimer.Tick += (_, _) => { CheckSchedule(); CheckAway(); };
-        _scheduleTimer.Start();
         _countdownTimer.Start();
         _groupScanTimer.Start();
         _uiRefreshTimer.Start();
@@ -874,79 +870,6 @@ public partial class MainWindow : Window
             TbCatchUp.Text = "补跑：" + SchedulePlanner.WindowText(s.ScheduleCatchUpMinutes);
         }
         catch { }
-    }
-
-    /// <summary>
-    /// v1.20 / 奇思妙想 #2：每 30 秒采一次样，看看你是不是走开了。
-    /// <para>
-    /// 判定逻辑全在 <see cref="AwaySense"/>（纯函数）；这里只管三件事：
-    /// 要不要问、要不要开、以及开完把话说明白。判错的代价是「你还在它就开跑了」，
-    /// 所以 <see cref="AwaySense.ConfirmTicks"/> 次连续判定才认账，中途一动立刻清零。
-    /// </para>
-    /// </summary>
-    private void CheckAway()
-    {
-        try
-        {
-            var s = AppState.Settings;
-            if (!s.AwayStartEnabled) return;
-
-            // 定时优先：两个都开时按定时走，因为定时能说清「几点」，而它说不清「你在不在」。
-            if (s.ScheduleEnabled) return;
-
-            var snap = AwayWatcher.Sample();
-            bool ranToday = QueueService.DoneToolIdsToday().Count > 0
-                            || AppState.Settings.LastRunAt is { Length: > 0 } last
-                               && DateTime.TryParse(last, out var at) && at.Date == DateTime.Today;
-
-            if (AwaySense.ShouldStart(snap, QueueService.IsRunning, ranToday))
-            {
-                DecisionLog.Add(DecisionSource.Schedule, "你走开，那就现在跑",
-                    $"连续 {AwaySense.ConfirmTicks} 次判定都没人动键鼠，已经安静 {AwaySense.Describe(snap).Split('，').Last()}");
-                AppState.PublishLog("✓ 你好像走了，开始跑今天的队列");
-                LogService.LogEvent("触发器：一走开就跑 —— " + AwaySense.Describe(snap));
-                AwayWatcher.Reset();       // 跑过一次就清零，免得你回来坐下又触发
-                _ = QueueService.StartAsync(QueueTrigger.Timer);
-                UpdateScheduleStatus();
-            }
-        }
-        catch { }
-    }
-
-    /// <summary>每 30 秒检查一次：到点（或在补跑窗口内且该计划点没跑过）→ 触发队列（定时触发）。</summary>
-    private void CheckSchedule()
-    {
-        try
-        {
-            var s = AppState.Settings;
-            var decision = SchedulePlanner.Decide(
-                s.ScheduleEnabled,
-                QueueService.IsRunning,
-                s.ScheduleHour,
-                s.ScheduleMinute,
-                s.ScheduleWeekdays,
-                s.ScheduleCatchUpMinutes,
-                ParseLastScheduleRun(s),
-                DateTime.Now);
-
-            if (!decision.ShouldRun) return;
-
-            // 先记录，再启动——启动失败也认这个计划点，避免每 30 秒重试一次刷屏
-            s.LastScheduleRunAt = (decision.DueAt ?? DateTime.Now).ToString("yyyy-MM-dd HH:mm");
-            _lastScheduleRun = DateTime.Now;
-            AppState.SaveSettings();
-
-            LogService.LogEvent("定时：" + decision.Reason + "，触发队列");
-            _ = QueueService.StartAsync(QueueTrigger.Timer);
-        }
-        catch { }
-    }
-
-    /// <summary>读取「上次因定时而跑的计划点」；旧配置只有 LastRunAt 时退化为不记录（宁可补跑一次）。</summary>
-    private static DateTime? ParseLastScheduleRun(AppSettings s)
-    {
-        if (DateTime.TryParse(s.LastScheduleRunAt, out var at)) return at;
-        return null;
     }
 
     // ===== 队列卡 =====
@@ -6428,20 +6351,6 @@ public partial class MainWindow : Window
                     Path.GetFileName(dlg.FileName), AppDialog.Kind.Warning, "恢复设置", "恢复", "算了", owner: this))
                 return;
 
-            // 先给现在这份留底
-            var current = new List<KeyValuePair<string, string>>();
-            foreach (var name in SettingsBackup.CollectFiles(cfgDir, File.Exists))
-                current.Add(new(name, Path.Combine(cfgDir, name)));
-            string safety = Path.Combine(SettingsBackup.Dir, "恢复前-" + SettingsBackup.FileName(DateTime.Now));
-            var (bOk, bMsg) = SettingsBackup.WritePackage(safety, current, DateTime.Now);
-            if (!bOk)
-            {
-                AppDialog.Show("没能先备份现在这份，为了不丢东西这次没有恢复。", bMsg,
-                    AppDialog.Kind.Warning, "恢复设置", owner: this);
-                AppState.PublishLog("✗ 恢复中止（自动备份失败）：" + bMsg);
-                return;
-            }
-
             string? oneDragonDir = null;
             if (hasBgi)
             {
@@ -6455,11 +6364,34 @@ public partial class MainWindow : Window
                 }
             }
 
-            var (restored, skipped, msg) = SettingsBackup.Extract(dlg.FileName, cfgDir, oneDragonDir, oneDragonDir != null);
-            if (restored == 0)
+            // 会被覆盖的两份配置都要先留底，失败时才有可用的恢复入口。
+            var current = new List<KeyValuePair<string, string>>();
+            foreach (var name in SettingsBackup.CollectFiles(cfgDir, File.Exists))
+                current.Add(new(name, Path.Combine(cfgDir, name)));
+            if (oneDragonDir != null)
             {
-                AppDialog.Show(msg, null, AppDialog.Kind.Warning, "恢复设置", owner: this);
-                AppState.PublishLog("✗ 恢复没成功：" + msg);
+                foreach (var name in SettingsBackup.CollectBgiFiles(oneDragonDir, File.Exists, Directory.GetFiles))
+                    current.Add(new(SettingsBackup.BgiEntry + name, Path.Combine(oneDragonDir, name)));
+            }
+            // 同一分钟内再次尝试恢复，也不能覆盖第一次恢复前的原始备份。
+            DateTime now = DateTime.Now;
+            string safety = Path.Combine(SettingsBackup.Dir, $"恢复前-{now:yyyyMMdd-HHmmss-fff}.zip");
+            var (bOk, bMsg) = SettingsBackup.WritePackage(safety, current, now);
+            if (!bOk)
+            {
+                AppDialog.Show("没能先备份现在这份，为了不丢东西这次没有恢复。", bMsg,
+                    AppDialog.Kind.Warning, "恢复设置", owner: this);
+                AppState.PublishLog("✗ 恢复中止（自动备份失败）：" + bMsg);
+                return;
+            }
+
+            var (ok, restored, skipped, msg) = SettingsBackup.Extract(dlg.FileName, cfgDir, oneDragonDir, oneDragonDir != null);
+            if (!ok)
+            {
+                string status = restored == 0 ? "没有恢复任何文件。" : $"只恢复了 {restored} 个文件，还有文件没恢复。";
+                AppState.PublishLog("✗ " + status + " " + msg);
+                AppDialog.Show(status, $"{msg}\n恢复前的备份：{safety}", AppDialog.Kind.Warning,
+                    "恢复设置", "知道了", "打开备份位置", () => RevealInExplorer(safety), this, safety);
                 return;
             }
 
@@ -8816,7 +8748,7 @@ public partial class MainWindow : Window
         // 直接关掉窗口，位置得在那之前存下来。
         SaveWindowBounds();
 
-        if (App.ForceExit || !AppState.Settings.StayInTray) return;
+        if (App.ForceExit || App.Instance?.IsTrimming == true || !AppState.Settings.StayInTray) return;
         e.Cancel = true;
         Hide();
         // v1.35：不弹了。
@@ -8838,15 +8770,14 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// v1.21 / 内存方案 B 的一半：先把所有定时器停掉，再让 App 销毁本窗。
+    /// 先停界面定时器，再让 App 销毁本窗。后台触发由 App 持有。
     ///
-    /// 顺序不能反。这五个 <see cref="DispatcherTimer"/> 的 Tick 是闭包，
+    /// 顺序不能反。这四个 <see cref="DispatcherTimer"/> 的 Tick 是闭包，
     /// 闭包里抓着 this——只要还有一个在跑，WeakReference 就永远不会变 null，
     /// 关掉窗口也回收不掉（实测：先 Close 再置 null 仍存活，先停再 Close 才回收）。
     /// </summary>
     internal void PrepareForTrim()
     {
-        try { _scheduleTimer.Stop(); } catch { }
         try { _countdownTimer.Stop(); } catch { }
         try { _groupScanTimer.Stop(); } catch { }
         try { _uiRefreshTimer.Stop(); } catch { }

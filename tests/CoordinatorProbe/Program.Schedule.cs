@@ -84,6 +84,26 @@ internal static partial class Program
         Check("窗口文字", SchedulePlanner.WindowText(120).Contains("2 小时"), SchedulePlanner.WindowText(120));
         Check("窗口关闭文字", SchedulePlanner.WindowText(0).Contains("关闭"), SchedulePlanner.WindowText(0));
 
+        // 不创建主窗，直接驱动常驻应用每次计时走的同一条路径。
+        var s = AppState.Settings;
+        s.ScheduleEnabled = true;
+        s.ScheduleHour = 8;
+        s.ScheduleMinute = 0;
+        s.ScheduleWeekdays = 0x7F;
+        s.LastScheduleRunAt = "";
+        s.Queue.Clear();
+        int starts = 0;
+        void CountStart() { if (QueueService.IsRunning) starts++; }
+        QueueService.StateChanged += CountStart;
+        try
+        {
+            ScheduleTrigger.Check(fri0800);
+            ScheduleTrigger.Check(fri0800.AddSeconds(30));
+            Check("无主窗仍触发，到点只触发一次", starts == 1 &&
+                DateTime.TryParse(s.LastScheduleRunAt, out var last) && last == fri0800);
+        }
+        finally { QueueService.StateChanged -= CountStart; }
+
         Console.WriteLine("RESULT schedule fails=" + fails);
         return fails == 0 ? 0 : 1;
     }

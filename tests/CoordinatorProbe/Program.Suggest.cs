@@ -209,7 +209,7 @@ internal static partial class Program
     }
 
     /// <summary>跑完动作 DRYRUN：关机只写日志。</summary>
-    private static int RunAfterRun()
+    private static int RunAfterRun(string stub)
     {
         var fails = new List<string>();
         void Check(string name, bool ok, string detail = "")
@@ -273,6 +273,30 @@ internal static partial class Program
         AppState.Settings.AfterRunOnFailure = false;
         AfterRunActionService.Execute(new AfterRunContext { Total = 2, Success = 2, HasFailure = false });
         AfterRunActionService.Execute(new AfterRunContext { Total = 2, Success = 1, HasFailure = true });
+
+        // 走真实队列收尾，用 DRYRUN 观察是否会授权电源动作。
+        var s = AppState.Settings;
+        s.KeepAwakeEnabled = false;
+        var profile = Stub("probe-afterrun", stub, "--seconds 1 --exit 0");
+        string log = Path.Combine(LogService.Dir, DateTime.Now.ToString("yyyy-MM-dd") + "_运行.log");
+        int CountLog(string text) => File.ReadLines(log).Count(line => line.Contains(text, StringComparison.Ordinal));
+        int powerActions = CountLog("DRYRUN: 将执行");
+        foreach (string action in new[] { "Sleep", "Shutdown" })
+        {
+            s.AfterRunAction = action;
+            s.AfterRunOnFailure = true;
+            QueueService.ToggleSkipOnce(profile.ToolId);
+            QueueService.RunProfilesAsync(new[] { profile }, QueueTrigger.Manual).GetAwaiter().GetResult();
+            Check("实际收尾/全跳过不授权 " + action, CountLog("DRYRUN: 将执行") == powerActions);
+        }
+
+        s.AfterRunAction = "RunAgain";
+        s.Queue = new() { new QueueEntry { ToolId = profile.ToolId, Enabled = true } };
+        ProfileRegistry.Save(profile);
+        int reruns = CountLog("跑完动作：再跑一轮");
+        Check("实际收尾/补跑走完正常队列", QueueService.StartRerunAsync().GetAwaiter().GetResult()
+            && QueueService.LastResults.Any(r => r.State == ToolRunState.Done));
+        Check("实际收尾/补跑不会再排下一轮", CountLog("跑完动作：再跑一轮") == reruns);
 
         // ---- OpenApp：路径不存在时不该抛、只写日志 ----
         AppState.Settings.AfterRunAction = "OpenApp";

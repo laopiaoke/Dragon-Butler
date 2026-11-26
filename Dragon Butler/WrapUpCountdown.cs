@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 
 namespace DragonButler;
 
@@ -39,6 +38,7 @@ public static class WrapUpCountdown
     private static WrapUpKind _kind;
     private static DateTime _deadline;
     private static bool _active;
+    private static bool _sleepInProgress;
     private static string? _lastEndReason;
     // 上一次通知界面时剩下几秒。定时器 200ms 一跳，但界面按秒刷新就够——
     // 不记这个的话每秒会把整页重算五次，而已有的 uiRefreshTimer 也在跑。
@@ -103,7 +103,7 @@ public static class WrapUpCountdown
         // 这时候开一个「60 秒后关机」的提示条就是骗人。
         if (kind == WrapUpKind.Shutdown)
         {
-            if (!QueueService.RequestSystemShutdown(out string detail))
+            if (!QueueService.RequestSystemShutdown(WindowSeconds, out string detail))
             {
                 LogService.LogEvent($"关机失败：{detail}");
                 NotifyService.Show(NotifyLevel.Warning, "龙管家", $"该关机了，但没能排上（{detail}）。电脑还开着。");
@@ -120,6 +120,7 @@ public static class WrapUpCountdown
             _lastEndReason = null;
             _deadline = DateTime.Now.AddSeconds(WindowSeconds);
             _lastNotifiedSecond = WindowSeconds;
+            if (kind == WrapUpKind.Shutdown) QueueService.MarkShutdownPending(WindowSeconds);
             _timer?.Dispose();
             // 200ms 一跳：界面按秒读 RemainingSeconds，秒数看起来是连续的，
             // 而 60 秒归零那一下不会因为 Timer 抖动晚半秒才执行。
@@ -130,12 +131,6 @@ public static class WrapUpCountdown
             ? $"收尾倒计时：{WindowSeconds} 秒后关机（shutdown /s /t {WindowSeconds} 已发出）"
             : $"收尾倒计时：{WindowSeconds} 秒后睡眠（进程内倒计时）");
 
-        if (kind == WrapUpKind.Shutdown)
-        {
-            // 系统的倒计时已经跑起来了，界面得知道有这么一个待关机状态。
-            QueueService.MarkShutdownPending();
-        }
-
         NotifyService.Show(NotifyLevel.Warning, "龙管家",
             $"队列完成，{WindowSeconds} 秒后{NameOf(kind)}。想反悔就在主页点「取消」，也可以点「立即执行」。");
 
@@ -143,101 +138,79 @@ public static class WrapUpCountdown
         return true;
     }
 
-    /// <summary>
-    /// 取消这次收尾。关机要真的把系统倒计时撤掉才算取消成功。
-    /// </summary>
-    /// <returns>取消是否成功。失败时窗口保持打开——不能让界面显示「已取消」而系统照样关机。</returns>
-    public static bool Cancel()
+    /// <summary>取消这次收尾；系统未确认撤销关机时，保留倒计时。</summary>
+    public static bool Cancel() => Cancel(forNewRun: false);
+
+    internal static bool TryCancelForNewRun() => Cancel(forNewRun: true);
+
+    private static bool Cancel(bool forNewRun)
     {
         WrapUpKind kind;
         lock (Gate)
         {
-            if (!_active) return false;
+            if (_sleepInProgress)
+            {
+                if (forNewRun) NotifyService.Show(NotifyLevel.Warning, "龙管家", "电脑正在执行睡眠，这次没有开跑。");
+                return false;
+            }
+            if (!_active)
+            {
+                // 界面倒计时归零时，系统仍可能在处理关机。
+                return forNewRun && (!QueueService.IsShutdownPending || QueueService.CancelShutdown());
+            }
             kind = _kind;
+            if (kind == WrapUpKind.Shutdown && !QueueService.CancelShutdown()) return false;
+            CloseWindow($"收尾已取消（{NameOf(kind)}）");
         }
 
-        if (kind == WrapUpKind.Shutdown && !QueueService.CancelShutdown())
-        {
-            // 撤销失败：状态留在窗口里，用户还能再试一次。
-            LogService.LogEvent("收尾倒计时：撤销系统关机失败，窗口保持打开");
-            NotifyService.Show(NotifyLevel.Warning, "龙管家",
-                "没能撤掉关机计划。倒计时可能还在，请再点一次，或者手动运行 shutdown /a。");
-            return false;
-        }
-
-        CloseWindow($"收尾已取消（{NameOf(kind)}）");
-        DecisionLog.Add(DecisionSource.System, $"收尾已取消（{NameOf(kind)}）",
-            $"队列跑完之后本来要{NameOf(kind)}，你在反悔窗口里点了取消，电脑继续开着。");
-        NotifyService.Show(NotifyLevel.Info, "龙管家", $"已取消{NameOf(kind)}，电脑继续运行。");
+        if (forNewRun)
+            DecisionLog.Add(DecisionSource.System, "收尾自动取消：队列又跑起来了",
+                $"新的运行要开始，上一轮的{NameOf(kind)}已取消。");
+        else
+            DecisionLog.Add(DecisionSource.System, $"收尾已取消（{NameOf(kind)}）",
+                $"你取消了队列跑完后的{NameOf(kind)}。");
+        if (kind == WrapUpKind.Sleep)
+            NotifyService.Show(NotifyLevel.Info, "龙管家", "已取消睡眠，电脑继续运行。");
         RaiseChanged();
         return true;
     }
 
     /// <summary>不等了，现在就执行。</summary>
-    /// <returns>是否真的执行了。</returns>
     public static bool RunNow()
     {
         WrapUpKind kind;
+        string detail = "";
+        bool accepted = true;
         lock (Gate)
         {
-            if (!_active) return false;
+            if (!_active || QueueService.IsRunning) return false;
             kind = _kind;
+            if (kind == WrapUpKind.Shutdown)
+            {
+                if (!QueueService.CancelShutdown()) return false;
+                accepted = QueueService.RequestSystemShutdown(0, out detail);
+                if (accepted) QueueService.MarkShutdownPending(0);
+            }
+            else
+            {
+                _sleepInProgress = true;
+            }
+            CloseWindow(accepted ? $"用户确认立即{NameOf(kind)}" : $"立即关机失败：{detail}");
         }
 
-        CloseWindow($"用户确认立即{NameOf(kind)}");
-        LogService.LogEvent($"收尾倒计时：用户点了立即执行（{NameOf(kind)}）");
+        if (!accepted)
+        {
+            LogService.LogEvent("立即关机失败：" + detail);
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", $"没能立即关机（{detail}）。电脑还开着。");
+            RaiseChanged();
+            return false;
+        }
+
         DecisionLog.Add(DecisionSource.System, $"用户确认立即{NameOf(kind)}",
             "队列跑完之后你点了「立即执行」，没有等满 60 秒。");
-
-        if (kind == WrapUpKind.Shutdown)
-        {
-            // 系统那边还挂着 60 秒，先撤掉再立刻关，否则会变成「60 秒后才关」。
-            QueueService.CancelShutdown();
-            QueueService.ExecuteShutdownNow();
-        }
-        else
-        {
-            DoSleep();
-        }
-
+        if (kind == WrapUpKind.Sleep) accepted = DoSleep();
         RaiseChanged();
-        return true;
-    }
-
-    /// <summary>
-    /// v1.44 / 修复 #4：倒计时窗口里队列又动起来了 → 自动取消。
-    ///
-    /// <para>
-    /// 理论上不该发生（收尾动作是队列结束后才执行的），但「理论上」不是保证：
-    /// 定时计划可能刚好到点、用户也可能在倒计时里点了「接着跑」。
-    /// 真遇上就取消收尾——<b>宁可少睡不可误睡</b>。
-    /// </para>
-    /// </summary>
-    internal static void AbortIfQueueActive()
-    {
-        if (!IsActive) return;
-        if (!QueueService.IsRunning) return;
-        WrapUpKind? kind = ActiveKind;
-        if (kind == null) return;
-        if (!Cancel()) return;
-        DecisionLog.Add(DecisionSource.System, "收尾自动取消：队列又跑起来了",
-            $"倒计时还没走完，队列又开始了新的运行，{NameOf(kind.Value)}已取消。");
-    }
-
-    /// <summary>队列开始新一轮时清掉残留窗口（防御性，正常路径走 AbortIfQueueActive）。</summary>
-    internal static void ResetForNewRun()
-    {
-        if (!IsActive) return;
-        // 队列已经在跑（定时撞上、或者人点了「接着跑」）→ 走带留痕的那条路，
-        // 让「今日」里能看见「为什么昨晚没关」；否则只是把窗口收掉。
-        if (QueueService.IsRunning)
-        {
-            AbortIfQueueActive();
-            return;
-        }
-        LogService.LogEvent("收尾倒计时：新一轮队列开始，放弃上次的收尾动作");
-        CloseWindow("新一轮队列开始，放弃收尾");
-        RaiseChanged();
+        return accepted;
     }
 
     private static void Tick()
@@ -247,73 +220,64 @@ public static class WrapUpCountdown
         lock (Gate)
         {
             if (!_active) return;
-            expired = DateTime.Now >= _deadline;
+            var remain = (_deadline - DateTime.Now).TotalSeconds;
+            expired = remain <= 0;
             kind = _kind;
+            if (expired)
+            {
+                _sleepInProgress = kind == WrapUpKind.Sleep;
+                CloseWindow($"倒计时结束自动{NameOf(kind)}");
+            }
+            else
+            {
+                int left = (int)Math.Ceiling(remain);
+                if (left != _lastNotifiedSecond)
+                    _lastNotifiedSecond = left;
+                else
+                    return;
+            }
         }
 
         if (!expired)
         {
-            int left;
-            lock (Gate)
-            {
-                double remain = (_deadline - DateTime.Now).TotalSeconds;
-                left = remain <= 0 ? 0 : (int)Math.Ceiling(remain);
-            }
-            if (left != _lastNotifiedSecond)
-            {
-                _lastNotifiedSecond = left;
-                // 只通知界面，不惊动 QueueService：StateChanged 会带出一整轮重算，
-                // 每秒为了一行倒计时抖动五次界面的钱不值。
-                try { Changed?.Invoke(); } catch { }
-            }
+            try { Changed?.Invoke(); } catch { }
             return;
         }
 
-        CloseWindow($"倒计时结束自动{NameOf(kind)}");
         LogService.LogEvent($"收尾倒计时：60 秒走完，执行{NameOf(kind)}");
         DecisionLog.Add(DecisionSource.System, $"倒计时结束自动{NameOf(kind)}",
             $"队列跑完之后等了 60 秒，没有人取消，就按设置里的收尾动作{NameOf(kind)}了。");
-
         if (kind == WrapUpKind.Sleep) DoSleep();
-        // 关机路径不需要再发一次命令：shutdown /s /t 60 的倒计时本来就在系统里跑，
-        // 这里只是把界面上的窗口收掉。
         RaiseChanged();
     }
 
+    // 调用时持有 Gate，取消和到期只能有一方拿走这次动作。
     private static void CloseWindow(string reason)
     {
-        lock (Gate)
-        {
-            _active = false;
-            _lastEndReason = reason;
-            _timer?.Dispose();
-            _timer = null;
-        }
+        _active = false;
+        _lastEndReason = reason;
+        _timer?.Dispose();
+        _timer = null;
     }
 
-    private static void DoSleep()
+    private static bool DoSleep()
     {
         try
         {
-            LogService.LogEvent("跑完动作：执行睡眠");
-            // v1.43 / 任务二：SetSuspendState 是布尔返回值，失败必须说出来。
-            // 原来只写「执行睡眠」就完事，日志里看起来像睡成功了，
-            // 而人第二天早上发现电脑还亮着，却没有一行能查的记录。
-            if (!AfterRunActionService.TrySleep(out string detail))
-            {
-                LogService.LogEvent("睡眠失败：" + detail);
-                NotifyService.Show(NotifyLevel.Warning, "龙管家", "要睡眠的时候系统没答应，电脑还醒着。");
-                DecisionLog.Add(DecisionSource.System, "睡眠没成功",
-                    $"系统拒绝进入睡眠（{detail}）。电脑还醒着。");
-            }
-            else
+            if (AfterRunActionService.TrySleep(out string detail))
             {
                 LogService.LogEvent("已进入睡眠");
+                return true;
             }
+            LogService.LogEvent("睡眠失败：" + detail);
+            NotifyService.Show(NotifyLevel.Warning, "龙管家", "要睡眠的时候系统没答应，电脑还醒着。");
+            DecisionLog.Add(DecisionSource.System, "睡眠没成功",
+                $"系统拒绝进入睡眠（{detail}）。电脑还醒着。");
+            return false;
         }
-        catch (Exception ex)
+        finally
         {
-            LogService.LogEvent("睡眠失败：" + ex.Message);
+            lock (Gate) _sleepInProgress = false;
         }
     }
 

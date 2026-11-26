@@ -33,8 +33,7 @@ public sealed record ApiPlan(int Status, ApiAction Action, string ToolId, string
 ///    WebhookListener 内部一处」，所以这里只做路由与判定，真正的监听仍由 WebhookListener 承担。
 /// 2) 判定与执行分离：<see cref="Plan"/> 是纯函数（不读设置、不碰队列、不碰时钟），
 ///    Probe 能拿固定输入验固定输出；副作用集中在 <see cref="WebhookHub.HandleApi"/>。
-/// 3) 默认关、默认只绑回环、默认要令牌。远程控制等于把「启动任意程序」的能力交给别人，
-///    所以三道闸都得用户自己动手打开。
+/// 3) 默认关，只收本机回环请求，开启后仍要令牌。局域网面板只开放读，不扩大控制范围。
 /// </summary>
 public static class ControlApi
 {
@@ -220,7 +219,7 @@ public static class ControlApi
         sb.Append($"<div style=\"margin-top:6px;word-break:break-word\">{ev}</div></div>");
 
         sb.Append($"<div class=\"foot\">只读页面 · 每 {refresh} 秒自动刷新 · 没有控制按钮<br>");
-        sb.Append("想在手机上远程开跑/停止，请用带令牌的控制 API，或在电脑上操作。</div>");
+        sb.Append("开跑或停止，请在运行管家的电脑上操作。</div>");
         sb.Append("</body></html>");
         return sb.ToString();
     }

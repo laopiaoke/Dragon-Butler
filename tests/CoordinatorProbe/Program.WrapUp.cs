@@ -48,6 +48,23 @@ internal static partial class Program
         Check("倒计时/名字说人话", WrapUpCountdown.NameOf(WrapUpKind.Sleep) == "睡眠"
             && WrapUpCountdown.NameOf(WrapUpKind.Shutdown) == "关机");
 
+        Check("倒计时/没有待收尾时允许开跑", WrapUpCountdown.TryCancelForNewRun());
+        string queueCs = ReadRepoSources("Dragon Butler/QueueService.cs");
+        Check("倒计时/整队、接着跑和单跑都走撤销门槛",
+            CountOf(queueCs, "if (!TryBeginRun()) return false;") == 3 &&
+            queueCs.IndexOf("!WrapUpCountdown.TryCancelForNewRun()", StringComparison.Ordinal) >= 0);
+
+        var lan = System.Net.IPAddress.Parse("192.0.2.10");
+        var loopback = System.Net.IPAddress.Loopback;
+        Check("局域网/只读首页可访问", WebhookListener.CanAccessPath(lan, "", "GET")
+            && !WebhookListener.CanAccessPath(lan, "", "POST"));
+        Check("局域网/拒绝 Webhook、控制 API 和 MCP", !WebhookListener.CanAccessPath(lan, "/webhook", "POST")
+            && !WebhookListener.CanAccessPath(lan, "/api/start", "GET")
+            && !WebhookListener.CanAccessPath(lan, "/mcp", "POST"));
+        Check("回环/保留原有接口", WebhookListener.CanAccessPath(loopback, "/webhook", "POST")
+            && WebhookListener.CanAccessPath(loopback, "/api/start", "GET")
+            && WebhookListener.CanAccessPath(loopback.MapToIPv6(), "/mcp", "POST"));
+
         // #5：端口校验的每一条挡板。
         Check("端口/正常值放行", WebhookHub.ValidatePortText("18235") == null);
         Check("端口/上下边界放行", WebhookHub.ValidatePortText("1024") == null && WebhookHub.ValidatePortText("65535") == null);

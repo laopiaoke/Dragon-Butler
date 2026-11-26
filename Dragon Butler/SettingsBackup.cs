@@ -296,9 +296,9 @@ public static class SettingsBackup
 
     /// <summary>
     /// 解包到目标目录。只解白名单里的文件；每一条都过 SafeEntryPath 与 IsInside。
-    /// 返回解出来的文件数（0 表示这个包对我们没用，不算失败，界面照实说）。
+    /// 保留已恢复的计数，但中途出错或没有可恢复文件都不能报成功。
     /// </summary>
-    public static (int Restored, List<string> Skipped, string Message) Extract(string zipPath, string configDir, string? oneDragonDir, bool includeBgi)
+    public static (bool Ok, int Restored, List<string> Skipped, string Message) Extract(string zipPath, string configDir, string? oneDragonDir, bool includeBgi)
     {
         var skipped = new List<string>();
         int restored = 0;
@@ -314,10 +314,12 @@ public static class SettingsBackup
                 if (entry.FullName.EndsWith("/", StringComparison.Ordinal)) continue;
                 string? safe = SafeEntryPath(entry.FullName);
                 if (safe == null) { skipped.Add(entry.FullName); continue; }
+                if (safe.Equals(RootEntry + MarkerName, StringComparison.OrdinalIgnoreCase)) continue;
 
                 string target;
                 string fileName = safe.Substring(safe.LastIndexOf('/') + 1);
-                if (safe.StartsWith(BgiEntry, StringComparison.OrdinalIgnoreCase))
+                if (safe.StartsWith(RootEntry + BgiEntry, StringComparison.OrdinalIgnoreCase)
+                    || safe.StartsWith(BgiEntry, StringComparison.OrdinalIgnoreCase))
                 {
                     if (!includeBgi || string.IsNullOrWhiteSpace(oneDragonDir)) { skipped.Add(safe); continue; }
                     string stem = fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
@@ -338,18 +340,25 @@ public static class SettingsBackup
                     continue;
                 }
 
-                using var es = entry.Open();
-                using var dst = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None);
-                es.CopyTo(dst);
-                restored++;
+                // 同目录写完再替换，读包/写盘中断不会把现有配置截成半份。
+                string tmp = target + "." + Guid.NewGuid().ToString("N") + ".dbtmp";
+                try
+                {
+                    using (var es = entry.Open())
+                    using (var dst = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        es.CopyTo(dst);
+                    File.Move(tmp, target, overwrite: true);
+                    restored++;
+                }
+                finally { TryDelete(tmp); }
             }
 
-            if (restored == 0) return (0, skipped, "这个包里没有能用的东西。");
-            return (restored, skipped, $"已恢复 {restored} 个文件。");
+            if (restored == 0) return (false, 0, skipped, "这个包里没有能恢复的文件。");
+            return (true, restored, skipped, $"已恢复 {restored} 个文件。");
         }
         catch (Exception ex)
         {
-            return (restored, skipped, "解包失败：" + ex.Message);
+            return (false, restored, skipped, "解包失败：" + ex.Message);
         }
     }
 

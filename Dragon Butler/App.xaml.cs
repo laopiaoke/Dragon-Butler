@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Threading;
 using wf = System.Windows.Forms;
 
 namespace DragonButler;
@@ -25,7 +26,9 @@ public partial class App : Application
     private wf.NotifyIcon? _tray;
     private wf.ToolStripMenuItem? _miOpen, _miStart, _miContinue, _miSnapshot, _miExit;
     private MainWindow? _win;
-    private bool _trimming;          // 正在销毁主窗（Window_Closing 看到它就别再拦）
+    private bool _trimming;
+    internal bool IsTrimming => _trimming;
+    private readonly DispatcherTimer _scheduleTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private wf.Timer? _trimTimer;    // 收进托盘后那次延迟销毁
 
     protected override void OnStartup(StartupEventArgs e)
@@ -98,6 +101,8 @@ public partial class App : Application
         WeeklyReportService.MaybeShow();
 
         BuildTray();
+        _scheduleTimer.Tick += (_, _) => ScheduleTrigger.Check(DateTime.Now);
+        _scheduleTimer.Start();
 
         if (AppState.Settings.SentinelEnabled) SentinelService.Start();
 
@@ -344,8 +349,6 @@ public partial class App : Application
         {
             if (_win == null || _trimming) return;
             if (!AppState.Settings.TrimToTrayEnabled) return;   // 默认关：实测只省 3.7 MB，不值得 1.4 秒
-            if (QueueService.IsRunning) return;   // 跑着的时候保持原样，别去动它
-
             _trimTimer?.Dispose();
             _trimTimer = new wf.Timer { Interval = 900 };
             _trimTimer.Tick += (_, _) =>
@@ -355,7 +358,7 @@ public partial class App : Application
                 _trimTimer = null;
 
                 var w = _win;
-                if (w == null || w.IsVisible) return;   // 用户又打开了，不销毁
+                if (w == null || w.IsVisible || QueueService.IsRunning) return;
 
                 _trimming = true;
                 try
@@ -393,6 +396,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _scheduleTimer.Stop();
         try
         {
             KeepAwakeService.Release();

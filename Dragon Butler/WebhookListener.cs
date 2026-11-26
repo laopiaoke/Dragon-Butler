@@ -156,6 +156,17 @@ public sealed class WebhookListener
         }
     }
 
+    // 通配绑定只给手机看首页；判断连接来源，不拿请求头或 URL 当来源。
+    internal static bool CanAccessPath(IPAddress? remoteAddress, string path, string method)
+    {
+        if (remoteAddress is not null)
+        {
+            if (remoteAddress.IsIPv4MappedToIPv6) remoteAddress = remoteAddress.MapToIPv4();
+            if (IPAddress.IsLoopback(remoteAddress)) return true;
+        }
+        return path.Length == 0 && method is "GET" or "HEAD";
+    }
+
     private void Loop()
     {
         while (_running)
@@ -164,12 +175,18 @@ public sealed class WebhookListener
             {
                 var ctx = _listener!.GetContext();
                 string path = (ctx.Request.Url?.AbsolutePath ?? "").TrimEnd('/');
+                if (!CanAccessPath(ctx.Request.RemoteEndPoint?.Address, path, ctx.Request.HttpMethod))
+                {
+                    ctx.Response.StatusCode = 404;
+                    ctx.Response.Close();
+                    continue;
+                }
                 if (!path.EndsWith("/webhook", StringComparison.OrdinalIgnoreCase))
                 {
                     // v1.7：非 /webhook 的路径交给附加路由（控制 API / 只读面板）
                     // v1.11：把请求体读出来一起传——MCP 走 POST + JSON-RPC
                     string routeBody = "";
-                    if (ctx.Request.HasEntityBody)
+                    if (path.Length != 0 && ctx.Request.HasEntityBody)
                     {
                         using var routeReader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8);
                         routeBody = routeReader.ReadToEnd();

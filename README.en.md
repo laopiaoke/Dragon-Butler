@@ -350,7 +350,7 @@ Bottom of the tools card → "Custom tool" → "＋ Add": pick the exe, name the
 
 **No telemetry, no analytics, no crash reporting.** The program sends usage data to nobody.
 
-The only outbound connection is the notification endpoint you fill in yourself; the local listener accepts `127.0.0.1` requests only and can be switched off.
+Notifications go to the destination you configure. Webhooks, the control API, and MCP accept loopback connections only. Enabling the LAN dashboard lets other devices on the network view progress, not control runs.
 
 ## Build
 

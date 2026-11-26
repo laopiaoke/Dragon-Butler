@@ -172,6 +172,20 @@ internal static partial class Program
             Drive(Profile(CompletionSignalKind.LogPattern), Sig(CompletionSignalKind.GameProcessExit, null, "game-exit"))
                 == ToolRunState.Running);
 
+        foreach (var secondary in new[] { CompletionSignalKind.GameProcessExit, CompletionSignalKind.Webhook })
+        {
+            Check("仲裁/主信号先到：" + secondary,
+                Drive(Profile(CompletionSignalKind.LogPattern), Sig(CompletionSignalKind.LogPattern), Sig(secondary))
+                    == ToolRunState.Done);
+            Check("仲裁/副信号先到：" + secondary,
+                Drive(Profile(CompletionSignalKind.LogPattern), Sig(secondary), Sig(CompletionSignalKind.LogPattern))
+                    == ToolRunState.Done);
+        }
+
+        Check("仲裁/零退出后到主日志算完成",
+            Drive(Profile(CompletionSignalKind.LogPattern), Sig(CompletionSignalKind.ProcessExit0, 0),
+                  Sig(CompletionSignalKind.LogPattern)) == ToolRunState.Done);
+
         // ⑧ 宽限为 0 时主信号到了也只能悬置。
         Check("仲裁/宽限为零就悬置",
             Drive(Profile(CompletionSignalKind.Webhook, grace: 0), Sig(CompletionSignalKind.Webhook))

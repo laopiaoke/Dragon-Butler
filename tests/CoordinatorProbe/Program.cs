@@ -51,7 +51,7 @@ internal static partial class Program
     {
         "schedule", "resume", "bundle", "explain", "retry", "api", "weekly",
         "hotkey", "progress", "command", "dag", "groups", "bgiupdate", "harvest",
-        "mcp", "uirules", "signals", "afterrun", "migrate", "wrapup", "m12fix",
+        "mcp", "uirules", "signals", "afterrun", "migrate", "wrapup", "backup", "m12fix",
     };
 
     /// <summary>
@@ -107,7 +107,7 @@ internal static partial class Program
             ["timeoutanchor"] = () => RunTimeoutAnchor(stub),
             ["residual"] = () => RunResidual(stub),
             ["conflict"] = () => RunConflict(stub),
-            ["afterrun"] = () => RunAfterRun(),
+            ["afterrun"] = () => RunAfterRun(stub),
             ["template"] = () => RunTemplate(),
             ["bgiwrite"] = () => RunBgiWrite(),
             ["completion"] = () => RunCompletion(),

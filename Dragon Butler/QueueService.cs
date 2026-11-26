@@ -223,10 +223,8 @@ public static class QueueService
         lock (Gate) _skipOnce.Clear();
     }
 
-    /// <summary>
-    /// 启动整条队列。返回 true 表示跑完（含被停止），false 表示没有可执行项。
-    /// </summary>
-    public static async Task<bool> StartAsync(QueueTrigger trigger)
+    // 先占住队列，再撤掉上轮的收尾；撤销失败时不能让工具进程开始跑。
+    private static bool TryBeginRun()
     {
         lock (Gate)
         {
@@ -237,12 +235,48 @@ public static class QueueService
             CurrentToolStartedAt = default;
             _cts = new CancellationTokenSource();
         }
-        // v1.44 / 修复 #4：队列真的开始跑了，上一轮的收尾倒计时就没有理由留着。
-        // 「倒计时窗口里队列又动起来」正常不该出现，但定时计划和手动「接着跑」
-        // 都不看这里——宁可少睡一次，也不能在队列跑到一半时关机。
-        WrapUpCountdown.ResetForNewRun();
-        LastResults.Clear();
+
+        bool started = false;
+        try
+        {
+            if (!WrapUpCountdown.TryCancelForNewRun() || _cts.IsCancellationRequested) return false;
+            LastResults.Clear();
+            RaiseState();
+            started = true;
+            return true;
+        }
+        finally
+        {
+            if (!started) EndRun();
+        }
+    }
+
+    private static void EndRun()
+    {
+        lock (Gate)
+        {
+            _running = false;
+            _stopRequested = false;
+            _currentCoordinator = null;
+            _currentProcess = null;
+            CurrentToolId = "";
+            CurrentToolStartedAt = default;
+            IsWaitingIdle = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
         RaiseState();
+        AppState.RefreshStatus();
+    }
+
+    /// <summary>启动整条队列。true 表示队列结束（含被停止），false 表示未开跑或执行链异常。</summary>
+    public static Task<bool> StartAsync(QueueTrigger trigger) => StartCoreAsync(trigger, isAutomaticRerun: false);
+
+    internal static Task<bool> StartRerunAsync() => StartCoreAsync(QueueTrigger.Manual, isAutomaticRerun: true);
+
+    private static async Task<bool> StartCoreAsync(QueueTrigger trigger, bool isAutomaticRerun)
+    {
+        if (!TryBeginRun()) return false;
 
         try
         {
@@ -278,7 +312,7 @@ public static class QueueService
             // v1.9 / P2：开跑前看一眼 BGI 版本有没有变过——变了就先说一句，别让用户去猜配置
             AnnounceBgiVersion();
 
-            int finished = await RunListAsync(items, trigger, _cts!.Token).ConfigureAwait(false);
+            await RunListAsync(items, trigger, _cts!.Token, isAutomaticRerun).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex)
@@ -289,23 +323,7 @@ public static class QueueService
             NoticeCenter.AddCrash("队列没能跑完", ex.ToString(), title: "队列整个中断了");
             return false;
         }
-        finally
-        {
-            lock (Gate)
-            {
-                _running = false;
-                _stopRequested = false;
-                _currentCoordinator = null;
-                _currentProcess = null;
-                CurrentToolId = "";
-                CurrentToolStartedAt = default;
-                IsWaitingIdle = false;
-                _cts?.Dispose();
-                _cts = null;
-            }
-            RaiseState();
-            AppState.RefreshStatus();
-        }
+        finally { EndRun(); }
     }
 
     /// <summary>
@@ -314,36 +332,12 @@ public static class QueueService
     /// </summary>
     public static async Task<int> RunProfilesAsync(IReadOnlyList<ToolProfile> profiles, QueueTrigger trigger)
     {
-        lock (Gate)
-        {
-            if (_running) return 0;
-            _running = true;
-            _stopRequested = false;
-            _cts = new CancellationTokenSource();
-        }
-        LastResults.Clear();
-        RaiseState();
+        if (!TryBeginRun()) return 0;
         try
         {
             return await RunListAsync(profiles.ToList(), trigger, _cts!.Token).ConfigureAwait(false);
         }
-        finally
-        {
-            lock (Gate)
-            {
-                _running = false;
-                _stopRequested = false;
-                _currentCoordinator = null;
-                _currentProcess = null;
-                CurrentToolId = "";
-                CurrentToolStartedAt = default;
-                IsWaitingIdle = false;
-                _cts?.Dispose();
-                _cts = null;
-            }
-            RaiseState();
-            AppState.RefreshStatus();
-        }
+        finally { EndRun(); }
     }
 
     // ===== v1.6 / F2「接着跑」 =====
@@ -395,16 +389,7 @@ public static class QueueService
     /// </summary>
     public static async Task<bool> StartContinueAsync()
     {
-        lock (Gate)
-        {
-            if (_running) return false;
-            _running = true;
-            _stopRequested = false;
-            CurrentToolId = "";
-            _cts = new CancellationTokenSource();
-        }
-        LastResults.Clear();
-        RaiseState();
+        if (!TryBeginRun()) return false;
 
         try
         {
@@ -425,27 +410,12 @@ public static class QueueService
             LogService.LogEvent("队列异常（接着跑）：" + ex);
             return false;
         }
-        finally
-        {
-            lock (Gate)
-            {
-                _running = false;
-                _stopRequested = false;
-                _currentCoordinator = null;
-                _currentProcess = null;
-                CurrentToolId = "";
-                CurrentToolStartedAt = default;
-                IsWaitingIdle = false;
-                _cts?.Dispose();
-                _cts = null;
-            }
-            RaiseState();
-            AppState.RefreshStatus();
-        }
+        finally { EndRun(); }
     }
 
     /// <summary>队列主体循环（StartAsync / RunProfilesAsync 共用）。</summary>
-    private static async Task<int> RunListAsync(List<ToolProfile> items, QueueTrigger trigger, CancellationToken ct)
+    private static async Task<int> RunListAsync(List<ToolProfile> items, QueueTrigger trigger, CancellationToken ct,
+        bool isAutomaticRerun = false)
     {
         KeepAwakeService.Acquire();
         try
@@ -614,7 +584,7 @@ public static class QueueService
                 }
             }
 
-            FinishQueue(trigger, finished, dependencyAbort);
+            FinishQueue(trigger, finished, dependencyAbort, isAutomaticRerun);
             return finished;
         }
         finally
@@ -628,15 +598,7 @@ public static class QueueService
     /// </summary>
     public static async Task<bool> StartSingleAsync(ToolProfile profile, QueueTrigger trigger)
     {
-        lock (Gate)
-        {
-            if (_running) return false;
-            _running = true;
-            _stopRequested = false;
-            _cts = new CancellationTokenSource();
-        }
-        LastResults.Clear();
-        RaiseState();
+        if (!TryBeginRun()) return false;
 
         try
         {
@@ -655,23 +617,7 @@ public static class QueueService
             LogService.LogEvent("单工具执行异常：" + ex);
             return false;
         }
-        finally
-        {
-            lock (Gate)
-            {
-                _running = false;
-                _stopRequested = false;
-                _currentCoordinator = null;
-                _currentProcess = null;
-                CurrentToolId = "";
-                CurrentToolStartedAt = default;
-                IsWaitingIdle = false;
-                _cts?.Dispose();
-                _cts = null;
-            }
-            RaiseState();
-            AppState.RefreshStatus();
-        }
+        finally { EndRun(); }
     }
 
     /// <summary>
@@ -729,11 +675,11 @@ public static class QueueService
     /// </para>
     /// </summary>
     /// <param name="detail">失败原因（成功时为空串）。</param>
-    internal static bool RequestSystemShutdown(out string detail)
+    internal static bool RequestSystemShutdown(int seconds, out string detail)
     {
         try
         {
-            var psi = new ProcessStartInfo("shutdown", $"/s /t {WrapUpCountdown.WindowSeconds}")
+            var psi = new ProcessStartInfo("shutdown", $"/s /t {seconds}")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -764,40 +710,14 @@ public static class QueueService
         }
     }
 
-    /// <summary>
-    /// v1.44 / 修复 #4：用户点了「立即执行」——不等剩下那几十秒了，现在就关。
-    ///
-    /// <para>调用前必须先 <see cref="CancelShutdown"/> 把系统那边挂着的倒计时撤掉，
-    /// 否则 <c>shutdown /s /t 0</c> 会被已有的计划挡住。</para>
-    /// </summary>
-    internal static void ExecuteShutdownNow()
-    {
-        try
-        {
-            var psi = new ProcessStartInfo("shutdown", "/s /t 0")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            Process.Start(psi);
-            LogService.LogEvent("关机已立即执行");
-        }
-        catch (Exception ex)
-        {
-            LogService.LogEvent("立即关机失败：" + ex.Message);
-            NotifyService.Show(NotifyLevel.Warning, "龙管家", "该关机了，但命令没能执行。电脑还开着。");
-        }
-    }
-
     /// <summary>关机已排定（供取消按钮判断）。</summary>
-    internal static void MarkShutdownPending()
+    internal static void MarkShutdownPending(int seconds)
     {
         lock (Gate)
         {
             _shutdownPending = true;
-            // 60 秒倒计时 + 5 秒余量：命令发出去到系统真正关机之间有一点延迟，
-            // 有效期卡得太死会让按钮在最后一秒闪一下又回来。
-            _shutdownPendingUntil = DateTime.Now.AddSeconds(65);
+            // 倒计时结束后系统还有少量时间启动关机；复用原来的 5 秒余量。
+            _shutdownPendingUntil = DateTime.Now.AddSeconds(seconds + 5);
         }
         NotifyShutdownStateChanged();
     }
@@ -1360,7 +1280,7 @@ public static class QueueService
     /// </para>
     /// </summary>
     /// <param name="dependencyAbort">依赖没跑成导致整队中止时的原因；没有中止为 null。</param>
-    private static void FinishQueue(QueueTrigger trigger, int finished, string? dependencyAbort)
+    private static void FinishQueue(QueueTrigger trigger, int finished, string? dependencyAbort, bool isAutomaticRerun)
     {
         var ran = LastResults.Where(r => !r.Skipped).ToList();
         int total = ran.Count;
@@ -1532,6 +1452,7 @@ public static class QueueService
             Stopped = _stopRequested,
             NothingRan = nothingRan,
             DependencyAbortReason = dependencyAbort,
+            IsAutomaticRerun = isAutomaticRerun,
         });
 
         // v1.41 / M3-7：「这次不跑」只活一趟，队列结束就清空。
@@ -1720,6 +1641,9 @@ public sealed class AfterRunContext
 
     /// <summary>依赖没跑成导致整队中止时的原因；没中止则为 null。</summary>
     public string? DependencyAbortReason { get; init; }
+
+    /// <summary>由「再跑一轮」发起的这一轮，不再触发下一轮。</summary>
+    internal bool IsAutomaticRerun { get; init; }
 }
 
 /// <summary>
@@ -1807,12 +1731,15 @@ public static class AfterRunActionService
     public static void Execute(AfterRunContext ctx)
     {
         string action = AppState.Settings.AfterRunAction ?? "Notify";
-        if (!ShouldRun(action, ctx.HasFailure, ctx.Stopped, AppState.Settings.AfterRunOnFailure))
+        if (!ShouldRun(action, ctx.HasFailure, ctx.Stopped, AppState.Settings.AfterRunOnFailure,
+            ctx.NothingRan, ctx.DependencyAbortReason != null))
         {
             if (!string.Equals(action, "Notify", StringComparison.OrdinalIgnoreCase))
-                LogService.LogEvent(ctx.Stopped
-                    ? $"跑完动作：队列被用户停止，跳过 {action}"
-                    : $"跑完动作：队列有失败项，跳过 {action}（仅通知）");
+            {
+                string reason = ctx.Stopped ? "队列被用户停止"
+                    : ctx.NothingRan ? "队列没有执行任何工具" : "队列有失败项";
+                LogService.LogEvent($"跑完动作：{reason}，跳过 {action}");
+            }
             return;
         }
 
@@ -1824,6 +1751,8 @@ public static class AfterRunActionService
 
         if (string.Equals(action, "RunAgain", StringComparison.OrdinalIgnoreCase))
         {
+            if (ctx.IsAutomaticRerun) return;
+
             // v1.15 / L5：再跑一轮。只在「上一轮一个都没失败」时才做，
             // 因为失败的组再跑一次大概率还是一样地失败，白白多烧一小时。
             if (ctx.HasFailure)
@@ -1838,7 +1767,7 @@ public static class AfterRunActionService
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
-                    try { await QueueService.StartAsync(QueueTrigger.Manual).ConfigureAwait(false); }
+                    try { await QueueService.StartRerunAsync().ConfigureAwait(false); }
                     catch (Exception ex) { LogService.LogEvent("再跑一轮失败：" + ex.Message); }
                 });
             }
