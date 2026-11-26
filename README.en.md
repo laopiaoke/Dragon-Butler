@@ -44,8 +44,8 @@ It never modifies game or tool files, and it does not log into or read game acco
 ## Download & Quick Start
 
 1. Download a release package from [Releases](https://github.com/laopiaoke/Dragon-Butler/releases/latest):
-   - **portable** (~158 MB): bundles the .NET 8 runtime; extract and run directly.
-   - **runtime-dependent** (~3.5 MB): requires .NET 8 Desktop Runtime installed on the machine.
+   - **portable** (~65 MB download, ~158 MB extracted): bundles the .NET 8 runtime; extract and run directly.
+   - **runtime-dependent** (~2.7 MB download): requires .NET 8 Desktop Runtime installed on the machine.
 2. Extract the archive, run `Dragon Butler.exe`, and accept the UAC prompt (elevation is required to monitor and manage target tool processes in the active session).
 3. Complete the five-step first-run wizard: select tools, verify executable paths (common install locations are scanned automatically), set an optional daily schedule, and optionally configure notifications.
 
@@ -199,7 +199,7 @@ Package both release variants into `发布\`:
 
 Licensed under [GNU AGPL-3.0](LICENSE). Any redistribution or modified network deployment must remain licensed under AGPL-3.0 with full source code provided, and must retain the disclaimers above.
 
-- Latest release: **v1.45.3** (`1.45.3` in-app)
+- Latest release: **v1.46.0** (`1.46.0` in-app)
 - Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 - User manual (Chinese): [docs/使用说明.txt](docs/使用说明.txt)
 - Design history & trade-offs: [docs/路线图.md](docs/路线图.md)

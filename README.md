@@ -44,8 +44,8 @@
 ## 下载与快速开始
 
 1. 前往 [Releases](https://github.com/laopiaoke/Dragon-Butler/releases/latest) 下载压缩包：
-   - **portable 版**（约 158 MB）：自带 .NET 8 运行时，解压即用。
-   - **runtime-dependent 版**（约 3.5 MB）：需本机已安装 .NET 8 桌面运行时。
+   - **portable 版**（下载约 65 MB，解压后约 158 MB）：自带 .NET 8 运行时，解压即用。
+   - **runtime-dependent 版**（下载约 2.7 MB）：需本机已安装 .NET 8 桌面运行时。
 2. 解压后运行 `Dragon Butler.exe`，在 UAC 提示中选择「是」（程序需要跨会话外进程管理与停止目标工具进程）。
 3. 首次启动会打开五步向导：勾选工具、确认可执行文件路径（会自动扫描本机常见位置）、设定每日定时与可选通知渠道，即可在主页点击「一键开跑」或等待定时触发。
 
@@ -199,7 +199,7 @@ $stub = (Resolve-Path tests\StubTool\bin\Release\net8.0\StubTool.exe).Path
 
 本项目以 [GNU AGPL-3.0](LICENSE) 开源发布。使用、修改或再分发（含作为网络服务提供）均须遵守 AGPL-3.0 条款，继续开源并提供完整源码，同时请保留上述使用须知，避免下游用户误以为官方产品。
 
-- 当前版本：**v1.45.3**（工程内 `1.45.3`）
+- 当前版本：**v1.46.0**（工程内 `1.46.0`）
 - 版本更新日志：[RELEASE_NOTES.md](RELEASE_NOTES.md)
 - 随包用户手册：[docs/使用说明.txt](docs/使用说明.txt)
 - 演进记录与设计取舍：[docs/路线图.md](docs/路线图.md)
