@@ -88,7 +88,7 @@ override 只是把那一列**涂成卡片底色**，看起来像「左边多一�
 |---|---|---|
 | `Dragon Butler/Themes/TrayMenuStyle.xaml` | 新建（7.8 KB） | 只含 5 个 `TrayMenu.*` 键，无其它键、不与既有键同名 |
 | `Dragon Butler/App.Tray.cs` | 重写菜单部分 | `NotifyIcon` 保留；`ContextMenuStrip` / `ThemedMenuColors` / `ShowImageMargin` 全部移除 |
-| `tests/CoordinatorProbe/Program.TrayRules.cs` | 新建（4,151 B） | 14 条源码级断言 |
+| `tests/CoordinatorProbe/Program.TrayRules.cs` | 新建 | 12 条源码级断言 |
 | `tests/CoordinatorProbe/Program.UiRules.cs` | 加一行调用 | 从本文件拆出是因为加上这批会到 20,626 B 撞 20 KB 闸门 |
 
 **主界面零改动（硬证）**：`MainWindow.xaml`、`MainWindow.xaml.cs`、`App.xaml`、
@@ -132,7 +132,7 @@ WPF 的 Esc 与失焦关闭都依赖键盘焦点，焦点没进菜单就收不�
 | DPI 100 / 125 / 150 / 200 实拍 | ✅（200% 见下） | 菜单几何 207×157 → 258×185 → 309×222 → 361×262，等比放大无错位 |
 | Esc / 失焦 / 点击后关闭 | ✅ | `POST[esc] menu present=False`、`POST[blur] menu present=False`、点击项后菜单消失 |
 | 对照表归档进 `docs/` | ✅ | 本文件 1.3 节 |
-| 新增断言全绿 | ✅ | `Program.TrayRules.cs` 14 条 + `uirules` 原有断言 |
+| 新增断言全绿 | ✅ | `Program.TrayRules.cs` 12 条 + `uirules` 原有断言 |
 | `SIGNATURES.md` 加 S1 备注（不立新号） | ✅ | S1 已补本案例 |
 
 **200% 档说明**：本机（BOE 屏）系统设置最高只到 175%，`SPI_SETLOGICALDPIOVERRIDE`
@@ -144,22 +144,23 @@ WPF 的 Esc 与失焦关闭都依赖键盘焦点，焦点没进菜单就收不�
 
 ### 5.1 断言
 
-`tests/CoordinatorProbe/Program.TrayRules.cs` 的 14 条（全部 PASS）：
+`tests/CoordinatorProbe/Program.TrayRules.cs` 的 12 条（全部 PASS）：
 
 1. `TrayMenuStyle.xaml` 存在；
 2. 它只含 `TrayMenu.*` 前缀的键（实测 `共 5 个`）；
-3. 全库已无旧菜单控件；
+3. 全库已无旧菜单控件（`ContextMenuStrip` 零命中）；
 4. 已无 `ShowImageMargin`；
 5. 项模板里不画图标列；
-6. 颜色只走 `DynamicResource` 或本文件键；
-7. 悬停背景与文字走既有色键；
-8. 小字号用 `Display` 模式；
-9. 五个项都在；
-10. 只有右键才弹出；
-11. 点完先收菜单再执行动作；
-12. 文件大小闸门通过（白名单仍是 14 项，没增）；
-13. 金丝雀组数不变（84 入口 / CI 22 组）；
-14. 主界面 XAML 不在本任务改动范围内。
+6. 颜色只走 `DynamicResource` 或本文件键（`StaticResource` 引用数为 0）；
+7. 悬停背景与文字走既有色键（`HoverBrush` / `TextPrimaryBrush`）；
+8. 小字号用 `Display` 模式（`TextFormattingMode` + `ClearType`）；
+9. 五个项都在（含「接着跑」）；
+10. 只有右键才弹出（`MouseButtons.Right`）；
+11. 点完先收菜单再执行动作（`CloseTrayMenu()` 在 `act()` 之前）；
+12. 动作排到下一轮消息泵——这条是退出 bug 修完后补的，同步 `Shutdown()` 退不干净。
+
+另外两条由既有闸门覆盖，不在这个文件里重复：文件大小上限 20 KB（`scripts/check-file-size.ps1`）、
+入口与 CI 组数不变（`Program.cs` 的金丝雀 `groups=84/84 ci=22`）。
 
 ### 5.2 实测记录
 
