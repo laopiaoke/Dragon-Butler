@@ -9,6 +9,11 @@
 
 已证实：开机自启开关（UI 存在、注册表 Run 键无写入）。
 
+已证实（变体：WinForms 遗留控件未主题化）：托盘右键菜单是 WinForms 的
+`ContextMenuStrip`，只有配色交给 `ProfessionalColorTable`，系统模板里那列
+`ImageMargin` 从没用过、却在界面上留了一条空白；主界面导航栏早已全 WPF + 主题资源，
+同一个软件的右键菜单和导航栏说着两套 UI 语言（v1.46.2 修复：换成本项目 WPF `ContextMenu`）。
+
 ## S2 有代码、未接线
 
 函数/事件存在且逻辑正确，但从未被调用、Timer 从未 Start、
@@ -118,4 +123,5 @@ manifest 提权级别与自启方式不匹配。
 | 配置 schema | S11 |
 | App 启动 | S12 / **S15** |
 | 窗口显示时序 | **S15** |
+| 托盘 / 右键菜单 | **S1** / S2 |
 | 错误文案 | S13 |

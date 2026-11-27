@@ -13,5 +13,6 @@
 | [`V1451_REPORT.md`](V1451_REPORT.md) | v1.45.1 代码去重与清理 |
 | [`V1452_REPORT.md`](V1452_REPORT.md) | v1.45.2 仓库整理与文件大小闸门 |
 | [`V1453_REPORT.md`](V1453_REPORT.md) | v1.45.3 探针拆分与入口金丝雀 |
+| [`V1462_REPORT.md`](V1462_REPORT.md) | v1.46.2 托盘右键菜单复刻导航栏（任务书 #18） |
 
 说明：各历史报告正文中互相提及的 `V*_REPORT.md` 文件名（例如 `V1421_REPORT.md`、`V1451_REPORT.md` 等），现均指本目录下的同名文件；历史报告提及的 `BUILD_REPORT.md`、`PHASE1_REPORT.md`、`PHASE2_REPORT.md`、`HOTFIX0_REPORT.md` 已归档至 [`docs/archive/`](../archive/README.md)。

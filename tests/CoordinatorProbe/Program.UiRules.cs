@@ -234,6 +234,9 @@ internal static partial class Program
         Check("隐藏启动/两个开关都开才算数",
             presentation.Contains("startMinimized && stayInTray", StringComparison.Ordinal));
 
+        // v1.46.2 / 任务书 #18：托盘菜单的规则拆到 Program.TrayRules.cs（这一份撞了 20 KB 闸门）。
+        TrayMenuChecks((name, ok, detail) => Check(name, ok, detail));
+
         Console.WriteLine($"RESULT uirules fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
     }

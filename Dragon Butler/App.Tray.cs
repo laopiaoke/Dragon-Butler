@@ -1,20 +1,32 @@
 using System;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Threading;
 using wf = System.Windows.Forms;
 
 namespace DragonButler;
 
 /// <summary>
-/// App 的托盘部分（v1.46.1 按功能拆出）：托盘图标、右键菜单、菜单配色、气泡通知，
+/// App 的托盘部分（v1.46.1 按功能拆出）：托盘图标、右键菜单、气泡通知，
 /// 以及「收进托盘」那次延迟销毁用的定时器。
 ///
 /// 拆出来的理由：这些代码全都要靠 System.Windows.Forms 的类型，与启动流程（WPF 的窗口和调度）
 /// 混在一个文件里，读的人得在两套 UI 体系之间来回切。拆开之后 App.xaml.cs 只剩「启动做什么」，
 /// 这里只剩「托盘上有什么」。同属 partial class App，行为与调用点一个都没变。
+///
+/// v1.46.2 / 任务书 #18：右键菜单从 WinForms 的托盘菜单控件换成 WPF 的 ContextMenu。
+/// 图标本体（NotifyIcon）仍然是 WinForms 的——托盘区本来就是它的地盘，换掉等于重写一遍托盘；
+/// 但**菜单**是画出来的东西，必须跟主界面同一套视觉语言，所以只换菜单这一层。
+/// 换掉之后左侧那条空白自然消失：WinForms 那边它叫 ImageMargin（默认留一列图标位，项目从没用过），
+/// 而 WPF 的模板里压根没有这一列。样式见 Themes/TrayMenuStyle.xaml。
 /// </summary>
 public partial class App
 {
     private wf.NotifyIcon? _tray;
-    private wf.ToolStripMenuItem? _miOpen, _miStart, _miContinue, _miSnapshot, _miExit;
+    private ContextMenu? _menu;
+    private MenuItem? _miOpen, _miStart, _miContinue, _miSnapshot, _miExit;
     private wf.Timer? _trimTimer;    // 收进托盘后那次延迟销毁
 
     private void BuildTray()
@@ -36,53 +48,16 @@ public partial class App
                 catch { }
             }
 
-            var menu = new wf.ContextMenuStrip();
-            // 深色菜单渲染器：跟随主题的配色表，消除默认白条/白底
-            menu.Renderer = new wf.ToolStripProfessionalRenderer(new ThemedMenuColors());
+            EnsureTrayMenuStyles();
+            _menu = BuildTrayMenu();
 
-            _miOpen = new wf.ToolStripMenuItem("打开主界面", null, (_, _) =>
+            // 右键才弹菜单；左键保持原样（双击开主界面，见下）。
+            // NotifyIcon 没有 WPF 的 ContextMenu 属性，只能自己接 MouseUp 再摆位置。
+            _tray.MouseUp += (_, e) =>
             {
-                SoundService.Play("click.wav");
-                ShowMainWindow();
-            });
-            _miStart = new wf.ToolStripMenuItem("⚡ 一键开跑", null, (_, _) =>
-            {
-                SoundService.Play("click.wav");   // 与主界面统一：托盘菜单也是普通点击音
-                _ = QueueService.StartAsync(QueueTrigger.Manual);
-            });
-            // v1.6 / F2：只在「今天跑成过至少一项，且还有没跑成的」时出现
-            _miContinue = new wf.ToolStripMenuItem("接着跑", null, (_, _) =>
-            {
-                SoundService.Play("click.wav");
-                _ = QueueService.StartContinueAsync();
-            });
-            _miContinue.Visible = false;
-            // v1.8 / F12：随时抓一张当前画面——人不在电脑前时，这是唯一能"看一眼"的入口
-            _miSnapshot = new wf.ToolStripMenuItem("现在就到（抓一张当前画面）", null, (_, _) =>
-            {
-                SoundService.Play("click.wav");
-                _ = Task.Run(() =>
-                {
-                    string msg = SnapshotService.CaptureMessage("托盘菜单");
-                    NotifyService.Show(NotifyLevel.Info, "龙管家", msg);
-                });
-            });
-            _miExit = new wf.ToolStripMenuItem("退出", null, (_, _) =>
-            {
-                SoundService.Play("click.wav");
-                ForceExit = true;
-                Shutdown();
-            });
-            menu.Items.Add(_miOpen);
-            menu.Items.Add(_miStart);
-            menu.Items.Add(_miContinue);
-            menu.Items.Add(_miSnapshot);
-            menu.Items.Add(new wf.ToolStripSeparator());
-            menu.Items.Add(_miExit);
-            menu.Opening += (_, _) => UpdateTrayMenu(); // 展开前刷新状态
-            _tray.ContextMenuStrip = menu;
+                if (e.Button == wf.MouseButtons.Right) ShowTrayMenu();
+            };
             _tray.DoubleClick += (_, _) => ShowMainWindow();
-            RecolorMenu();
             UpdateTrayMenu();
         }
         catch (Exception ex)
@@ -92,7 +67,149 @@ public partial class App
     }
 
     /// <summary>
-    /// 刷新托盘菜单的运行状态：BGI 运行中时"启动一条龙"变为"一条龙运行中…"并禁用（防止误操作）
+    /// 把 Themes/TrayMenuStyle.xaml 并进应用资源。只在第一次进来时并一次。
+    ///
+    /// <para>
+    /// 为什么并到应用级：弹出层是独立的可视树，挂在它上面的 DynamicResource 要能一路找到
+    /// Theme.Apply 写进去的那些刷子。并进 App.Resources 是最短的一条路。
+    /// 那个文件里只准有 TrayMenu.* 前缀的键（任务书资源策略第 4 条），并进来不会盖掉任何既有键。
+    /// </para>
+    /// </summary>
+    private static void EnsureTrayMenuStyles()
+    {
+        var res = Application.Current?.Resources;
+        if (res == null) return;
+        foreach (ResourceDictionary d in res.MergedDictionaries)
+        {
+            if (d.Source != null && d.Source.OriginalString.Contains("TrayMenuStyle", StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+        res.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("Themes/TrayMenuStyle.xaml", UriKind.Relative),
+        });
+    }
+
+    /// <summary>建一遍菜单。四个菜单项的处理函数与迁移前逐个对应，没有第二套实现。</summary>
+    private ContextMenu BuildTrayMenu()
+    {
+        var menu = new ContextMenu
+        {
+            Style = Res<Style>("TrayMenu.ContextMenuStyle"),
+            StaysOpen = false,
+        };
+
+        _miOpen = MakeItem("打开主界面", () => ShowMainWindow());
+        _miStart = MakeItem("⚡ 一键开跑", () => _ = QueueService.StartAsync(QueueTrigger.Manual));
+        // v1.6 / F2：只在「今天跑成过至少一项，且还有没跑成的」时出现
+        _miContinue = MakeItem("接着跑", () => _ = QueueService.StartContinueAsync());
+        _miContinue.Visibility = Visibility.Collapsed;
+        // v1.8 / F12：随时抓一张当前画面——人不在电脑前时，这是唯一能「看一眼」的入口
+        _miSnapshot = MakeItem("现在就到（抓一张当前画面）", () =>
+            _ = Task.Run(() =>
+            {
+                string msg = SnapshotService.CaptureMessage("托盘菜单");
+                NotifyService.Show(NotifyLevel.Info, "龙管家", msg);
+            }));
+        _miExit = MakeItem("退出", () =>
+        {
+            ForceExit = true;
+            Shutdown();
+        });
+
+        menu.Items.Add(_miOpen);
+        menu.Items.Add(_miStart);
+        menu.Items.Add(_miContinue);
+        menu.Items.Add(_miSnapshot);
+        menu.Items.Add(new Separator { Style = Res<Style>("TrayMenu.SeparatorStyle") });
+        menu.Items.Add(_miExit);
+        return menu;
+    }
+
+    /// <summary>
+    /// 造一个菜单项。点击先收菜单再干活——收尾动作可能是关机或退出进程，
+    /// 让一个还开着的弹出层挡在前面，轻则关不掉，重则进程退不干净。
+    /// 音效也在这里统一放，四个项都是同一个点击音（与主界面统一）。
+    /// </summary>
+    private MenuItem MakeItem(string header, Action act)
+    {
+        var mi = new MenuItem
+        {
+            Header = header,
+            Style = Res<Style>("TrayMenu.ItemStyle"),
+        };
+        mi.Click += (_, _) =>
+        {
+            CloseTrayMenu();
+            SoundService.Play("click.wav");
+            // Click 是在弹出层自己的嵌套消息循环里跑的：这个循环要等处理器返回才收尾。
+            // 在里面同步 Shutdown()，OnExit 会照常跑完、日志也写了「正常退出」，
+            // 但那个循环还压在栈上，进程就留在原地不走了（v1.46.2 实测踩到）。
+            // 排到下一轮消息泵再执行，弹层先收干净，退出/关机才真的开始。
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try { act(); }
+                catch (Exception ex) { LogService.LogEvent("托盘菜单动作失败：" + ex.Message); }
+            }), DispatcherPriority.Background);
+        };
+        return mi;
+    }
+
+    private static T? Res<T>(string key) where T : class
+    {
+        try { return Application.Current?.TryFindResource(key) as T; }
+        catch { return null; }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    private void ShowTrayMenu()
+    {
+        try
+        {
+            if (_menu == null) return;
+            UpdateTrayMenu();
+            // 菜单没有宿主窗口，用鼠标位置定位；这是 WPF 托盘菜单的常规做法。
+            _menu.Placement = PlacementMode.MousePoint;
+            _menu.IsOpen = true;
+            // 弹出这一刻还处在 WinForms 的托盘消息里：键盘焦点还在任务栏（实测前台窗口是
+            // Shell_TrayWnd），菜单看得见，但按 Esc 没反应、点到别处也不收——那两件事都靠键盘焦点
+            // 与窗口激活。所以弹出后把焦点交给菜单自己的弹出窗口，WPF 的默认行为才真的生效。
+            // 这不是自造关闭逻辑：Esc 与失焦仍然是 ContextMenu 自己的处理。
+            // 弹出这一刻还处在 WinForms 的托盘消息里：键盘焦点还在任务栏（实测前台窗口是
+            // Shell_TrayWnd），菜单看得见，但按 Esc 没反应、点到别处也不收——那两件事都靠键盘焦点
+            // 与窗口激活。所以弹出后把焦点交给菜单自己的弹出窗口，WPF 的默认行为才真的生效。
+            // 这不是自造关闭逻辑：Esc 与失焦仍然是 ContextMenu 自己的处理。
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    if (PresentationSource.FromVisual(_menu) is System.Windows.Interop.HwndSource src)
+                        SetForegroundWindow(src.Handle);
+                    if (_menu.Items.Count > 0 && _menu.Items[0] is MenuItem first)
+                    {
+                        first.Focus();
+                        Keyboard.Focus(first);
+                    }
+                }
+                catch { }
+            }), DispatcherPriority.Input);
+        }
+        catch (Exception ex)
+        {
+            LogService.LogEvent("托盘菜单弹出失败：" + ex.Message);
+        }
+    }
+
+    private void CloseTrayMenu()
+    {
+        try { if (_menu != null) _menu.IsOpen = false; }
+        catch { }
+    }
+
+    /// <summary>
+    /// 刷新托盘菜单的运行状态：队列在跑时「一键开跑」变成说明文字并禁用（防止误操作）。
     /// </summary>
     private void UpdateTrayMenu()
     {
@@ -100,8 +217,8 @@ public partial class App
         {
             if (_miStart == null) return;
             bool running = QueueService.IsRunning;
-            _miStart.Enabled = !running;
-            _miStart.Text = running ? "队列运行中…（请先在主界面停止）" : "⚡ 一键开跑";
+            _miStart.IsEnabled = !running;
+            _miStart.Header = running ? "队列运行中…（请先在主界面停止）" : "⚡ 一键开跑";
 
             // 分子分母共用一份台账（RunJournal），与任务栏进度、接着跑按钮三处同源
             int doneToday = QueueService.DoneToolIdsToday().Count;
@@ -112,9 +229,9 @@ public partial class App
             {
                 // 菜单项只在「没在跑 + 今天跑成过至少一项 + 还有没跑成的」时出现
                 bool showContinue = !running && doneToday > 0 && leftToday > 0;
-                _miContinue.Visible = showContinue;
-                _miContinue.Enabled = showContinue;
-                _miContinue.Text = leftToday > 0 ? $"接着跑（今天还剩 {leftToday} 项）" : "接着跑";
+                _miContinue.Visibility = showContinue ? Visibility.Visible : Visibility.Collapsed;
+                _miContinue.IsEnabled = showContinue;
+                _miContinue.Header = leftToday > 0 ? $"接着跑（今天还剩 {leftToday} 项）" : "接着跑";
             }
 
             // v1.8 / F10：托盘悬停文字带上进度。不新增菜单项——
@@ -142,23 +259,17 @@ public partial class App
         catch { return ""; }
     }
 
-    /// <summary>主题切换后重新着色托盘菜单（深浅主题即时跟随）</summary>
+    /// <summary>
+    /// 主题切换的挂钩（Theme.Apply 每次换色都会叫一声）。
+    ///
+    /// <para>
+    /// v1.46.2 起这里是空的：菜单的颜色全部走 DynamicResource，Theme.Apply 把新刷子写进应用资源
+    /// 的那一刻，菜单下次弹出就已经是新颜色，不需要再逐项刷一遍。
+    /// 方法留着是因为调用点在 Theme.cs，删掉它等于为了这点小事去改主题服务。
+    /// </para>
+    /// </summary>
     public void RecolorMenu()
     {
-        try
-        {
-            if (_tray?.ContextMenuStrip == null) return;
-            var back = Theme.C("WindowBg");
-            var fore = Theme.C("TextPrimary");
-            _tray.ContextMenuStrip.BackColor = back;
-            _tray.ContextMenuStrip.ForeColor = fore;
-            foreach (wf.ToolStripItem item in _tray.ContextMenuStrip.Items)
-            {
-                item.BackColor = back;
-                item.ForeColor = fore;
-            }
-        }
-        catch { }
     }
 
     /// <summary>
@@ -213,28 +324,5 @@ public partial class App
             try { LogService.LogEvent("托盘气泡没弹出来：" + ex.Message); } catch { }
             return false;
         }
-    }
-
-
-    /// <summary>
-    /// 托盘菜单配色表（SPBGI）：全部取主题十色键，渲染时实时查询，
-    /// 深浅主题切换即时生效，消除默认渲染器的白底/白条。
-    /// </summary>
-    private sealed class ThemedMenuColors : wf.ProfessionalColorTable
-    {
-        public override System.Drawing.Color ToolStripDropDownBackground => Theme.C("CardBg");
-        public override System.Drawing.Color MenuBorder => Theme.C("Border");
-        public override System.Drawing.Color MenuItemBorder => Theme.C("Brand");
-        public override System.Drawing.Color MenuItemSelected => Theme.C("Hover");
-        public override System.Drawing.Color MenuItemSelectedGradientBegin => Theme.C("Hover");
-        public override System.Drawing.Color MenuItemSelectedGradientEnd => Theme.C("Hover");
-        public override System.Drawing.Color MenuItemPressedGradientBegin => Theme.C("Hover");
-        public override System.Drawing.Color MenuItemPressedGradientEnd => Theme.C("Hover");
-        public override System.Drawing.Color SeparatorDark => Theme.C("Border");
-        public override System.Drawing.Color SeparatorLight => Theme.C("CardBg");
-        public override System.Drawing.Color ToolStripBorder => Theme.C("Border");
-        public override System.Drawing.Color ImageMarginGradientBegin => Theme.C("CardBg");
-        public override System.Drawing.Color ImageMarginGradientMiddle => Theme.C("CardBg");
-        public override System.Drawing.Color ImageMarginGradientEnd => Theme.C("CardBg");
     }
 }
