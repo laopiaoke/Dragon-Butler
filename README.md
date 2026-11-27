@@ -34,11 +34,11 @@
 全程不修改游戏与第三方工具文件，不登录或读取游戏账号数据。
 
 <p align="center">
-  <img src="docs/proto/tasklist_collapsed_v1421.png" width="820" alt="主界面">
+  <img src="docs/proto/tasklist_collapsed_v147.png" width="820" alt="主界面">
 </p>
 
 <p align="center">
-  <sub>主界面：左侧为定时与执行摘要，右侧为任务清单卡片，显示当前工具顺序与预计耗时。</sub>
+  <sub>主界面：左侧为定时与执行摘要，右侧为任务清单卡片，显示当前工具顺序与预计耗时。工具的主程序与完成方式在「设置 → 工具配置」里改。</sub>
 </p>
 
 ## 下载与快速开始

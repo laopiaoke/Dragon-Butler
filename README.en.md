@@ -34,11 +34,11 @@ Dragon Butler is a WPF desktop queue dispatcher built on .NET 8. It does not imp
 It never modifies game or tool files, and it does not log into or read game account data.
 
 <p align="center">
-  <img src="docs/proto/tasklist_collapsed_v1421.png" width="820" alt="Main window">
+  <img src="docs/proto/tasklist_collapsed_v147.png" width="820" alt="Main window">
 </p>
 
 <p align="center">
-  <sub>Main window: schedule and run summary on the left; ordered task list and estimated duration on the right.</sub>
+  <sub>Main window: schedule and run summary on the left; ordered task list and estimated duration on the right. Each tool's executable and completion mode live under Settings → Tool setup.</sub>
 </p>
 
 ## Download & Quick Start
