@@ -183,6 +183,57 @@ internal static partial class Program
             hide.Success && bypasses.Contains("App.ForceExit") && bypasses.Contains("!AppState.Settings.StayInTray"));
         Check("托盘精简/允许关闭主窗", bypasses.Contains("App.Instance?.IsTrimming==true"));
 
+        // v1.46.1 / S15：启动时最小化必须「首帧之前」就藏好。
+        //
+        // 老写法是先 Show() 再 Hide()，中间隔着刷红点、两张报告、建托盘、起调度定时器——
+        // 那段距离足够首帧画到屏幕上，现象是「闪一下才消失」。
+        // 这里只守「顺序」这一件事：四样属性全部出现在 Show() 之前，且不再有 Show 之后的 Hide。
+        var appXaml = ReadRepoSources("Dragon Butler/App.xaml");
+        var appCs = ReadRepoSources("Dragon Butler/App.xaml.cs");
+        var presentation = ReadRepoSources("Dragon Butler/StartupPresentation.cs");
+
+        Check("隐藏启动/App.xaml 没有 StartupUri（主窗只能由代码建）",
+            !appXaml.Contains("StartupUri", StringComparison.Ordinal));
+
+        // 找 OnStartup 里那一段：从「算 hiddenStart」到 Show() 为止。
+        string startup = SliceBetween(appCs, "bool hiddenStart =", "_win.Show();");
+        Check("隐藏启动/先算 hiddenStart 再建窗", startup.Length > 0);
+        // 四个属性必须在 Show() 之前设好——写成一个方法调用，顺序由 StartupPresentation 保证。
+        var beforeShow = Regex.Match(startup, @"if\s*\(\s*hiddenStart\s*\)\s*StartupPresentation\.PrepareHidden\(\s*_win\s*\)\s*;");
+        Check("隐藏启动/属性全部在 Show() 之前摆好", beforeShow.Success);
+        // Show() 之前不许出现 Hide()：真要藏，四样属性就够，Hide 只允许紧跟在 Show() 之后。
+        Check("隐藏启动/Show() 之前没有 Hide()",
+            !startup.Contains("_win.Hide(", StringComparison.Ordinal));
+        // 老写法把 Hide() 放在 RefreshNoticeBadge / 两张报告 / BuildTray 之后，
+        // 那是「首帧已出」的证据。后来那段里不许再有 Hide。
+        string lateStartup = SliceBetween(appCs, "BuildTray();\r\n        _scheduleTimer.Tick", "if (AppState.Settings.SentinelEnabled)");
+        Check("隐藏启动/建托盘之后不再补一次 Hide()",
+            lateStartup.Length > 0 && !lateStartup.Contains("_win.Hide(", StringComparison.Ordinal),
+            lateStartup.Length == 0 ? "切成空片" : "");
+
+        // StartupPresentation 里四个属性一个都不能少，且都必须早于任何 Show 调用。
+        string prepare = SliceBetween(presentation, "public static void PrepareHidden(Window window)", "}");
+        foreach (string prop in new[] { "ShowActivated", "WindowState", "Visibility", "ShowInTaskbar" })
+        {
+            Check($"隐藏启动/PrepareHidden 设了 {prop}",
+                prepare.Contains(prop + " = ", StringComparison.Ordinal));
+        }
+        Check("隐藏启动/PrepareHidden 里没有 Show（属性必须先于展示）",
+            !prepare.Contains(".Show(", StringComparison.Ordinal));
+        Check("隐藏启动/恢复时按相反方向还原",
+            SliceBetween(presentation, "public static void RestoreShown(Window window)", "}")
+                .Contains("ShowInTaskbar = true", StringComparison.Ordinal)
+            && presentation.Contains("Visibility = Visibility.Visible", StringComparison.Ordinal));
+        Check("隐藏启动/手动建窗后登记 Application.MainWindow",
+            Regex.IsMatch(appCs, @"MainWindow\s*=\s*_win\s*;"));
+        // OnStartup 里调度器的接线不许被这次改动碰到（v1.46.0 刚修好）。
+        Check("隐藏启动/没动 ScheduleTrigger 的接线",
+            appCs.Contains("_scheduleTimer.Tick += (_, _) => ScheduleTrigger.Check(DateTime.Now);", StringComparison.Ordinal)
+            && appCs.Contains("_scheduleTimer.Start();", StringComparison.Ordinal));
+        // 值域：开关两个都开才藏，缺一个都不藏。
+        Check("隐藏启动/两个开关都开才算数",
+            presentation.Contains("startMinimized && stayInTray", StringComparison.Ordinal));
+
         Console.WriteLine($"RESULT uirules fails={fails.Count}");
         return fails.Count == 0 ? 0 : 1;
     }

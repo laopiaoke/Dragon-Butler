@@ -37,7 +37,7 @@ Dragon-Butler（一条龙管家）：Windows 桌面小工具，替人按下「�
 | `docs/VOICE.md` | 文案语气与反例。新写一句面向用户的话，先在这里找同类的写法 |
 | `docs/PATTERNS.md` | 交互模式 checklist。新加按钮/入口前对一遍 |
 
-动代码前还要过一遍失败模式签名：`docs/SIGNATURES.md`（S1–S14，逐条自查；交付报告里引用「命中 S#」以那份为准）。
+动代码前还要过一遍失败模式签名：`docs/SIGNATURES.md`（S1–S15，逐条自查；交付报告里引用「命中 S#」以那份为准）。
 
 ## 对外文档写作要求
 

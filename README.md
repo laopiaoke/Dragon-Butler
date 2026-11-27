@@ -199,7 +199,7 @@ $stub = (Resolve-Path tests\StubTool\bin\Release\net8.0\StubTool.exe).Path
 
 本项目以 [GNU AGPL-3.0](LICENSE) 开源发布。使用、修改或再分发（含作为网络服务提供）均须遵守 AGPL-3.0 条款，继续开源并提供完整源码，同时请保留上述使用须知，避免下游用户误以为官方产品。
 
-- 当前版本：**v1.46**（工程内 `1.46.0`）
+- 当前版本：**v1.46.1**（工程内 `1.46.1`）
 - 版本更新日志：[RELEASE_NOTES.md](RELEASE_NOTES.md)
 - 随包用户手册：[docs/使用说明.txt](docs/使用说明.txt)
 - 演进记录与设计取舍：[docs/路线图.md](docs/路线图.md)
