@@ -63,7 +63,7 @@ internal sealed partial class UiRunner
                             $"extent={homeScroll.ExtentHeight:F0} scrollable={homeScroll.ScrollableHeight:F1}");
                         Console.WriteLine($"ZERO-SCROLL collapsed_ok={(homeScroll.ScrollableHeight <= 0.5 ? "YES" : "NO")}");
                         // v1.42.1 / M9-3（D17）：契约说的是「摘要、一键开跑、添加行都看得见」，
-// 不是「整页一点都滚不动」——「每个工具怎么跑」那一段本来就在折叠线下面，
+// 不是「整页一点都滚不动」——折叠线下面本来还有「每个工具怎么跑」那一段，v1.47 搬走之后
 // 注释里写明了「上面挑、下面配，往下滚一点就到」。拿整页 ExtentHeight 当判据
 // 会把它算成赤字，逼着人去砍一段本来就不该进首屏的内容。
 // 所以量三块东西的底边：都在视口里，才算达成。
@@ -100,15 +100,12 @@ if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
                                         if (hcc is System.Windows.FrameworkElement hf && hf.ActualHeight > 0)
                                             Console.WriteLine($"ZERO-SCROLL       hero={hf.Name}/{hf.GetType().Name} h={hf.ActualHeight:F0}");
                         // 超预算时要知道是哪一块撑出来的，不然只能瞎调间距。
-                                                        // 工具行宿主与「每个工具怎么跑」块也逐行量。
+                                                        // 工具行宿主逐行量。
                         if (win.FindName("ToolRowHost") is System.Windows.Controls.StackPanel rh)
                             foreach (System.Windows.UIElement r in rh.Children)
                                 if (r is System.Windows.FrameworkElement rfe && rfe.ActualHeight > 0)
                                     Console.WriteLine($"ZERO-SCROLL       rowhost={rfe.Name}/{rfe.GetType().Name} h={rfe.ActualHeight:F0} margin={rfe.Margin}");
-                        if (win.FindName("ToolSetupBlock") is System.Windows.Controls.StackPanel tsb)
-                            foreach (System.Windows.UIElement s in tsb.Children)
-                                if (s is System.Windows.FrameworkElement sfe && sfe.ActualHeight > 0)
-                                    Console.WriteLine($"ZERO-SCROLL       setup={sfe.Name}/{sfe.GetType().Name} h={sfe.ActualHeight:F0} margin={sfe.Margin}");                                // 底部动作区逐行量：超 20px 时得知道钱花在哪一行。
+                        // v1.47 / M11-4（D23）：「每个工具怎么跑」整块搬去设置页了，主页这条量测线跟着撤掉。                                // 底部动作区逐行量：超 20px 时得知道钱花在哪一行。
                         if (win.FindName("QueueCard") is System.Windows.Controls.Border qcard && qcard.Child is System.Windows.Controls.Panel qpanel)
                             foreach (System.Windows.UIElement qchild in qpanel.Children)
                                 if (qchild is System.Windows.Controls.StackPanel bottom && System.Windows.Controls.Grid.GetRow(bottom) == 5)
@@ -233,7 +230,9 @@ if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
             // 这一张要证明的是「它不再是一张默认收起的折叠卡」——
             // 进来就看得见目录在哪、装了什么（这里种两条：一条能读、一条读不懂），
             // 以及下面那两条「能做什么/不能做什么」。
-            if (mode == "plugins" || mode == "all")
+            // v1.47 / M11-2：插件页三种状态各出一张图——只有成功项、只有失败项（全空另出）。
+            // 同一段播种，靠 seed 决定种哪几条，免得三份代码走样。
+            if (mode == "plugins" || mode == "plugins_ok" || mode == "plugins_empty" || mode == "all")
             {
                 SeedSampleQueue();
                 var sandbox = Path.Combine(Path.GetTempPath(), "dragon-plugins-render");
@@ -241,6 +240,10 @@ if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
                 PluginLoader.RootOverride = sandbox;
                 try
                 {
+                    bool seedOk = mode != "plugins_empty";
+                    bool seedBad = mode == "plugins" || mode == "all";
+                    if (seedOk)
+                    {
                     var okDir = Path.Combine(sandbox, "daily-report");
                     Directory.CreateDirectory(okDir);
                     File.WriteAllText(Path.Combine(okDir, "metadata.json"),
@@ -249,10 +252,14 @@ if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
                         new System.Text.UTF8Encoding(false));
                     File.WriteAllText(Path.Combine(okDir, "Plugin.dll"), "", new System.Text.UTF8Encoding(false));
 
-                    var badDir = Path.Combine(sandbox, "half-done");
-                    Directory.CreateDirectory(badDir);
-                    File.WriteAllText(Path.Combine(badDir, "metadata.json"),
-                        "{\"id\":\"half-done\"}", new System.Text.UTF8Encoding(false));
+                    }
+                    if (seedBad)
+                    {
+                        var badDir = Path.Combine(sandbox, "half-done");
+                        Directory.CreateDirectory(badDir);
+                        File.WriteAllText(Path.Combine(badDir, "metadata.json"),
+                            "{\"id\":\"half-done\"}", new System.Text.UTF8Encoding(false));
+                    }
                 }
                 catch (Exception ex) { Console.WriteLine("SEED-PLUGINS-FAIL " + ex.Message); }
 
@@ -261,7 +268,8 @@ if (mode == "rows" && !(okSummary && okStart && okAdd)) zeroScrollFail = true;
                 w.Show();
                 SwitchToPluginsPage(w);
                 w.UpdateLayout();
-                bool ok = Save(w, Path.Combine(spot, "plugins.png"), 980, 0);
+                string shot = mode == "plugins_ok" ? "plugins_ok.png" : mode == "plugins_empty" ? "plugins_empty.png" : "plugins.png";
+                bool ok = Save(w, Path.Combine(spot, shot), 980, 0);
                 Console.WriteLine($"RENDER plugins={ok}");
                 w.Close();
 

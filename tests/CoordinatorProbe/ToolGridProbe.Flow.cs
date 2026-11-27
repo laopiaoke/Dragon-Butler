@@ -49,9 +49,10 @@ internal sealed partial class ToolGridProbe
         // 不再看 Row 序号（卡会挪），只看「两列存在 + 四张卡两两并排 + 通知占满第一排」。
         Check("设置页/两列卡片墙", mainXaml.Contains("<ColumnDefinition Width=\"*\"") && SliceBetween(mainXaml, "x:Name=\"PageSettings\"", "</Grid.ColumnDefinitions>").Contains("<ColumnDefinition Width=\"*\""));
         Check("设置页/通知卡还在", mainXaml.Contains("x:Name=\"NotifyCard\""));
-        // v1.41 / M4-1：卡片不再按 Grid 行列摆，改成五个竖排分区，一次只显示一个。
-        Check("设置页/五个分区一次只显示一个",
-            new[] { "SecGuard", "SecTiming", "SecNotify", "SecApi", "SecUi" }.All(n => mainXaml.Contains("x:Name=\"" + n + "\" Visibility=\"Collapsed\"")));
+        // v1.41 / M4-1：卡片不再按 Grid 行列摆，改成竖排分区，一次只显示一个。
+        // v1.47 / M11-3：多了「工具配置」这一区，从五变六。
+        Check("设置页/六个分区一次只显示一个",
+            new[] { "SecGuard", "SecTiming", "SecNotify", "SecApi", "SecTools", "SecUi" }.All(n => mainXaml.Contains("x:Name=\"" + n + "\" Visibility=\"Collapsed\"")));
         Check("设置页/一级只有入口卡没有人开关",
             mainXaml.Contains("x:Name=\"SettingsEntryHost\"") && SliceBetween(mainXaml, "x:Name=\"SettingsHome\"", "x:Name=\"SettingsSection\"").IndexOf("TgSchedule", StringComparison.Ordinal) < 0);
         Check("设置页/五张卡各有标题", new[] { "守护与恢复", "定时与节奏", "接口与维护", "启动与界面", "报告" }.All(t => mainXaml.Contains("Text=\"" + t + "\"")));
@@ -131,8 +132,9 @@ internal sealed partial class ToolGridProbe
         Check("分页/翻到第四页就到头", Pager.Clamp(9) == 3);
         Check("插件页/有自己的一页", mainXaml.Contains("x:Name=\"PagePlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
         Check("插件页/从设置页撤走了", !mainXaml.Contains("x:Name=\"BtnFoldPlugins\""));
-        Check("插件页/说清能做什么不能做什么", mainXaml.Contains("插件能做什么、不能做什么"));
-        Check("插件页/装坏了也不拖垮主程序", mainXaml.Contains("装坏了也不会让主程序起不来"));
+        // v1.47 / M11-1（D22）：两段说明从两张卡收进 ⓘ 弹窗，话一句没少，只是换了落点——判据跟着搬到代码侧。
+        Check("插件页/说清能做什么不能做什么", mainCs.Contains("不能做：改界面、停队列、动设置、读文件、访问任意网址。"));
+        Check("插件页/装坏了也不拖垮主程序", mainCs.Contains("装坏了也不会让主程序起不来，只会在下面列成一条「没加载」并写明原因。"));
         bool archived;
         try { archived = ReadRepoSources("docs/plugin-samples/miyoushe/MiyousheBbs.cs").Length > 1000; }
         catch { archived = false; }

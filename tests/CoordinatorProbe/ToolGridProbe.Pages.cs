@@ -101,9 +101,9 @@ internal sealed partial class ToolGridProbe
             // 结果是深色字贴在灰底上、比原来更难读。所以字色必须落在 Bd 的 TextElement.Foreground。
             SliceBetween(mainXaml, "<Style x:Key=\"LaunchPrimary\"", "</Style>")
                 .Contains("Property=\"TextElement.Foreground\""));
-        Check("首运行/提示行与工具块一起收起",
-            mainCs.Contains("TbGridHint.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;")
-            && mainCs.Contains("ToolSetupBlock.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;"));
+        // v1.47 / M11-4（D23）：工具块搬去设置页了，主页只需要守提示行。
+        Check("首运行/提示行跟着收起",
+            mainCs.Contains("TbGridHint.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;"));
 
         // 任务书 P0-2：26 高 / 11 号字在深色底上又小又密，低于可点中尺寸。
         Check("小按钮/长到 30 高",
@@ -118,12 +118,14 @@ internal sealed partial class ToolGridProbe
             new[] { "BtnWeeklyPlan_Click", "BtnCalendar_Click", "BtnToday_Click", "BtnDepends_Click", "BtnGroupSlice_Click" }
                 .All(h => !mainXaml.Contains(h)) && !mainXaml.Contains("BtnQueueView"));
 
-        // 任务书 P1-4：只配了一部分时也是警示——那正是「一键开跑」会悄悄跳过它们的场景。
-        Check("半配/文案用警示色",
-            SliceBetween(mainCs, "if (missing.Count == 0)", "catch (Exception ex)")
+        // v1.47 / M11-4（D23）：主页那句「已配 N 个 · 还有 M 个没配」搬走之后，
+        // 半配状态的提示落到设置页每一行自己身上——未配置的行用警示色说明，已就绪的行用三级灰。
+        // 任务书 P1-4 要守的那件事没变：没配好的必须一眼看得出来，而且不能和配好的一样淡。
+        Check("半配/没配好的用警示色",
+            SliceBetween(mainCs, "private Border BuildToolSettingsRow", "return row;")
                 .Split(new[] { "WarningBrush" }, StringSplitOptions.None).Length - 1 >= 2);
         Check("半配/配齐了才用三级灰",
-            SliceBetween(mainCs, "TbToolsSummary.Text = $\"已配 {ready} 个\";", "}")
+            SliceBetween(mainCs, "private Border BuildToolSettingsRow", "return row;")
                 .Contains("TextTertiaryBrush"));
     }
 
@@ -133,20 +135,23 @@ internal sealed partial class ToolGridProbe
         // 设置页：两列四卡，每张卡有图标标题副标题，行与行之间只靠留白和一条极淡的分隔线。
         // 判据全部落在「结构属性」上，不看标签在文件里的先后（v1.32 在这里绊过一跤）。
         settingsPane = SliceBetween(mainXaml, "x:Name=\"PageSettings\"", "</Grid>\n                    </ScrollViewer>");
-        // v1.41 / M4-1：卡片墙拆成五个竖排分区，一次只铺一个；这里守的是「五个分区都在、都默认收起」。
-        Check("设置页/五个分区竖排铺开",
-            new[] { "SecGuard", "SecTiming", "SecNotify", "SecApi", "SecUi" }
+        // v1.41 / M4-1：卡片墙拆成竖排分区，一次只铺一个；这里守的是「分区都在、都默认收起」。
+        // v1.47 / M11-3：多了「工具配置」这一区，从五变六。
+        Check("设置页/六个分区竖排铺开",
+            new[] { "SecGuard", "SecTiming", "SecNotify", "SecApi", "SecTools", "SecUi" }
                 .All(n => settingsPane.Contains("x:Name=\"" + n + "\"")));
         Check("设置页/每张卡都有图标和副标题",
-            System.Text.RegularExpressions.Regex.Matches(settingsPane, "<Border Width=\"26\" Height=\"26\" CornerRadius=\"8\" Background=\"\\{DynamicResource BrandSoftBrush\\}\">").Count >= 5);
+            System.Text.RegularExpressions.Regex.Matches(settingsPane, "<Border Width=\"26\" Height=\"26\" CornerRadius=\"8\" Background=\"\\{DynamicResource BrandSoftBrush\\}\">").Count >= 6);
         Check("设置页/行用 SetRow 而不是每行套一块浅底",
             settingsPane.Contains("Style=\"{StaticResource SetRow}\"")
             && !settingsPane.Contains("Style=\"{StaticResource SettingCard}\""));
         Check("设置页/最后一行不画分隔线", settingsPane.Contains("Style=\"{StaticResource SetRowLast}\""));
         Check("设置页/通知卡还在", settingsPane.Contains("x:Name=\"NotifyCard\""));
-        Check("设置页/五张卡都还在",
+        // v1.47 / M11-3：多了「工具配置」这一卡。
+        Check("设置页/六张卡都还在",
             settingsPane.Contains("守护与恢复") && settingsPane.Contains("启动与界面")
-            && settingsPane.Contains("定时与节奏") && settingsPane.Contains("接口与维护"));
+            && settingsPane.Contains("定时与节奏") && settingsPane.Contains("接口与维护")
+            && settingsPane.Contains("x:Name=\"SecTools\""));
         Check("设置页/不再有 AdvancedBody 和 SystemBody", !mainXaml.Contains("AdvancedBody") && !mainXaml.Contains("SystemBody"));
 
         // v1.41 / M1-1：日志不再是底栏的一页，「带折角的纸」那个图标跟着它的按钮一起退场；

@@ -199,7 +199,7 @@ Package both release variants into `发布\`:
 
 Licensed under [GNU AGPL-3.0](LICENSE). Any redistribution or modified network deployment must remain licensed under AGPL-3.0 with full source code provided, and must retain the disclaimers above.
 
-- Latest release: **v1.46.2** (`1.46.2` in-app)
+- Latest release: **v1.47.0** (`1.47.0` in-app)
 - Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 - User manual (Chinese): [docs/使用说明.txt](docs/使用说明.txt)
 - Design history & trade-offs: [docs/路线图.md](docs/路线图.md)

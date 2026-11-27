@@ -18,7 +18,8 @@ internal sealed partial class UiRunner
 {
     private void Step24()
     {
-            // v1.41 / M4-1：设置页从「一屏全是开关」改成「一级五张入口卡 + 二级才铺开关」。
+            // v1.41 / M4-1：设置页从「一屏全是开关」改成「一级入口卡 + 二级才铺开关」。
+            // v1.47 / M11-3：多了「工具配置」这一区。
             // 老的 advanced/top 只能拍到一级那五张卡，二级到底长什么样需要单独拍。
             if (mode == "panes" || mode == "all")
             {
@@ -33,6 +34,7 @@ internal sealed partial class UiRunner
                     ("Timing", "pane_timing.png"),
                     ("Notify", "pane_notify.png"),
                     ("Api", "pane_api.png"),
+                    ("Tools", "pane_tools.png"),
                     ("Ui", "pane_ui.png"),
                 })
                 {

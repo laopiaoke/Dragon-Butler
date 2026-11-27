@@ -620,9 +620,14 @@ public partial class MainWindow : Window
 
         AppState.Settings.Theme = mode;
         AppState.SaveSettings();
-        _themeAnimatingSwitch = true;
-        try { Theme.Set(mode); }
-        finally { _themeAnimatingSwitch = false; }
+        // v1.47 / M11-5（D24）：换字典这件事本身会闪一下（背景、字色、边框不是同时换的），
+        // 把旧画面截下来盖在上面淡出 250ms，中间那一帧就没人看得见。
+        ThemeFade.Run(this, () =>
+        {
+            _themeAnimatingSwitch = true;
+            try { Theme.Set(mode); }
+            finally { _themeAnimatingSwitch = false; }
+        });
 
         PlaceThemeThumb(to, animate: true);
     }
@@ -1724,25 +1729,9 @@ public partial class MainWindow : Window
         if (expand) RefreshToolCard(toolId);
     }
 
-    /// <summary>上一次画出来的那排工具按键的签名（id + 有没有配好）。</summary>
-    private string _toolButtonSignature = "";
-
     /// <summary>
-    /// v1.32：「每个工具怎么跑」那一排小按键。
-    ///
-    /// <para>
-    /// 原来是「工具设置」折叠区，里面每个工具再套一层折叠卡。用户想看 BetterGI，
-    /// 得先展开整个区、再展开 BetterGI——两次点击都在回答同一个问题「它在哪」。
-    /// 现在一个工具一个按键，点一下直接开它的配置窗口，跟托管桌面里「左键点图标」是同一个动作。
-    /// </para>
-    /// <para>
-    /// 图标 20×20、按键高 30：比格子小一号，因为它们不承担「今晚跑不跑」的信息，
-    /// 只承担「去哪改它」。排不下会自动换行（WrapPanel）。
-    /// </para>
-    /// </summary>
-    /// <summary>
-    /// 「我现在在用的工具」——小按键那一排和右边那句「已配 N 个」用的是同一份名单。
-    /// 两处各自算一遍的话，迟早会出现「一排三颗按键，摘要写着还有五个没配」这种自相矛盾。
+    /// 「我现在在用的工具」——主页的工具行和设置页「工具配置」那张卡用的是同一份名单。
+    /// 两处各自算一遍的话，迟早会出现「一行三个工具，设置页写着还有五个没配」这种自相矛盾。
     /// </summary>
     private static List<string> ToolButtonIds()
     {
@@ -1772,134 +1761,176 @@ public partial class MainWindow : Window
         return ids;
     }
 
-    private void RenderToolButtons()
+    // v1.47 / M11-4（D23）：原来这里有个 RefreshToolsSummary()，把「已配 N 个 · 还有 M 个没配」
+    // 写到主页任务清单卡的标题行右侧。那行字和工具小按键一起搬走了——设置页「工具配置」每一行
+    // 都自带「已就绪 / 未配置」的胶囊，比一句汇总更准，也不用再维护第二份计数。
+
+    // ===== v1.47 / M11-3：工具配置（设置页第 6 张卡）=====
+    //
+    // 这一块原来在主页任务清单卡的最下面（标题「每个工具怎么跑」），一直要往下滚才看得见，
+    // 而且那是「跑之前」的动线——真正想改程序位置的时候，人是去找设置的。
+    // 搬到设置页之后，主页那张卡只回答一个问题：今晚跑什么。
+    //
+    // 弹窗没换：还是 ToolLaunchWindow，内容一个字都没动。
+
+    private string _toolSettingsSignature = "";
+
+    /// <summary>设置页「工具配置」那一列：一行一个工具，点哪行就开哪个工具的配置窗。</summary>
+    private void RefreshToolSettingsList()
     {
-        if (ToolButtonHost == null) return;
+        if (SecToolsHost == null) return;
 
         var ids = ToolButtonIds();
 
-        // 每秒一次的界面轮询也会走到这里。签名没变就一个控件都不碰——
-        // 重造一排按钮不只是浪费，还会把正按在上面的手指/鼠标弄丢（v1.23 桌面格子踩过同一条）。
+        // 跟主页那排按键同一套办法：每秒一次的界面轮询也会走到这里，
+        // 签名没变就一个控件都不碰，免得把正按在上面的手指弄丢。
         string signature = Theme.Mode + ":" + (Theme.LastSchemeLight ? "L" : "D") + "|" +
                            string.Join("|", ids.Select(id =>
                                id + ":" + (ToolRunner.HasExecutable(ProfileRegistry.Get(id)) ? "1" : "0")));
-        if (signature == _toolButtonSignature) return;
-        _toolButtonSignature = signature;
+        if (signature == _toolSettingsSignature) return;
+        _toolSettingsSignature = signature;
 
-        ToolButtonHost.Children.Clear();
-        foreach (string id in ids) ToolButtonHost.Children.Add(BuildToolButton(id));
+        SecToolsHost.Children.Clear();
+        for (int i = 0; i < ids.Count; i++)
+        {
+            SecToolsHost.Children.Add(BuildToolSettingsRow(ids[i], i == ids.Count - 1));
+        }
+
+        if (SecToolsHost.Children.Count == 0)
+        {
+            SecToolsHost.Children.Add(new TextBlock
+            {
+                Text = "队列里还没有工具。回主页点「＋ 添加工具」，或者在这里加一个自定义的。",
+                FontSize = 10.5,
+                Margin = new Thickness(16, 12, 16, 14),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            });
+        }
     }
 
-    private Border BuildToolButton(string toolId)
+    /// <summary>工具配置里的一行：图标 + 名字 + 状态徽章 + 一句「它怎么跑」，整行可点。</summary>
+    private Border BuildToolSettingsRow(string toolId, bool last)
     {
         var profile = ProfileRegistry.Get(toolId);
         bool ready = ToolRunner.HasExecutable(profile);
 
+        var row = new Border
+        {
+            Style = (Style?)FindResource(last ? "SetRowLast" : "SetRow"),
+            Cursor = Cursors.Hand,
+            Tag = toolId,
+            ToolTip = ready ? profile.DisplayName + "\n" + profile.ExecutablePath : profile.DisplayName + "\n还没找到主程序——点一下填上。",
+        };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // 图标 28：这一行比主页那排按键宽松，但仍然不该比名字更显眼。
         var icon = new Border
         {
-            Width = 20,
-            Height = 20,
-            CornerRadius = new CornerRadius(6),
+            Width = 28,
+            Height = 28,
+            CornerRadius = new CornerRadius(8),
             Background = BrushOf("ControlBgBrush") ?? DotGray,
             VerticalAlignment = VerticalAlignment.Center,
         };
         var bmp = ToolIconService.GetBitmap(profile);
         if (bmp != null)
         {
-            icon.Child = new Image { Source = bmp, Stretch = Stretch.Uniform, Margin = new Thickness(2) };
+            icon.Child = new Image { Source = bmp, Stretch = Stretch.Uniform, Margin = new Thickness(3) };
         }
         else
         {
             icon.Child = new TextBlock
             {
                 Text = profile.DisplayName.Length > 0 ? profile.DisplayName[..1] : "?",
-                FontSize = 11,
+                FontSize = 12,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
             };
         }
+        Grid.SetColumn(icon, 0);
+        grid.Children.Add(icon);
 
-        var stack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        stack.Children.Add(icon);
-        stack.Children.Add(new TextBlock
+        var text = new StackPanel
+        {
+            Margin = new Thickness(11, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        text.Children.Add(new TextBlock
         {
             Text = profile.DisplayName,
-            FontSize = 11.5,
-            Margin = new Thickness(7, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 12.5,
             Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
-            MaxWidth = 96,
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
-
-        var btn = new Border
+        text.Children.Add(new TextBlock
         {
-            Height = 30,
-            Margin = new Thickness(0, 0, 6, 6),
-            Padding = new Thickness(8, 0, 10, 0),
-            CornerRadius = new CornerRadius(8),
-            Background = BrushOf("InsetBrush") ?? DotGray,
-            BorderThickness = new Thickness(1),
-            BorderBrush = BrushOf(ready ? "BorderBrush" : "WarningBrush") ?? DotGray,
-            Child = stack,
-            Cursor = Cursors.Hand,
-            Tag = toolId,
-            ToolTip = ready
-                ? profile.DisplayName + "\n" + profile.ExecutablePath
-                : profile.DisplayName + "\n还没找到主程序——点一下填上。",
+            Text = ready
+                ? "主程序：" + profile.ExecutablePath
+                : "还没找到主程序。点这一行填上，不然「一键开跑」会跳过它。",
+            FontSize = 10.5,
+            Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = ready
+                ? (BrushOf("TextTertiaryBrush") ?? DotGray)
+                : (BrushOf("WarningBrush") ?? DotYellow),
+        });
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+
+        var right = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
         };
-        btn.MouseEnter += (_, _) => btn.Background = BrushOf("HoverBrush") ?? DotGray;
-        btn.MouseLeave += (_, _) => btn.Background = BrushOf("InsetBrush") ?? DotGray;
-        btn.MouseLeftButtonDown += (_, _) => OpenToolLaunch(toolId);
-        return btn;
-    }
-
-    /// <summary>「已配 1 个 / 3 个都没配」——收起状态下唯一能看出配置状况的地方。</summary>
-    private void RefreshToolsSummary()
-    {
-        try
+        right.Children.Add(new Border
         {
-            int ready = 0;
-            var missing = new List<string>();
-            // v1.33：跟小按键那一排用同一份名单。原来这里写死三个内置 + 自定义卡，
-            // 于是「只勾了 BetterGI」的人会看到「已配 1 个·还有 2 个没配」——
-            // 那两个他根本没勾，报出来只是在提醒他「你还不够」。
-            foreach (string id in ToolButtonIds())
+            Height = 20,
+            Padding = new Thickness(8, 0, 8, 0),
+            CornerRadius = new CornerRadius(10),
+            VerticalAlignment = VerticalAlignment.Center,
+            Background = ready
+                ? (BrushOf("BrandSoftBrush") ?? DotGray)
+                : (BrushOf("InsetBrush") ?? DotGray),
+            Child = new TextBlock
             {
-                try
-                {
-                    var p = ProfileRegistry.Get(id);
-                    if (ToolRunner.HasExecutable(p)) ready++;
-                    else missing.Add(p.DisplayName);
-                }
-                catch { }
-            }
+                Text = ready ? "已就绪" : "未配置",
+                FontSize = 10.5,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = ready
+                    ? (BrushOf("BrandTextBrush") ?? DotGreen)
+                    : (BrushOf("WarningBrush") ?? DotYellow),
+            },
+        });
 
-            if (missing.Count == 0)
-            {
-                TbToolsSummary.Text = $"已配 {ready} 个";
-                TbToolsSummary.Foreground = BrushOf("TextTertiaryBrush") ?? DotGray;
-            }
-            else
-            {
-                // 只报「还有几个没配」而不点名：点名会把一整排名字塞进 10.5 号字里，
-                // 而且哪个没配点开就看得到。
-                TbToolsSummary.Text = ready == 0
-                    ? "还没配，点开填一下"
-                    : $"已配 {ready} 个 · 还有 {missing.Count} 个没配";
-                // v1.37：只配了一部分时也是警示，不是普通状态——
-                // 「一键开跑」会把没配好的那几个直接跳过，跑出来的结果和用户以为的不一样。
-                // 原来这里跟「全部配好」一样用三级灰，等于把一句要紧的话写成了旁白。
-                TbToolsSummary.Foreground = ready == 0
-                    ? (BrushOf("WarningBrush") ?? DotYellow)
-                    : (BrushOf("WarningBrush") ?? DotYellow);
-            }
-        }
-        catch (Exception ex)
+        var chevron = new System.Windows.Shapes.Path
         {
-            LogService.LogEvent("工具摘要刷新失败：" + ex.Message);
-        }
+            Data = Geometry.Parse("M9,6 L15,12 L9,18"),
+            Stroke = BrushOf("TextTertiaryBrush") ?? DotGray,
+            StrokeThickness = 1.5,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Width = 9,
+            Height = 9,
+            Stretch = Stretch.Uniform,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        right.Children.Add(chevron);
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(right);
+
+        row.Child = grid;
+        row.MouseEnter += (_, _) => row.Background = BrushOf("HoverBrush") ?? DotGray;
+        row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+        row.MouseLeftButtonUp += (_, _) => OpenToolLaunch(toolId);
+        return row;
     }
 
     // ===== v1.42 / M8-2：横向工具行 =====
@@ -2591,8 +2622,7 @@ public partial class MainWindow : Window
         {
             try { RefreshCustomToolCard(id); } catch { }
         }
-        RefreshToolsSummary();
-        try { RenderToolButtons(); } catch { }
+        try { RefreshToolSettingsList(); } catch { }
         try { SyncToolGrid(); } catch { }
         // 路径或配置名刚变过时要重读；节流在 RefreshCompletionRow 里，20 秒最多读一次盘
         try { RefreshCompletionRow(); } catch { }
@@ -3975,7 +4005,7 @@ public partial class MainWindow : Window
         RebuildCustomToolCards();
         RenderToolGrid();
         RenderQueue();
-        RefreshToolsSummary();
+        try { RefreshToolSettingsList(); } catch { }
         AppState.PublishLog($"✓ 已移除工具：{name}");
         LogService.LogEvent($"移除工具：{toolId}");
     }
@@ -4966,7 +4996,7 @@ public partial class MainWindow : Window
     // 为什么这么切：以前五张卡并排，一眼看到二十多个开关，想改「失败之后还跑不跑」
     // 得先在一堆字里认出哪一行属于它。按「你什么时候会想改它」分成五类之后，
     // 一级那屏只回答一个问题：我要改的是哪一类。
-    private enum SettingsPane { None, Guard, Timing, Notify, Api, Ui }
+    private enum SettingsPane { None, Guard, Timing, Notify, Api, Tools, Ui }
 
     private SettingsPane _settingsPane = SettingsPane.None;
 
@@ -4977,6 +5007,7 @@ public partial class MainWindow : Window
         (SettingsPane.Timing, "定时",       "几点跑、中间歇多久", "M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,7.5 L12,12 L15,13.5"),
         (SettingsPane.Notify, "通知",       "跑完怎么告诉你",     "M6,9 A6,6 0 0 1 18,9 L18,14 L20,16 L4,16 L6,14 Z M10,19 A2,2 0 0 0 14,19"),
         (SettingsPane.Api,    "接口",       "给外面的东西开个口", "M7,8 L4,12 L7,16 M17,8 L20,12 L17,16 M14,6 L10,18"),
+        (SettingsPane.Tools,  "工具配置",   "主程序与完成方式",   "M4,6 L20,6 L20,17 L4,17 Z M4,10 L20,10 M7,14 L11,14 M15,14 L17,14"),
         (SettingsPane.Ui,     "界面与启动", "平时怎么用它",       "M4,6 L20,6 L20,17 L4,17 Z M9,21 L15,21 M12,17 L12,21"),
     };
 
@@ -5120,6 +5151,7 @@ public partial class MainWindow : Window
             (SettingsPane.Timing, SecTiming),
             (SettingsPane.Notify, SecNotify),
             (SettingsPane.Api,    SecApi),
+            (SettingsPane.Tools,  SecTools),
             (SettingsPane.Ui,     SecUi),
         };
         foreach (var pair in hosts)
@@ -5143,6 +5175,13 @@ public partial class MainWindow : Window
         // v1.41 / M4-1：通知卡默认是收起的（平时不看渠道，收着才不占地方）。
         // 但人既然点了「通知」这一个入口，就是想改通知——替他把卡打开，
         // 不然点进来只看见一个标题，还得再点一次。
+        // v1.47 / M11-3：工具列表要等这一屏露出来才量得到行高，和说明折叠同一处调度。
+        if (pane == SettingsPane.Tools)
+        {
+            _toolSettingsSignature = "";
+            try { RefreshToolSettingsList(); } catch { }
+        }
+
         if (pane == SettingsPane.Notify && NotifyBody != null)
         {
             NotifyBody.Visibility = Visibility.Visible;
@@ -5175,6 +5214,7 @@ public partial class MainWindow : Window
         if (SecTiming != null && (SecTiming == target || SecTiming.IsAncestorOf(target))) return SettingsPane.Timing;
         if (SecNotify != null && (SecNotify == target || SecNotify.IsAncestorOf(target))) return SettingsPane.Notify;
         if (SecApi != null && (SecApi == target || SecApi.IsAncestorOf(target))) return SettingsPane.Api;
+        if (SecTools != null && (SecTools == target || SecTools.IsAncestorOf(target))) return SettingsPane.Tools;
         if (SecUi != null && (SecUi == target || SecUi.IsAncestorOf(target))) return SettingsPane.Ui;
         return SettingsPane.None;
     }
@@ -7951,10 +7991,8 @@ public partial class MainWindow : Window
             QueueCard.Opacity = firstRun ? 0.72 : 1.0;
             TbGridHint.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;
 
-            // 「每个工具怎么跑」整块也是同一件事：首次运行时它只会显示一行
-            // 「还没配，点开填一下」的橙色小字，而卡已经整体压暗了，那行字不再提供信息。
-            ToolSetupDivider.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;
-            ToolSetupBlock.Visibility = firstRun ? Visibility.Collapsed : Visibility.Visible;
+            // v1.47 / M11-4（D23）：「每个工具怎么跑」整块搬去了设置页「工具配置」，
+            // 这里不再需要为首次运行单独收起它——那块控件已经不在这张卡里了。
 
             RenderHomeSteps(view.ShowSteps);
             RefreshHomeFirstVisit();
@@ -8398,7 +8436,7 @@ public partial class MainWindow : Window
                 RefreshDetectedGroups(force: true);
             InvalidateHomeHeroCaches();
             RefreshHomeHero();
-            RefreshToolsSummary();
+            try { RefreshToolSettingsList(); } catch { }
         }
         catch (Exception ex)
         {
@@ -8769,105 +8807,219 @@ public partial class MainWindow : Window
                     ? $"已装 {okList.Count} 个"
                     : "有目录，但都读不懂";
 
-            foreach (var f in okList)
-            {
-                string name = f.Meta?.Name ?? f.DirName;
-                string ver = f.Meta?.Version ?? "";
-                string needs = f.Meta?.Needs ?? "";
-                var card = new Border
-                {
-                    Background = BrushOf("CardBg2Brush") ?? DotGray,
-                    CornerRadius = new CornerRadius(10),
-                    Padding = new Thickness(12, 9, 12, 9),
-                    Margin = new Thickness(0, 0, 0, 6),
-                };
-                var panel = new StackPanel();
-                var head = new Grid();
-                head.Children.Add(new TextBlock
-                {
-                    Text = string.IsNullOrWhiteSpace(ver) ? name : $"{name} {ver}",
-                    FontSize = 12.5,
-                    Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
-                });
-                head.Children.Add(new TextBlock
-                {
-                    Text = "已就绪",
-                    FontSize = 10.5,
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    Foreground = BrushOf("BrandTextBrush") ?? DotGray,
-                });
-                panel.Children.Add(head);
-                if (!string.IsNullOrWhiteSpace(needs))
-                {
-                    panel.Children.Add(new TextBlock
-                    {
-                        Text = needs,
-                        FontSize = 10.5,
-                        Margin = new Thickness(0, 3, 0, 0),
-                        TextWrapping = TextWrapping.Wrap,
-                        Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
-                    });
-                }
-                var hosts = f.Meta?.Hosts ?? new List<string>();
-                if (hosts.Count > 0)
-                {
-                    panel.Children.Add(new TextBlock
-                    {
-                        Text = "会访问：" + string.Join("、", hosts),
-                        FontSize = 10,
-                        Margin = new Thickness(0, 3, 0, 0),
-                        TextWrapping = TextWrapping.Wrap,
-                        Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
-                    });
-                }
-                card.Child = panel;
-                PluginsHost.Children.Add(card);
-            }
-
-            foreach (var f in badList)
-            {
-                string why = f.Refuse ?? "目录里没找到入口程序集（默认 Plugin.dll）。";
-                var card = new Border
-                {
-                    Background = BrushOf("CardBg2Brush") ?? DotGray,
-                    CornerRadius = new CornerRadius(10),
-                    Padding = new Thickness(12, 9, 12, 9),
-                    Margin = new Thickness(0, 0, 0, 6),
-                };
-                var panel = new StackPanel();
-                panel.Children.Add(new TextBlock
-                {
-                    Text = f.DirName + "（没加载）",
-                    FontSize = 12.5,
-                    Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
-                });
-                panel.Children.Add(new TextBlock
-                {
-                    Text = why,
-                    FontSize = 10.5,
-                    Margin = new Thickness(0, 3, 0, 0),
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = BrushOf("WarningBrush") ?? DotGray,
-                });
-                card.Child = panel;
-                PluginsHost.Children.Add(card);
-            }
-
             if (found.Count == 0)
             {
+                // v1.47 / M11-2：这句话是灵魂句，字节级不许动。
                 PluginsHost.Children.Add(new TextBlock
                 {
                     Text = "现在一个插件都没有。这不影响任何功能——管家自己就能跑完一套。",
-                    FontSize = 10.5,
+                    FontSize = 13,
+                    Margin = new Thickness(2, 10, 2, 10),
                     TextWrapping = TextWrapping.Wrap,
-                    Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+                    LineHeight = 21,
+                    Foreground = BrushOf("TextSecondaryBrush") ?? DotGray,
                 });
+                return;
+            }
+
+            if (okList.Count > 0)
+            {
+                PluginsHost.Children.Add(BuildPluginGroupHeader("已加载插件"));
+                foreach (var f in okList) PluginsHost.Children.Add(BuildPluginRow(f, false));
+            }
+
+            if (badList.Count > 0)
+            {
+                // 「加载失败」这一段只在真有失败项时出现——一段永远空着的分组标题，比不分组更吵。
+                PluginsHost.Children.Add(BuildPluginGroupHeader("加载失败"));
+                foreach (var f in badList) PluginsHost.Children.Add(BuildPluginRow(f, true));
             }
         }
         catch (Exception ex)
         {
             LogService.LogEvent("刷新插件列表失败：" + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// v1.47 / M11-2（D22）：分组标题。10.5 号三级灰，和列表项的 15 号名字拉开层级，
+    /// 但不用卡片——两张卡叠三张卡，页面会碎成一地盒子。
+    /// </summary>
+    private TextBlock BuildPluginGroupHeader(string text)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            FontSize = 10.5,
+            Margin = new Thickness(2, 12, 2, 6),
+            Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+        };
+    }
+
+    /// <summary>
+    /// v1.47 / M11-2（D22）：一行一个插件。图标 40×40 圆角 8、名字 15 号半粗、说明 13 号辅助色、行高 ≥64。
+    /// 右边只放状态与「查看详情」——加载器没有「启用/停用」这个概念（扫到就加载，坏了就不加载），
+    /// 摆一个开关在这里等于告诉用户「你可以关掉它」，而实际上按下去什么都不会发生。
+    /// </summary>
+    private Border BuildPluginRow(PluginLoader.Found f, bool bad)
+    {
+        // 名字为空串时 ?? 不会接手（它只挡 null），目录名才是这时候唯一有信息量的东西。
+        string name = string.IsNullOrWhiteSpace(f.Meta?.Name) ? f.DirName : f.Meta!.Name!;
+        string ver = f.Meta?.Version ?? "";
+        var hosts = f.Meta?.Hosts ?? new List<string>();
+
+        var row = new Border
+        {
+            Background = BrushOf("CardBg2Brush") ?? DotGray,
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(14, 10, 14, 10),
+            Margin = new Thickness(0, 0, 0, 6),
+            MinHeight = 64,
+        };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // 图标位：插件目前不提供图（metadata.json 里没有图标字段），用名字首字做占位，
+        // 尺寸与圆角按规格给足，将来有真图标直接换 Child 即可。
+        var iconBox = new Border
+        {
+            Width = 40,
+            Height = 40,
+            CornerRadius = new CornerRadius(8),
+            Background = BrushOf("InsetBrush") ?? DotGray,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        string initial = string.IsNullOrWhiteSpace(name) ? "?" : name.Substring(0, 1);
+        iconBox.Child = new TextBlock
+        {
+            Text = initial,
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = bad ? (BrushOf("WarningBrush") ?? DotGray) : (BrushOf("BrandTextBrush") ?? DotGray),
+        };
+        grid.Children.Add(iconBox);
+
+        var text = new StackPanel { Margin = new Thickness(12, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
+
+        var titleLine = new StackPanel { Orientation = Orientation.Horizontal };
+        titleLine.Children.Add(new TextBlock
+        {
+            Text = name,
+            FontSize = 15,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = BrushOf("TextPrimaryBrush") ?? DotGray,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxWidth = 320,
+        });
+        if (!string.IsNullOrWhiteSpace(ver))
+        {
+            titleLine.Children.Add(new TextBlock
+            {
+                Text = ver,
+                FontSize = 11,
+                Margin = new Thickness(8, 4, 0, 0),
+                Foreground = BrushOf("TextTertiaryBrush") ?? DotGray,
+            });
+        }
+        text.Children.Add(titleLine);
+
+        string desc;
+        if (bad)
+        {
+            desc = "没加载：" + (f.Refuse ?? "目录里没找到入口程序集（默认 Plugin.dll）。");
+        }
+        else if (!string.IsNullOrWhiteSpace(f.Meta?.Needs))
+        {
+            desc = f.Meta!.Needs!;
+        }
+        else if (hosts.Count > 0)
+        {
+            desc = "会访问：" + string.Join("、", hosts);
+        }
+        else
+        {
+            desc = "已就绪。它没有声明要访问任何域名。";
+        }
+        text.Children.Add(new TextBlock
+        {
+            Text = desc,
+            FontSize = 13,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 19,
+            Foreground = bad ? (BrushOf("WarningBrush") ?? DotGray) : (BrushOf("TextSecondaryBrush") ?? DotGray),
+        });
+
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+
+        var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (bad)
+        {
+            var detail = new Button
+            {
+                Content = "查看详情",
+                Style = (Style?)FindResource("MiniAction"),
+                Height = 26,
+                Padding = new Thickness(10, 0, 10, 0),
+                Cursor = Cursors.Hand,
+            };
+            string why = f.Refuse ?? "目录里没找到入口程序集（默认 Plugin.dll）。";
+            string dir = f.Dir;
+            detail.Click += (_, _) => AppDialog.Show(
+                string.IsNullOrWhiteSpace(f.DirName) ? "这个插件没加载。" : $"「{f.DirName}」没加载。",
+                detail: why + "\n\n目录：" + dir + "\n\n改好 metadata.json 之后点上面的「刷新」。",
+                kind: AppDialog.Kind.Warning, title: "插件没加载", primary: "知道了", owner: this);
+            right.Children.Add(detail);
+        }
+        else
+        {
+            right.Children.Add(new TextBlock
+            {
+                Text = "已就绪",
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = BrushOf("BrandTextBrush") ?? DotGray,
+            });
+        }
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(right);
+
+        row.Child = grid;
+        return row;
+    }
+
+    private void BtnPluginsRefresh_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshPlugins();
+        AppState.PublishLog("插件列表已刷新。");
+    }
+
+    private void BtnAddPlugin_Click(object sender, RoutedEventArgs e)
+    {
+        // v1.47 / M11-1：下拉项就是原来的「打开插件目录」，现在收进这个按钮里，
+        // 头部只留一个动作位，标题行不再被两个按钮挤成两截。
+        if (AddPluginMenu == null) return;
+        AddPluginMenu.PlacementTarget = BtnAddPlugin;
+        AddPluginMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        AddPluginMenu.IsOpen = true;
+    }
+
+    private void BtnPluginInfo_Click(object sender, RoutedEventArgs e)
+    {
+        // v1.47 / M11-1：这两段原来各占一整张卡，现在收在这里，一字未删、一句没改。
+        AppDialog.Show(
+            "插件怎么装、能做什么、不能做什么",
+            detail:
+                "把一个插件文件夹放进插件目录，重启管家就会出现在下面。每个插件要在 metadata.json 里说清它要访问哪些域名、需要什么——写不明白的不加载。装坏了也不会让主程序起不来，只会在下面列成一条「没加载」并写明原因。\n\n" +
+                "能做：看当前跑没跑、跑的是哪个工具、今天还剩几个；借你配好的渠道发通知；记自己的日志和设置；要求开跑一次；读今天的日志尾巴。\n\n" +
+                "不能做：改界面、停队列、动设置、读文件、访问任意网址。插件出问题时最坏的结果是它自己坏了。",
+            kind: AppDialog.Kind.Info, title: "插件", primary: "知道了", owner: this);
     }
 
     private void BtnPluginsOpen_Click(object sender, RoutedEventArgs e)
@@ -9366,7 +9518,13 @@ public partial class MainWindow : Window
         string next = Theme.Mode == "Light" ? "Dark" : "Light";
         AppState.Settings.Theme = next;
         AppState.SaveSettings();
-        Theme.Set(next);
+        // 命令面板这条路也走同一层淡出，否则「同一个动作两种观感」。
+        ThemeFade.Run(this, () =>
+        {
+            _themeAnimatingSwitch = true;
+            try { Theme.Set(next); }
+            finally { _themeAnimatingSwitch = false; }
+        });
         SyncThemeSeg();
         AppState.PublishLog("主题：" + (next == "Light" ? "浅色" : "深色"));
     }

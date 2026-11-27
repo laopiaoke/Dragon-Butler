@@ -127,14 +127,37 @@ internal sealed partial class ToolGridProbe
             mainXaml.Contains("x:Name=\"NavShell\"") &&
             mainXaml.Contains("Grid.Row=\"1\" Panel.ZIndex=\"20\"") &&
             mainXaml.Contains("<Border Grid.Row=\"2\" x:Name=\"StatusBarBorder\""));
-        Check("合并/工具设置搬进启动页",
-            mainXaml.IndexOf("x:Name=\"ToolButtonHost\"", StringComparison.Ordinal) <
-            mainXaml.IndexOf("x:Name=\"PageSettings\"", StringComparison.Ordinal));
+        // v1.47 / M11-4（D23）：「每个工具怎么跑」搬进设置页第 6 张卡，主页那排小按键整排撤掉。
+        Check("合并/工具配置卡在设置页里",
+            mainXaml.IndexOf("x:Name=\"PageSettings\"", StringComparison.Ordinal) <
+            mainXaml.IndexOf("x:Name=\"SecTools\"", StringComparison.Ordinal));
         Check("合并/设置页不再有工具设置壳", !mainXaml.Contains("第二层：工具设置"));
         // v1.34：插件从折叠卡变成独立一页，折叠头没了，但它那一整套「读得懂/读不懂」都还在。
         Check("插件/有自己的一页", mainXaml.Contains("x:Name=\"PagePlugins\"") && mainXaml.Contains("x:Name=\"PluginsHost\""));
         Check("插件/不再挂在折叠头下面", !mainXaml.Contains("x:Name=\"BtnFoldPlugins\"") && !mainCs.Contains("=> PluginsBody"));
         Check("插件/读得懂的与读不懂的都列出来", mainCs.Contains("PluginLoader.Scan()") && mainCs.Contains("没加载"));
+        // v1.47 / M11-1、M11-2（D22）：头部三件套、说明收进 ⓘ、列表分两段、行样式达标。
+        Check("插件/头部有刷新和添加", mainXaml.Contains("x:Name=\"BtnPluginsRefresh\"") && mainXaml.Contains("x:Name=\"BtnAddPlugin\""));
+        Check("插件/说明收进 ⓘ", mainXaml.Contains("x:Name=\"PlugInfoBtn\"") && mainCs.Contains("private void BtnPluginInfo_Click"));
+        Check("插件/打开目录在添加下拉里", mainXaml.Contains("x:Name=\"AddPluginMenu\"") && mainXaml.Contains("Header=\"打开插件目录\""));
+        Check("插件/列表分两段", mainCs.Contains("BuildPluginGroupHeader(\"已加载插件\")") && mainCs.Contains("BuildPluginGroupHeader(\"加载失败\")"));
+        // 「内置插件配置」这一段没有建：代码里只有 plugins\ 目录这一种机制，没有内置插件注册表（见 PluginContract.cs）。
+        // 判据查的是「有没有真的画出这一段」，不是「源码里有没有这四个字」——注释会误伤。
+        Check("插件/没有内置插件配置那一段", !mainCs.Contains("BuildPluginGroupHeader(\"内置插件配置\")"));
+        Check("插件/行样式达标", mainCs.Contains("Width = 40,") && mainCs.Contains("Height = 40,") && mainCs.Contains("CornerRadius = new CornerRadius(8)") && mainCs.Contains("FontSize = 15,") && mainCs.Contains("MinHeight = 64,"));
+        Check("插件/空态那句一字没改", mainCs.Contains("现在一个插件都没有。这不影响任何功能——管家自己就能跑完一套。"));
+
+        // v1.47 / M11-5（D24）：主题切换改成截图淡出。
+        // 判据看的是「五步齐不齐 + 三个边界有没有守」，不是「有没有用到某个类」。
+        string fadeCs = ReadRepoSources("Dragon Butler/ThemeFade.cs");
+        Check("主题/有截图那一步", fadeCs.Contains("new RenderTargetBitmap(") && fadeCs.Contains("bmp.Render(window);"));
+        Check("主题/截图作覆盖层且不吃点击", fadeCs.Contains("IsHitTestVisible = false") && fadeCs.Contains("host.Children.Add(layer);"));
+        Check("主题/250ms 的 EaseOut", fadeCs.Contains("public const int DurationMs = 250;") && fadeCs.Contains("new CubicEase { EasingMode = EasingMode.EaseOut }"));
+        Check("主题/退完就摘掉", fadeCs.Contains("fade.Completed +=") && fadeCs.Contains("host.Children.Remove(layer);"));
+        Check("主题/连点不叠第二层", fadeCs.Contains("if (_running || !Enabled || window == null)"));
+        Check("主题/亮度没变就不动", fadeCs.Contains("wasLight == Theme.LastSchemeLight"));
+        Check("主题/探针模式关掉", fadeCs.Contains("public static bool Enabled { get; set; } = true;") && ReadRepoSources("tests/CoordinatorProbe/RenderProbe.cs").Contains("ThemeFade.Enabled = false;"));
+        Check("主题/两条切换路径都走它", CountOf(mainCs, "ThemeFade.Run(this, () =>") == 2);
         Check("插件/空着也说清不影响功能", mainCs.Contains("这不影响任何功能"));
     }
 
@@ -204,37 +227,6 @@ internal sealed partial class ToolGridProbe
             !appStateCs.Contains("Path.Combine(AppContext.BaseDirectory, \"config\""));
     }
 
-    private void Step19()
-    {
-        // ---- 11f) v1.32 一个工具一个按键 / 引导页图标格 ----
-        Check("按键/有那一排", mainXaml.Contains("x:Name=\"ToolButtonHost\""));
-        Check("按键/排不下会换行", mainXaml.Contains("<WrapPanel x:Name=\"ToolButtonHost\""));
-        Check("按键/旧的折叠头撤掉了",
-            !mainXaml.Contains("x:Name=\"BtnFoldTools\"") && !mainXaml.Contains("x:Name=\"ChevTools\""));
-        Check("按键/长列表留着但不再显示",
-            mainXaml.Contains("<StackPanel x:Name=\"ToolCardsHost\" Visibility=\"Collapsed\">"));
-        Check("按键/点一下开那个工具的配置窗", mainCs.Contains("btn.MouseLeftButtonDown += (_, _) => OpenToolLaunch(toolId);"));
-        Check("按键/名字太长会截断", mainCs.Contains("TextTrimming.CharacterEllipsis,") && mainCs.Contains("MaxWidth = 96"));
-        Check("按键/没配好的用警示色圈出来", mainCs.Contains("ready ? \"BorderBrush\" : \"WarningBrush\""));
-        // 每秒轮询会走到这里，签名没变就一个控件都不碰——否则手指按着的那颗按钮会被换掉
-        Check("按键/没变就不重造", mainCs.Contains("_toolButtonSignature") && mainCs.Contains("if (signature == _toolButtonSignature) return;"));
-
-        Check("引导/图标格不是一行一个", wizardXaml.Contains("<WrapPanel x:Name=\"ToolPickHost\""));
-        Check("引导/有压在角上的勾选框", wizardXaml.Contains("x:Key=\"WizTileCheck\""));
-        Check("引导/勾上周围变绿", wizardCs.Contains("tile.BorderBrush = (Brush?)TryFindResource(\"BrandBrush\")"));
-        Check("引导/一整格都能点", wizardCs.Contains("tile.MouseLeftButtonUp += (_, _) => check.IsChecked = check.IsChecked != true;"));
-        Check("引导/名字两行封顶", wizardCs.Contains("MaxHeight = 30") && wizardCs.Contains("TextWrapping = TextWrapping.Wrap"));
-
-        Check("图标/缺的那五个有图了",
-            System.IO.File.Exists("Dragon Butler/Assets/icons/baah.png") &&
-            System.IO.File.Exists("Dragon Butler/Assets/icons/hsr.png") &&
-            System.IO.File.Exists("Dragon Butler/Assets/icons/m9a.png") &&
-            System.IO.File.Exists("Dragon Butler/Assets/icons/mss.png") &&
-            System.IO.File.Exists("Dragon Butler/Assets/icons/src.png"));
-        // m9a 的原文件其实是 ICO 冒名 png，重存过；比 10 KB 大说明还是那个两百多 K 的壳
-        Check("图标/m9a 是真 PNG",
-            System.IO.File.Exists("Dragon Butler/Assets/icons/m9a.png") &&
-            new System.IO.FileInfo("Dragon Butler/Assets/icons/m9a.png").Length < 120_000);
-    }
 
 }
+

@@ -209,5 +209,12 @@ internal static partial class RenderProbe
     /// 渲染一个独立窗口（浮动条、命令面板、日历），跑完就关。
     /// 这些窗口没有主窗的依赖，可以单独实例化。
     /// </summary>
-    public static int RunUi(string mode) => new UiRunner(mode).Run();
+    public static int RunUi(string mode)
+    {
+        // v1.47 / M11-5（D24）：截图出图时关掉主题淡出。
+        // 无头环境里动画时钟不推进，250ms 的 Completed 回调可能永远不回来，
+        // 那一层截图就会一直盖在窗口上，出图全是旧的。
+        ThemeFade.Enabled = false;
+        return new UiRunner(mode).Run();
+    }
 }
